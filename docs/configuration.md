@@ -176,7 +176,7 @@ least-recently-used eviction or shutdown; active streaming requests are never ev
 
 ## GigaChat settings
 
-The minimum supported GigaChat Python SDK version is `0.2.3`; the gateway keeps
+The minimum supported GigaChat Python SDK version is `0.2.4a1`; the gateway keeps
 the dependency within the compatible `0.2.x` series. The SDK default API base
 URL is `https://api.giga.chat/v1`.
 

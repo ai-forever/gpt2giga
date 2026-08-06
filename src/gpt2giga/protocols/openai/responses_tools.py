@@ -6,7 +6,6 @@ from collections.abc import Mapping
 from typing import Any, NoReturn
 
 from gpt2giga.common.client_params import ClientCompatibilityError
-from gpt2giga.common.json_schema import normalize_tool_parameters_schema
 from gpt2giga.protocols.normalized.models import NormalizedTool, NormalizedToolKind
 
 
@@ -145,7 +144,7 @@ def _normalize_function_tool(
         type="function",
         name=name,
         description=description,
-        parameters=normalize_tool_parameters_schema(parameters),
+        parameters=dict(parameters),
         raw_extensions=({"function": {"strict": strict}} if strict is not None else {}),
     )
 

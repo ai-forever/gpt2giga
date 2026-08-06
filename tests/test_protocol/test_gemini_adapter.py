@@ -116,11 +116,10 @@ def test_gemini_adapter_maps_generate_content_to_normalized_request():
     assert payload["tools"][0]["parameters"]["type"] == "object"
     assert payload["tools"][0]["parameters"]["properties"]["q"]["type"] == "string"
     assert payload["tools"][0]["parameters"]["properties"]["answers"] == {
-        "type": "object",
-        "properties": {},
+        "type": "object"
     }
     assert payload["tools"][0]["parameters"]["properties"]["limit"]["type"] == (
-        "integer"
+        ["integer", "null"]
     )
     assert payload["tool_choice"] == {
         "type": "function",
@@ -174,6 +173,17 @@ def test_gemini_adapter_maps_response_json_schema_alias_to_json_schema():
 )
 def test_gemini_adapter_maps_function_parameters_json_schema(schema_key):
     adapter = GeminiProtocolAdapter()
+    schema = {
+        "$defs": {"line": {"type": ["integer", "null"]}},
+        "type": "object",
+        "properties": {
+            "path": {"type": "string", "format": "uri-reference"},
+            "start_line": {"$ref": "#/$defs/line"},
+            "mode": {"anyOf": [{"const": "text"}, {"const": 1}]},
+        },
+        "required": ["path"],
+        "unevaluatedProperties": False,
+    }
 
     normalized = adapter.generate_content_to_normalized(
         {
@@ -184,14 +194,7 @@ def test_gemini_adapter_maps_function_parameters_json_schema(schema_key):
                         {
                             "name": "read_file",
                             "description": "Read a file.",
-                            schema_key: {
-                                "type": "object",
-                                "properties": {
-                                    "path": {"type": "string"},
-                                    "start_line": {"type": "integer"},
-                                },
-                                "required": ["path"],
-                            },
+                            schema_key: schema,
                         }
                     ]
                 }
@@ -203,14 +206,7 @@ def test_gemini_adapter_maps_function_parameters_json_schema(schema_key):
     tool = normalized.tools[0]
 
     assert tool.name == "read_file"
-    assert tool.parameters == {
-        "type": "object",
-        "properties": {
-            "path": {"type": "string"},
-            "start_line": {"type": "integer"},
-        },
-        "required": ["path"],
-    }
+    assert tool.parameters == schema
     assert schema_key not in tool.raw_extensions
 
 

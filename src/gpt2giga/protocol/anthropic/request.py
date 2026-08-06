@@ -5,10 +5,7 @@ import uuid
 from typing import Any, Dict, List, Optional
 
 from gpt2giga.common.content_utils import ensure_json_object_str
-from gpt2giga.common.tools import (
-    convert_tool_to_giga_functions,
-    normalize_gigachat_builtin_tool_type,
-)
+from gpt2giga.common.tools import normalize_gigachat_builtin_tool_type
 from gpt2giga.protocol.anthropic.params import sanitize_anthropic_messages_parameters
 
 
@@ -361,14 +358,8 @@ def _build_openai_data_from_anthropic_request(
             data["tools"],
             builtin_tool_mapping_enabled=builtin_tool_mapping_enabled,
         )
-        if openai_data["tools"]:
-            functions = convert_tool_to_giga_functions(openai_data)
-            if functions:
-                openai_data["functions"] = functions
-        else:
+        if not openai_data["tools"]:
             openai_data.pop("tools", None)
-        if logger and "functions" in openai_data:
-            logger.debug(f"Functions count: {len(openai_data['functions'])}")
 
     tool_choice = data.get("tool_choice")
     if tool_choice and isinstance(tool_choice, dict):

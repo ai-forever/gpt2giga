@@ -124,6 +124,31 @@ def test_anthropic_adapter_maps_messages_tools_and_controls_to_normalized():
     }
 
 
+def test_anthropic_adapter_preserves_native_tool_schema():
+    schema = {
+        "$defs": {"item": {"type": ["integer", "null"]}},
+        "type": "object",
+        "properties": {
+            "items": {
+                "type": "array",
+                "prefixItems": [{"$ref": "#/$defs/item"}],
+                "items": False,
+            },
+            "mode": {"enum": ["safe", None, 1]},
+        },
+    }
+
+    normalized = AnthropicProtocolAdapter().messages_to_normalized(
+        {
+            "model": "claude-x",
+            "messages": [{"role": "user", "content": "Run."}],
+            "tools": [{"name": "run", "input_schema": schema}],
+        }
+    )
+
+    assert normalized.tools[0].parameters == schema
+
+
 def test_anthropic_adapter_maps_provider_tools_only_when_enabled():
     payload = {
         "model": "claude-x",

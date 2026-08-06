@@ -9,6 +9,7 @@ from gigachat.models import (
     ChatMessage,
     ChatModelOptions,
     ChatTool,
+    Function,
     FunctionCall,
     Messages,
     MessagesRole,
@@ -17,11 +18,6 @@ from gigachat.models import (
 from gpt2giga.common.client_params import ClientCompatibilityError
 from gpt2giga.common.content_utils import ensure_json_object_str
 from gpt2giga.common.debug_logging import log_debug_payload
-from gpt2giga.common.json_schema import (
-    normalize_json_schema,
-    normalize_tool_parameters_schema,
-    resolve_schema_refs,
-)
 from gpt2giga.common.message_utils import (
     collapse_user_messages,
     ensure_system_first,
@@ -33,7 +29,6 @@ from gpt2giga.common.tools import (
     build_gigachat_builtin_tool_payload,
     iter_function_tool_payloads,
     map_tool_name_to_gigachat,
-    normalize_gigachat_function_definitions,
 )
 from gpt2giga.constants import DEFAULT_MAX_AUDIO_IMAGE_TOTAL_SIZE_BYTES
 from gpt2giga.models.config import ProxyConfig
@@ -520,11 +515,6 @@ class RequestTransformer:
             transformed["functions"] = functions
             self.logger.debug(f"Transformed {len(functions)} tools to functions")
 
-        if "functions" in transformed:
-            transformed["functions"] = self._normalize_legacy_functions(
-                transformed["functions"]
-            )
-
         # Map reserved tool names to safe aliases for GigaChat
         function_call = transformed.get("function_call")
         if isinstance(function_call, dict) and function_call.get("name"):
@@ -541,42 +531,14 @@ class RequestTransformer:
         return transformed
 
     @staticmethod
-    def _normalize_legacy_functions(functions: Any) -> Any:
-        """Normalize legacy function schemas before GigaChat Chat validation."""
-        if not isinstance(functions, list):
-            return functions
-
-        normalized_functions = []
-        for function in functions:
-            if hasattr(function, "model_dump"):
-                function_payload = function.model_dump(exclude_none=True, by_alias=True)
-            elif isinstance(function, Mapping):
-                function_payload = dict(function)
-            else:
-                normalized_functions.append(function)
-                continue
-
-            parameters = function_payload.get("parameters")
-            if isinstance(parameters, dict):
-                function_payload["parameters"] = normalize_json_schema(
-                    resolve_schema_refs(parameters)
-                )
-            normalized_functions.append(function_payload)
-
-        return normalized_functions
-
-    @staticmethod
     def _apply_json_schema_as_function(
         transformed: Dict, schema_name: str, schema: Dict
     ) -> None:
         """Applies JSON schema as function call for structured output."""
-        resolved_schema = resolve_schema_refs(schema)
-        resolved_schema = normalize_json_schema(resolved_schema)
-
         function_def = {
             "name": schema_name,
             "description": f"Output response in structured format: {schema_name}",
-            "parameters": resolved_schema,
+            "parameters": dict(schema) if isinstance(schema, Mapping) else {},
         }
 
         if "functions" not in transformed:
@@ -608,12 +570,10 @@ class RequestTransformer:
         transformed: Dict, schema: Dict, strict: Optional[bool]
     ) -> None:
         """Applies JSON schema through GigaChat native response_format."""
-        schema = (
-            normalize_json_schema(resolve_schema_refs(schema))
-            if isinstance(schema, dict)
-            else {}
-        )
-        response_format = {"type": "json_schema", "schema": schema}
+        response_format = {
+            "type": "json_schema",
+            "schema": dict(schema) if isinstance(schema, Mapping) else {},
+        }
         if strict is not None:
             response_format["strict"] = strict
         transformed["response_format"] = response_format
@@ -968,14 +928,14 @@ class RequestTransformer:
         transformed_data.pop("_gpt2giga_builtin_tools", None)
         transformed_data.pop("_gpt2giga_tool_config", None)
         transformed_data.pop("tools", None)
-        if "functions" in transformed_data:
-            functions = normalize_gigachat_function_definitions(
-                transformed_data.get("functions")
-            )
-            if functions:
-                transformed_data["functions"] = functions
-            else:
-                transformed_data.pop("functions", None)
+        functions = transformed_data.get("functions")
+        if isinstance(functions, list):
+            transformed_data["functions"] = [
+                function
+                if isinstance(function, Function)
+                else Function.model_validate(function)
+                for function in functions
+            ]
         transformed_data["messages"] = await self.transform_messages(
             transformed_data.get("messages", []), giga_client
         )
@@ -1331,9 +1291,7 @@ class RequestTransformer:
                 continue
             seen_names.add(mapped_name)
 
-            parameters = self._normalize_chat_completion_function_schema(
-                function_payload.get("parameters") or {}
-            )
+            parameters = self._dump_mapping(function_payload.get("parameters"))
             spec_payload = {
                 "name": mapped_name,
                 "parameters": parameters,
@@ -1363,10 +1321,6 @@ class RequestTransformer:
             )
         )
         return tools
-
-    @staticmethod
-    def _normalize_chat_completion_function_schema(schema: Any) -> dict[str, Any]:
-        return normalize_tool_parameters_schema(schema)
 
     @staticmethod
     def _dump_mapping(value: Any) -> Dict[str, Any]:

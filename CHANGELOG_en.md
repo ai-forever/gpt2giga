@@ -5,6 +5,11 @@ All notable changes to the gpt2giga project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1a1] - 2026-08-06
+
+### Fixed
+- **Native function-calling schemas**: OpenAI, Responses, Anthropic, and Gemini no longer pass function JSON Schemas through GigaChat-specific workaround transformations. Schemas using `$defs`/`$ref`, composition, union types, mixed `enum` values, boolean subschemas, and extension keywords are forwarded losslessly to GigaChat v1 and v2 through `gigachat>=0.2.4a1`.
+
 ## [0.3.0] - 2026-08-03
 
 ### Added

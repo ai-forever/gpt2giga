@@ -28,10 +28,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PATH="/opt/venv/bin:$PATH"
 
 COPY --from=builder /app/dist/*.whl /tmp/
+COPY gigachat-0.2.4a1-py3-none-any.whl /tmp/
 
 RUN python -m venv "$VIRTUAL_ENV" \
-    && wheel_path="$(find /tmp -maxdepth 1 -name '*.whl' -print -quit)" \
-    && pip install --no-cache-dir "${wheel_path}${INSTALL_EXTRAS}" \
+    && wheel_path="$(find /tmp -maxdepth 1 -name 'gpt2giga-*.whl' -print -quit)" \
+    && sdk_wheel_path="$(find /tmp -maxdepth 1 -name 'gigachat-*.whl' -print -quit)" \
+    && pip install --no-cache-dir "$sdk_wheel_path" "${wheel_path}${INSTALL_EXTRAS}" \
     && rm -rf /tmp/*.whl \
     && find "$VIRTUAL_ENV" -type d -name "__pycache__" -prune -exec rm -rf '{}' + \
     && find "$VIRTUAL_ENV" -type f -name "*.pyc" -delete \

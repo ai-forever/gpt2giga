@@ -43,10 +43,7 @@ from gpt2giga.protocols.openai import (
 )
 from gpt2giga.providers.gigachat import GigaChatProviderAdapter
 from gpt2giga.providers.gigachat.model_resolution import resolve_upstream_model
-from gpt2giga.routers.openai.helpers import (
-    populate_giga_functions,
-    request_attachment_ids,
-)
+from gpt2giga.routers.openai.helpers import request_attachment_ids
 from gpt2giga.sinks.observability.responses import (
     emit_openai_response_observability,
     observe_openai_response_stream,
@@ -68,7 +65,6 @@ class NativeGigaChatResponsesExecutor:
         mode = resolve_gigachat_api_mode(request)
         conversation_turn = await stitch_responses_payload(request, data, mode=mode)
 
-        populate_giga_functions(data, getattr(state, "logger", None))
         attachment_ids = request_attachment_ids(request)
         attachment_kwargs = {"attachment_ids": attachment_ids} if attachment_ids else {}
         if mode == "v2":

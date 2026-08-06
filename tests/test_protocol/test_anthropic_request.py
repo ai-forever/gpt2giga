@@ -212,7 +212,7 @@ def test_build_openai_data_from_anthropic_request_maps_server_tools_to_builtins(
     ]
     assert openai_data["tools"][3]["type"] == "function"
     assert openai_data["tools"][3]["function"]["name"] == "sum"
-    assert len(openai_data["functions"]) == 1
+    assert "functions" not in openai_data
     assert openai_data["tool_choice"] == {"type": "web_search"}
 
 
@@ -248,7 +248,7 @@ def test_build_openai_data_from_anthropic_request_ignores_server_tools_when_mapp
     assert len(openai_data["tools"]) == 1
     assert openai_data["tools"][0]["type"] == "function"
     assert openai_data["tools"][0]["function"]["name"] == "sum"
-    assert len(openai_data["functions"]) == 1
+    assert "functions" not in openai_data
     assert "tool_choice" not in openai_data
 
 
@@ -369,7 +369,7 @@ def test_build_openai_data_from_anthropic_request_defaults_bad_tool_schema():
     }
 
 
-def test_build_openai_data_from_anthropic_request_normalizes_tool_schema():
+def test_build_openai_data_from_anthropic_request_preserves_tool_schema():
     data = {
         "model": "claude-x",
         "messages": [{"role": "user", "content": "hi"}],
@@ -396,12 +396,12 @@ def test_build_openai_data_from_anthropic_request_normalizes_tool_schema():
     openai_data = _build_openai_data_from_anthropic_request(data, logger)
 
     parameters = openai_data["tools"][0]["function"]["parameters"]
-    assert parameters["properties"]["answers"] == {
-        "type": "object",
-        "properties": {},
-    }
-    assert parameters["properties"]["score"]["type"] == "integer"
-    assert "anyOf" not in parameters["properties"]["score"]
+    assert parameters["properties"]["answers"] == {"type": "object"}
+    assert parameters["properties"]["score"]["anyOf"] == [
+        {"type": "integer"},
+        {"type": "number"},
+        {"type": "null"},
+    ]
 
 
 def test_build_openai_data_from_anthropic_request_keeps_function_tools():
@@ -424,7 +424,7 @@ def test_build_openai_data_from_anthropic_request_keeps_function_tools():
 
     assert openai_data["tools"][0]["type"] == "function"
     assert openai_data["tools"][0]["function"]["name"] == "sum"
-    assert len(openai_data["functions"]) == 1
+    assert "functions" not in openai_data
 
 
 @pytest.mark.parametrize(

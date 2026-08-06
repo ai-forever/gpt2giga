@@ -176,7 +176,7 @@ x-api-key: <GPT2GIGA_API_KEY>
 
 ## Настройки GigaChat
 
-Минимальная поддерживаемая версия GigaChat Python SDK — `0.2.3`; gateway
+Минимальная поддерживаемая версия GigaChat Python SDK — `0.2.4a1`; gateway
 остаётся в совместимой ветке `0.2.x`. API base URL SDK по умолчанию —
 `https://api.giga.chat/v1`.
 

@@ -1020,7 +1020,7 @@ def test_gemini_count_tokens_normalization_on_uses_normalized_contract():
                 "count these words",
                 "lookup",
                 "Lookup data",
-                '{"type": "object", "properties": {}}',
+                '{"type": "object"}',
             ],
             "model": "gemini-pro",
         }

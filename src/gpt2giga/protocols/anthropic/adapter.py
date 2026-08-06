@@ -6,7 +6,6 @@ from collections.abc import Mapping
 from typing import Any
 
 from gpt2giga.common.content_utils import ensure_json_object_str
-from gpt2giga.common.json_schema import normalize_tool_parameters_schema
 from gpt2giga.common.tools import normalize_gigachat_builtin_tool_type
 from gpt2giga.core.context import RequestContext
 from gpt2giga.protocol.anthropic.params import (
@@ -301,7 +300,7 @@ def _normalize_tools(
                 type="function",
                 name=name,
                 description=_string_or_none(item.get("description")),
-                parameters=normalize_tool_parameters_schema(schema),
+                parameters=dict(schema),
             )
         )
     return tools

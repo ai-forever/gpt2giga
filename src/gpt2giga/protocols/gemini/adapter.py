@@ -8,7 +8,6 @@ from typing import Any
 
 from fastapi import HTTPException
 
-from gpt2giga.common.json_schema import normalize_tool_parameters_schema
 from gpt2giga.common.tools import normalize_gigachat_builtin_tool_type
 from gpt2giga.core.context import RequestContext
 from gpt2giga.protocols.gemini.response_adapter import (
@@ -780,7 +779,7 @@ def _function_declaration_to_normalized(
     return NormalizedTool(
         name=str(declaration.get("name") or ""),
         description=_string_or_none(declaration.get("description")),
-        parameters=normalize_tool_parameters_schema(parameters),
+        parameters=dict(parameters),
         raw_extensions=raw_extensions,
     )
 
@@ -790,15 +789,43 @@ def _function_declaration_parameters(
 ) -> Mapping[str, Any]:
     parameters = declaration.get("parameters")
     if isinstance(parameters, Mapping):
-        return parameters
+        return _gemini_schema_to_json_schema(parameters)
     parameters_json_schema = _part_value(
         declaration,
         "parametersJsonSchema",
         "parameters_json_schema",
     )
     if isinstance(parameters_json_schema, Mapping):
-        return parameters_json_schema
+        return dict(parameters_json_schema)
     return {}
+
+
+_JSON_SCHEMA_TYPES = frozenset(
+    {"array", "boolean", "integer", "null", "number", "object", "string"}
+)
+
+
+def _gemini_schema_to_json_schema(value: Any) -> Any:
+    """Convert Gemini Schema type enums without rewriting JSON Schema semantics."""
+    if isinstance(value, Mapping):
+        converted = {}
+        for key, item in value.items():
+            if key == "type":
+                converted[key] = _gemini_schema_type_to_json_schema(item)
+            else:
+                converted[key] = _gemini_schema_to_json_schema(item)
+        return converted
+    if isinstance(value, list):
+        return [_gemini_schema_to_json_schema(item) for item in value]
+    return value
+
+
+def _gemini_schema_type_to_json_schema(value: Any) -> Any:
+    if isinstance(value, str) and value.lower() in _JSON_SCHEMA_TYPES:
+        return value.lower()
+    if isinstance(value, list):
+        return [_gemini_schema_type_to_json_schema(item) for item in value]
+    return value
 
 
 def _function_calling_config(

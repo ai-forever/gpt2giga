@@ -74,9 +74,24 @@ async def test_prepare_chat_completion_maps_tools_and_forced_function_call():
     assert request.tool_config.function_name == "__gpt2giga_user_search_web"
 
 
-async def test_prepare_chat_completion_normalizes_uppercase_gemini_tool_schema():
+async def test_prepare_chat_completion_preserves_native_tool_schema():
     cfg = ProxyConfig(proxy=ProxySettings(gigachat_api_mode="v2"))
     rt = RequestTransformer(cfg, logger=logger)
+    schema = {
+        "$defs": {"city": {"type": ["string", "null"]}},
+        "type": "object",
+        "properties": {
+            "city": {"$ref": "#/$defs/city"},
+            "coordinates": {
+                "anyOf": [
+                    {"type": "array", "prefixItems": [{"type": "number"}]},
+                    {"type": "null"},
+                ]
+            },
+            "mode": {"enum": ["fast", None, 1]},
+        },
+        "unevaluatedProperties": False,
+    }
 
     request = await rt.prepare_chat_completion(
         {
@@ -88,18 +103,7 @@ async def test_prepare_chat_completion_normalizes_uppercase_gemini_tool_schema()
                     "function": {
                         "name": "get_weather",
                         "description": "Get weather.",
-                        "parameters": {
-                            "type": "OBJECT",
-                            "properties": {
-                                "city": {"type": "STRING"},
-                                "include_forecast": {"type": "BOOLEAN"},
-                                "daily_highs": {
-                                    "type": "ARRAY",
-                                    "items": {"type": "NUMBER"},
-                                },
-                            },
-                            "required": ["city"],
-                        },
+                        "parameters": schema,
                     },
                 }
             ],
@@ -108,14 +112,10 @@ async def test_prepare_chat_completion_normalizes_uppercase_gemini_tool_schema()
 
     assert isinstance(request, ChatCompletionRequest)
     spec = request.tools[0].functions.specifications[0]
-    assert spec.parameters["type"] == "object"
-    assert spec.parameters["properties"]["city"]["type"] == "string"
-    assert spec.parameters["properties"]["include_forecast"]["type"] == "boolean"
-    assert spec.parameters["properties"]["daily_highs"]["type"] == "array"
-    assert spec.parameters["properties"]["daily_highs"]["items"]["type"] == "number"
+    assert spec.parameters == schema
 
 
-async def test_prepare_chat_completion_adds_properties_to_empty_tool_schema():
+async def test_prepare_chat_completion_preserves_empty_tool_schema():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger=logger)
 
@@ -137,10 +137,10 @@ async def test_prepare_chat_completion_adds_properties_to_empty_tool_schema():
     )
 
     spec = request.tools[0].functions.specifications[0]
-    assert spec.parameters == {"type": "object", "properties": {}}
+    assert spec.parameters == {}
 
 
-async def test_prepare_chat_completion_normalizes_anthropic_nested_tool_schema():
+async def test_prepare_chat_completion_preserves_anthropic_nested_tool_schema():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger=logger)
     openai_data = _build_openai_data_from_anthropic_request(
@@ -177,12 +177,12 @@ async def test_prepare_chat_completion_normalizes_anthropic_nested_tool_schema()
     url = spec.parameters["properties"]["url"]
     annotations = spec.parameters["properties"]["annotations"]
     assert url["type"] == "string"
-    assert "format" not in url
+    assert url["format"] == "uri"
     assert annotations["type"] == "object"
-    assert annotations["properties"] == {}
+    assert "properties" not in annotations
 
 
-async def test_prepare_chat_completion_defaults_untyped_array_items():
+async def test_prepare_chat_completion_preserves_untyped_array_items():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger=logger)
 
@@ -212,10 +212,10 @@ async def test_prepare_chat_completion_defaults_untyped_array_items():
 
     spec = request.tools[0].functions.specifications[0]
     excluded_body_parts = spec.parameters["properties"]["excludedBodyParts"]
-    assert excluded_body_parts["items"]["type"] == "string"
+    assert excluded_body_parts["items"] == {}
 
 
-async def test_prepare_chat_completion_defaults_untyped_tool_properties():
+async def test_prepare_chat_completion_preserves_untyped_tool_properties():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger=logger)
 
@@ -251,8 +251,11 @@ async def test_prepare_chat_completion_defaults_untyped_tool_properties():
 
     spec = request.tools[0].functions.specifications[0]
     args = spec.parameters["properties"]["args"]
-    assert args["type"] == "object"
-    assert args["properties"] == {}
+    assert args == {
+        "description": (
+            "Optional input value exposed to the script as the global args, verbatim."
+        )
+    }
 
 
 async def test_prepare_chat_completion_maps_builtin_tools_in_v2_mode():
@@ -442,7 +445,6 @@ async def test_prepare_chat_completion_maps_native_structured_output_and_reasoni
     assert request.model_options.response_format.type == "json_schema"
     assert request.model_options.response_format.schema_ == {
         "type": "object",
-        "properties": {},
     }
     assert request.model_options.response_format.strict is True
     assert request.tools is None

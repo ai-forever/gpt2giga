@@ -75,6 +75,34 @@ def test_responses_adapter_decodes_pinned_codex_request() -> None:
     assert normalized.provider_metadata == {}
 
 
+def test_responses_adapter_preserves_native_function_schema() -> None:
+    schema = {
+        "$defs": {"value": {"type": ["string", "null"]}},
+        "type": "object",
+        "properties": {
+            "value": {"$ref": "#/$defs/value"},
+            "choice": {"oneOf": [{"const": "a"}, {"const": 1}, {"type": "null"}]},
+        },
+        "unevaluatedProperties": False,
+    }
+
+    normalized = OpenAIProtocolAdapter().responses_to_normalized(
+        {
+            "model": "GigaChat",
+            "input": "Choose.",
+            "tools": [
+                {
+                    "type": "function",
+                    "name": "choose",
+                    "parameters": schema,
+                }
+            ],
+        }
+    )
+
+    assert normalized.tools[0].parameters == schema
+
+
 def test_responses_adapter_preserves_ordered_messages_calls_and_results() -> None:
     normalized = OpenAIProtocolAdapter().responses_to_normalized(
         {

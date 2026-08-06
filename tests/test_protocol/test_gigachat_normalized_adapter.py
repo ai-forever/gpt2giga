@@ -353,7 +353,7 @@ def test_normalized_chat_to_openai_payload_drops_builtin_tool_choice_when_disabl
     assert "tool_choice" not in payload
 
 
-def test_normalized_chat_to_openai_payload_sanitizes_tool_parameters():
+def test_normalized_chat_to_openai_payload_preserves_tool_parameters():
     request = NormalizedChatRequest(
         model="GigaChat",
         messages=[NormalizedMessage(role="user", content="answer")],
@@ -380,12 +380,12 @@ def test_normalized_chat_to_openai_payload_sanitizes_tool_parameters():
     payload = normalized_chat_to_openai_payload(request)
 
     parameters = payload["tools"][0]["function"]["parameters"]
-    assert parameters["properties"]["answers"] == {
-        "type": "object",
-        "properties": {},
-    }
-    assert parameters["properties"]["score"]["type"] == "integer"
-    assert "anyOf" not in parameters["properties"]["score"]
+    assert parameters["properties"]["answers"] == {"type": "object"}
+    assert parameters["properties"]["score"]["anyOf"] == [
+        {"type": "integer"},
+        {"type": "number"},
+        {"type": "null"},
+    ]
 
 
 async def test_gigachat_provider_adapter_executes_chat_to_normalized_response():

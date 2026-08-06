@@ -11,6 +11,7 @@ on:
       - '!src/gpt2giga/**/*.md'
       - 'README.md'
       - 'pyproject.toml'
+      - 'gigachat-0.2.4a1-py3-none-any.whl'
       - '.github/workflows/docker-smoke.yaml'
   workflow_dispatch:
 

@@ -10,7 +10,6 @@ from gpt2giga.common.gigachat_options import (
     extract_gigachat_request_options,
     gigachat_request_options,
 )
-from gpt2giga.common.tools import convert_tool_to_giga_functions
 from gpt2giga.protocol.batches import infer_openai_file_purpose
 
 GPT2GIGA_ATTACHMENT_IDS_HEADER = "x-gpt2giga-attachment-ids"
@@ -78,15 +77,6 @@ def _serialize_file_object(file_obj, stored_metadata: Optional[dict] = None) -> 
         "expires_at": stored_metadata.get("expires_at"),
         "status_details": stored_metadata.get("status_details"),
     }
-
-
-def populate_giga_functions(data: dict, logger) -> None:
-    """Populate GigaChat-compatible function definitions when tools are present."""
-    if "tools" not in data and "functions" not in data:
-        return
-    data["functions"] = convert_tool_to_giga_functions(data)
-    if logger:
-        logger.debug(f"Functions count: {len(data['functions'])}")
 
 
 async def _load_batch_output_content(request: Request, file_id: str) -> bytes:

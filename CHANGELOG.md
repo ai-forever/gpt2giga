@@ -5,6 +5,11 @@
 Формат основан на [Keep a Changelog](https://keepachangelog.com/ru/1.0.0/),
 и проект придерживается [Семантического версионирования](https://semver.org/lang/ru/).
 
+## [0.3.1a1] - 2026-08-06
+
+### Исправлено
+- **Нативные схемы function calling**: OpenAI, Responses, Anthropic и Gemini больше не пропускают JSON Schema функций через GigaChat-специфичные обходные преобразования. Схемы с `$defs`/`$ref`, композициями, union-типами, mixed `enum`, boolean subschemas и дополнительными keywords передаются без потерь в GigaChat v1 и v2 через SDK `gigachat>=0.2.4a1`.
+
 ## [0.3.0] - 2026-08-03
 
 ### Добавлено

@@ -67,7 +67,7 @@ def test_transform_chat_parameters_keeps_sdk_function_models():
             "name": "get_weather",
             "parameters": {
                 "type": "object",
-                "properties": {"city": {"type": "string", "description": ""}},
+                "properties": {"city": {"type": "string"}},
                 "required": ["city"],
             },
         }
@@ -176,7 +176,7 @@ def test_transform_responses_parameters_accepts_flat_forced_function_tool_choice
     assert out["function_call"] == {"name": "lookup"}
 
 
-def test_transform_responses_parameters_sanitizes_legacy_function_enums():
+def test_transform_responses_parameters_preserves_native_function_enums():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger=logger)
 
@@ -226,10 +226,16 @@ def test_transform_responses_parameters_sanitizes_legacy_function_enums():
     params = out["functions"][0]["parameters"]["properties"]
     manifest = params["manifest"]["properties"]
     snapshot = params["snapshot"]["properties"]
-    assert manifest["surface"]["enum"] == ["dashboard", "report"]
-    assert "enum" not in manifest["version"]
-    assert snapshot["status"]["enum"] == ["ready", "partial", "blocked", "fixture"]
-    assert "enum" not in snapshot["version"]
+    assert manifest["surface"]["enum"] == ["dashboard", "report", None]
+    assert manifest["version"]["enum"] == [1]
+    assert snapshot["status"]["enum"] == [
+        "ready",
+        "partial",
+        "blocked",
+        "fixture",
+        None,
+    ]
+    assert snapshot["version"]["enum"] == [1]
 
 
 def test_transform_responses_parameters_ignores_builtin_tools_in_v1_mode():
@@ -589,7 +595,7 @@ def test_transform_chat_parameters_json_schema_native_response_format():
     out = rt.transform_chat_parameters(data)
     assert out["response_format"] == {
         "type": "json_schema",
-        "schema": {"type": "object", "properties": {}},
+        "schema": {"type": "object"},
         "strict": True,
     }
     assert "functions" not in out
@@ -627,7 +633,7 @@ def test_transform_chat_parameters_native_keeps_user_tools_as_functions():
     out = rt.transform_chat_parameters(data)
     assert out["response_format"] == {
         "type": "json_schema",
-        "schema": {"type": "object", "properties": {}},
+        "schema": {"type": "object"},
     }
     assert out["functions"] == [{"name": "sum"}]
     assert "function_call" not in out
@@ -936,7 +942,7 @@ def test_transform_responses_parameters_text_json_schema_native():
     out = rt.transform_responses_parameters(data)
     assert out["response_format"] == {
         "type": "json_schema",
-        "schema": {"type": "object", "properties": {}},
+        "schema": {"type": "object"},
         "strict": True,
     }
     assert "functions" not in out
@@ -960,8 +966,8 @@ def test_transform_responses_parameters_rejects_json_object_response_format():
     assert exc_info.value.code == "unsupported_response_format"
 
 
-def test_apply_json_schema_resolves_refs():
-    """Тест что _apply_json_schema_as_function разрешает $ref"""
+def test_apply_json_schema_preserves_refs():
+    """Тест, что _apply_json_schema_as_function сохраняет $ref."""
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger=logger)
     transformed = {}
@@ -987,7 +993,4 @@ def test_apply_json_schema_resolves_refs():
     )
 
     params = transformed["functions"][0]["parameters"]
-    # Проверяем, что $defs удален и $ref разрешен
-    assert "$defs" not in params
-    assert "$ref" not in params["properties"]["items"]["items"]
-    assert params["properties"]["items"]["items"]["type"] == "object"
+    assert params == schema_with_refs
