@@ -37,7 +37,6 @@ from gpt2giga.protocol.anthropic.request import (
     _extract_text_from_openai_messages,
     _extract_structured_output_text,
     _extract_tool_definitions_text,
-    _is_anthropic_structured_output_request,
 )
 from gpt2giga.protocol.anthropic.response import _build_anthropic_response
 from gpt2giga.protocol.anthropic.streaming import (
@@ -138,7 +137,6 @@ async def messages(request: Request):
     openai_data: Dict = _build_openai_data_from_anthropic_request(
         data,
         state.logger,
-        builtin_tool_mapping_enabled=not state.config.proxy_settings.disable_builtin_tool_mapping,
     )
     if "conversation" in data:
         openai_data["conversation"] = data["conversation"]
@@ -149,10 +147,6 @@ async def messages(request: Request):
         openai_data,
         protocol="anthropic",
     )
-    structured_output_fallback = (
-        _is_anthropic_structured_output_request(data)
-        and state.config.proxy_settings.structured_output_mode == "function_call"
-    )
     mode = resolve_gigachat_api_mode(request)
 
     normalized_response = await _try_normalized_non_stream_message(
@@ -162,7 +156,6 @@ async def messages(request: Request):
         request_options=request_options,
         conversation_turn=conversation_turn,
         pinned_model=pinned_model,
-        structured_output=structured_output_fallback,
     )
     if normalized_response is not None:
         return normalized_response
@@ -174,7 +167,6 @@ async def messages(request: Request):
         request_options=request_options,
         conversation_turn=conversation_turn,
         pinned_model=pinned_model,
-        structured_output=structured_output_fallback,
     )
     if normalized_stream is not None:
         return normalized_stream
@@ -212,7 +204,6 @@ async def messages(request: Request):
                 giga_dict,
                 model,
                 current_rquid,
-                is_structured_output=structured_output_fallback,
                 logger=state.logger,
                 mode=state.config.proxy_settings.mode,
                 log_level=state.config.proxy_settings.log_level,
@@ -238,7 +229,6 @@ async def messages(request: Request):
                         chat_request,
                         current_rquid,
                         giga_client,
-                        is_structured_output=structured_output_fallback,
                         request_options=request_options,
                         model_limiter=model_limiter,
                         effective_model=effective_model,
@@ -280,7 +270,6 @@ async def messages(request: Request):
             giga_dict,
             model,
             current_rquid,
-            is_structured_output=structured_output_fallback,
             logger=state.logger,
             mode=state.config.proxy_settings.mode,
             log_level=state.config.proxy_settings.log_level,
@@ -306,7 +295,6 @@ async def messages(request: Request):
                     chat_messages,
                     current_rquid,
                     giga_client,
-                    is_structured_output=structured_output_fallback,
                     request_options=request_options,
                     model_limiter=model_limiter,
                     effective_model=effective_model,
@@ -333,7 +321,6 @@ async def _try_normalized_count_tokens(
         normalized_request = _anthropic_adapter(request).count_tokens_to_normalized(
             payload,
             context=context,
-            builtin_tool_mapping_enabled=_builtin_tool_mapping_enabled(request),
         )
         response = await _provider_adapter(
             request,
@@ -356,7 +343,6 @@ async def _try_normalized_non_stream_message(
     request_options: Any,
     conversation_turn: Any,
     pinned_model: str | None,
-    structured_output: bool,
 ) -> dict[str, Any] | None:
     settings = _normalization_settings(request)
     if (
@@ -370,7 +356,6 @@ async def _try_normalized_non_stream_message(
         normalized_request = _anthropic_adapter(request).messages_to_normalized(
             payload,
             context=context,
-            builtin_tool_mapping_enabled=_builtin_tool_mapping_enabled(request),
         )
         normalized_response = await _provider_adapter(
             request,
@@ -381,7 +366,6 @@ async def _try_normalized_non_stream_message(
             normalized_response,
             requested_model=str(payload.get("model") or "unknown"),
             context=context,
-            structured_output=structured_output,
         )
         await commit_anthropic_response(request, conversation_turn, result)
         await emit_anthropic_message_observability(
@@ -406,7 +390,6 @@ async def _try_normalized_stream_message(
     request_options: Any,
     conversation_turn: Any,
     pinned_model: str | None,
-    structured_output: bool,
 ) -> StreamingResponse | None:
     settings = _normalization_settings(request)
     if (
@@ -420,7 +403,6 @@ async def _try_normalized_stream_message(
         normalized_request = _anthropic_adapter(request).messages_to_normalized(
             payload,
             context=context,
-            builtin_tool_mapping_enabled=_builtin_tool_mapping_enabled(request),
         )
         provider = _provider_adapter(
             request,
@@ -432,7 +414,6 @@ async def _try_normalized_stream_message(
         projector = AnthropicStreamProjector(
             requested_model=str(payload.get("model") or "unknown"),
             response_id=response_id or "-",
-            structured_output=structured_output,
         )
 
         async def emit_stream() -> AsyncIterator[str]:
@@ -498,11 +479,6 @@ def _normalization_settings(request: Request) -> Any:
         "proxy_settings",
         None,
     )
-
-
-def _builtin_tool_mapping_enabled(request: Request) -> bool:
-    settings = _normalization_settings(request)
-    return settings is None or not settings.disable_builtin_tool_mapping
 
 
 def _log_normalized_fallback(

@@ -524,42 +524,23 @@ class RequestTransformer:
         return transformed
 
     @staticmethod
-    def _apply_json_schema_as_function(
-        transformed: Dict, schema_name: str, schema: Dict
-    ) -> None:
-        """Applies JSON schema as function call for structured output."""
-        function_def = {
-            "name": schema_name,
-            "description": f"Output response in structured format: {schema_name}",
-            "parameters": dict(schema) if isinstance(schema, Mapping) else {},
-        }
-
-        if "functions" not in transformed:
-            transformed["functions"] = []
-
-        transformed["functions"].append(function_def)
-        transformed["function_call"] = {"name": schema_name}
-
-    @staticmethod
     def _extract_json_schema_response_format(
         response_format: Dict,
-    ) -> tuple[str, Dict, Optional[bool]]:
+    ) -> tuple[Dict, Optional[bool]]:
         """Extract schema metadata from OpenAI chat/responses JSON schema formats."""
         if "json_schema" in response_format:
             json_schema = response_format.get("json_schema") or {}
-            schema_name = json_schema.get("name", "structured_output")
             schema = json_schema.get("schema")
             strict = json_schema.get("strict", response_format.get("strict"))
-            return schema_name, schema, strict
+            return schema, strict
 
         return (
-            response_format.get("name", "structured_output"),
             response_format.get("schema"),
             response_format.get("strict"),
         )
 
     @staticmethod
-    def _apply_json_schema_natively(
+    def _apply_json_schema(
         transformed: Dict, schema: Dict, strict: Optional[bool]
     ) -> None:
         """Applies JSON schema through GigaChat native response_format."""
@@ -581,18 +562,8 @@ class RequestTransformer:
             code="unsupported_response_format",
         )
 
-    def _structured_output_mode(self) -> str:
-        return getattr(
-            self.config.proxy_settings,
-            "structured_output_mode",
-            "function_call",
-        )
-
     def _responses_chat_completion_tools_enabled_by_default(self) -> bool:
-        return (
-            getattr(self.config.proxy_settings, "gigachat_api_mode", "v1") == "v2"
-            and self._builtin_tool_mapping_enabled()
-        )
+        return getattr(self.config.proxy_settings, "gigachat_api_mode", "v1") == "v2"
 
     def _responses_stateful_enabled_by_default(self) -> bool:
         return getattr(self.config.proxy_settings, "gigachat_api_mode", "v1") == "v2"
@@ -618,17 +589,7 @@ class RequestTransformer:
         return stripped
 
     def _chat_completion_tools_enabled_by_default(self) -> bool:
-        return (
-            getattr(self.config.proxy_settings, "gigachat_api_mode", "v1") == "v2"
-            and self._builtin_tool_mapping_enabled()
-        )
-
-    def _builtin_tool_mapping_enabled(self) -> bool:
-        return not getattr(
-            self.config.proxy_settings,
-            "disable_builtin_tool_mapping",
-            False,
-        )
+        return getattr(self.config.proxy_settings, "gigachat_api_mode", "v1") == "v2"
 
     def transform_chat_parameters(
         self, data: Dict, *, allow_builtin_tools: Optional[bool] = None
@@ -637,7 +598,7 @@ class RequestTransformer:
         builtin_tools_enabled = (
             self._chat_completion_tools_enabled_by_default()
             if allow_builtin_tools is None
-            else allow_builtin_tools and self._builtin_tool_mapping_enabled()
+            else allow_builtin_tools
         )
         data = sanitize_openai_chat_parameters(
             data,
@@ -656,15 +617,10 @@ class RequestTransformer:
         response_format: dict | None = transformed.pop("response_format", None)
         if response_format:
             if response_format.get("type") == "json_schema":
-                schema_name, schema, strict = self._extract_json_schema_response_format(
+                schema, strict = self._extract_json_schema_response_format(
                     response_format
                 )
-                if self._structured_output_mode() == "native":
-                    self._apply_json_schema_natively(transformed, schema, strict)
-                else:
-                    self._apply_json_schema_as_function(
-                        transformed, schema_name, schema
-                    )
+                self._apply_json_schema(transformed, schema, strict)
             elif response_format.get("type") == "json_object":
                 self._reject_json_object_response_format("response_format.type")
             else:
@@ -704,7 +660,7 @@ class RequestTransformer:
         builtin_tools_enabled = (
             self._responses_chat_completion_tools_enabled_by_default()
             if allow_builtin_tools is None
-            else allow_builtin_tools and self._builtin_tool_mapping_enabled()
+            else allow_builtin_tools
         )
         if allow_stateful is None:
             stateful_enabled = (
@@ -731,15 +687,10 @@ class RequestTransformer:
         if response_format_responses:
             response_format = response_format_responses.get("format", {})
             if response_format.get("type") == "json_schema":
-                schema_name, schema, strict = self._extract_json_schema_response_format(
+                schema, strict = self._extract_json_schema_response_format(
                     response_format
                 )
-                if self._structured_output_mode() == "native":
-                    self._apply_json_schema_natively(transformed, schema, strict)
-                else:
-                    self._apply_json_schema_as_function(
-                        transformed, schema_name, schema
-                    )
+                self._apply_json_schema(transformed, schema, strict)
             elif response_format.get("type") == "json_object":
                 self._reject_json_object_response_format("text.format.type")
             else:

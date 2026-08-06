@@ -217,16 +217,8 @@ Reasoning:
 
 Structured output:
 
-```dotenv
-GPT2GIGA_STRUCTURED_OUTPUT_MODE=function_call
-```
-
-Values:
-
-- `function_call`: a compatibility fallback through function calling;
-- `native`: passes the JSON Schema through GigaChat `response_format` if the model/API supports it.
-
-Both modes are designed for schema-based structured output. OpenAI
+JSON Schema is passed natively through GigaChat `response_format`; the gateway
+does not synthesize a function call for structured output. OpenAI
 `response_format.type=json_object` and Gemini `responseMimeType=application/json`
 without `responseJsonSchema` / `responseSchema` are not proxied to GigaChat,
 because the upstream does not support a separate schema-less JSON mode.
@@ -255,16 +247,9 @@ for a supported v2 flow that carries an `assistant_id` or an existing
 `storage.thread_id`. This exception does not expose OpenAI Assistants or Threads
 routes through the gateway.
 
-Built-in tool mapping can be disabled separately:
-
-```dotenv
-GPT2GIGA_DISABLE_BUILTIN_TOOL_MAPPING=False
-```
-
-When set to `True`, OpenAI/Anthropic/Gemini provider built-in tools
-(`web_search*`, `code_execution*`, `urlContext`, and similar) are not mapped to
-GigaChat v2 built-in tools and are ignored. User function/local tools remain
-enabled.
+Recognized OpenAI/Anthropic/Gemini provider built-in tools (`web_search*`,
+`code_execution*`, `urlContext`, and similar) are mapped to GigaChat built-ins
+on v2 routes. User function/local tools are mapped independently.
 
 ## Normalized layer flags
 

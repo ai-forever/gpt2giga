@@ -108,10 +108,6 @@ reasoning for that request, including Codex `model_reasoning_effort=none`.
 Otherwise the proxy forwards the client's explicit reasoning effort and does
 not apply a global default or override.
 
-With `GPT2GIGA_DISABLE_BUILTIN_TOOL_MAPPING=True`, the proxy accepts provider
-built-in tools for compatibility but does not map or send them to GigaChat as
-executable tools. User function tools continue to work.
-
 OpenAI metadata fields such as `user`, `metadata`, `service_tier`,
 `safety_identifier`, `seed`, `prompt_cache_key`, and `prompt_cache_retention` are
 accepted and ignored where they are classified.

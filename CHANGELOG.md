@@ -13,6 +13,8 @@
 
 ### Удалено
 - **Глобальные reasoning workarounds**: удалены `GPT2GIGA_ENABLE_REASONING` / `--proxy.enable-reasoning` и `GPT2GIGA_DISABLE_REASONING` / `--proxy.disable-reasoning`; reasoning теперь управляется только явными параметрами клиентского запроса.
+- **Structured output fallback**: удалены `GPT2GIGA_STRUCTURED_OUTPUT_MODE` / `--proxy.structured-output-mode` и преобразование JSON Schema в искусственный function call; structured output всегда использует нативный GigaChat `response_format`.
+- **Глобальный opt-out built-in tools**: удалены `GPT2GIGA_DISABLE_BUILTIN_TOOL_MAPPING` / `--proxy.disable-builtin-tool-mapping`; распознанные provider built-in tools на маршрутах GigaChat v2 теперь всегда сопоставляются по клиентскому запросу.
 
 ## [0.3.0] - 2026-08-03
 

@@ -250,8 +250,8 @@ def test_debug_translate_normalized_to_gigachat():
     assert body["gigachat_payload"]["prepared"] == "v1"
 
 
-def test_debug_translate_normalized_to_gigachat_ignores_builtin_when_mapping_disabled():
-    client = TestClient(make_debug_app(mode="v2", disable_builtin_tool_mapping=True))
+def test_debug_translate_normalized_to_gigachat_preserves_builtin_tools():
+    client = TestClient(make_debug_app(mode="v2"))
 
     response = client.post(
         "/_debug/translate/normalized-to-gigachat",
@@ -273,10 +273,13 @@ def test_debug_translate_normalized_to_gigachat_ignores_builtin_when_mapping_dis
 
     assert response.status_code == 200
     body = response.json()
-    assert len(body["openai_payload"]["tools"]) == 1
-    assert body["openai_payload"]["tools"][0]["type"] == "function"
-    assert body["openai_payload"]["tools"][0]["function"]["name"] == "lookup"
-    assert "tool_choice" not in body["openai_payload"]
+    assert body["openai_payload"]["tools"][0] == {
+        "type": "web_search",
+        "web_search": {"indexes": ["web"]},
+    }
+    assert body["openai_payload"]["tools"][1]["type"] == "function"
+    assert body["openai_payload"]["tools"][1]["function"]["name"] == "lookup"
+    assert body["openai_payload"]["tool_choice"] == {"type": "web_search"}
     assert body["gigachat_payload"]["prepared"] == "v2"
 
 

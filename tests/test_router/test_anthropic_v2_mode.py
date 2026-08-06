@@ -490,35 +490,6 @@ def test_anthropic_messages_v2_mode_passes_builtin_tools_to_transformer():
     assert "function_call" not in transformed_data
 
 
-def test_anthropic_messages_v2_mode_ignores_builtin_tools_when_mapping_disabled():
-    app = make_app("v2", disable_builtin_tool_mapping=True)
-    client = TestClient(app)
-
-    response = client.post(
-        "/messages",
-        json={
-            "model": "claude-x",
-            "max_tokens": 16,
-            "messages": [{"role": "user", "content": "search"}],
-            "tools": [
-                {
-                    "type": "web_search_20250305",
-                    "name": "web_search",
-                    "max_uses": 3,
-                }
-            ],
-            "tool_choice": {"type": "tool", "name": "web_search"},
-        },
-    )
-
-    assert response.status_code == 200
-    transformed_data = app.state.request_transformer.chat_completion_calls[0][0]
-    assert "tools" not in transformed_data
-    assert "tool_choice" not in transformed_data
-    assert "functions" not in transformed_data
-    assert "function_call" not in transformed_data
-
-
 async def _wait_for_chat_completion_transformer_calls(app, count: int) -> None:
     while len(app.state.request_transformer.chat_completion_calls) < count:
         await asyncio.sleep(0)

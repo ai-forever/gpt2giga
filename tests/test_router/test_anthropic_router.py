@@ -18,7 +18,6 @@ from gpt2giga.protocol.anthropic.request import (
     _extract_text_from_openai_messages,
     _extract_structured_output_text,
     _extract_tool_definitions_text,
-    _is_anthropic_structured_output_request,
 )
 from gpt2giga.protocol.anthropic.response import (
     _build_anthropic_response,
@@ -295,8 +294,8 @@ class FakeGigachatFunctionCall:
         return gen()
 
 
-class FakeGigachatStructuredFunctionCall:
-    """Fake that returns a synthetic structured-output function call."""
+class FakeGigachatStructuredOutput:
+    """Fake that returns native structured-output text."""
 
     async def achat(self, chat):
         return MockResponse(
@@ -305,16 +304,11 @@ class FakeGigachatStructuredFunctionCall:
                     {
                         "message": {
                             "role": "assistant",
-                            "content": "",
-                            "function_call": {
-                                "name": "structured_output",
-                                "arguments": {
-                                    "name": "John Smith",
-                                    "email": "john@example.com",
-                                },
-                            },
+                            "content": (
+                                '{"name": "John Smith", "email": "john@example.com"}'
+                            ),
                         },
-                        "finish_reason": "function_call",
+                        "finish_reason": "stop",
                     }
                 ],
                 "usage": {
@@ -332,13 +326,10 @@ class FakeGigachatStructuredFunctionCall:
                     "choices": [
                         {
                             "delta": {
-                                "function_call": {
-                                    "name": "structured_output",
-                                    "arguments": {
-                                        "name": "John Smith",
-                                        "email": "john@example.com",
-                                    },
-                                }
+                                "content": (
+                                    '{"name": "John Smith", '
+                                    '"email": "john@example.com"}'
+                                )
                             }
                         }
                     ],
@@ -524,9 +515,7 @@ def make_app(gigachat=None):
     app.state.response_processor = ResponseProcessor(logger=logger)
     app.state.request_transformer = FakeRequestTransformer()
     app.state.openai_protocol_adapter = OpenAIProtocolAdapter()
-    app.state.config = ProxyConfig(
-        proxy=ProxySettings(structured_output_mode="function_call")
-    )
+    app.state.config = ProxyConfig(proxy=ProxySettings())
     app.state.logger = logger
     return app
 
@@ -612,7 +601,6 @@ class TestAnthropicStructuredOutputRequest:
             "name": "ContactInfo",
             "strict": True,
         }
-        assert _is_anthropic_structured_output_request(data) is True
 
     def test_legacy_output_format_json_schema_maps_to_response_format(self):
         data = {
@@ -1031,33 +1019,6 @@ class TestBuildAnthropicResponse:
         assert result["content"][0]["name"] == "search"
         assert result["content"][0]["input"] == {"q": "test"}
 
-    def test_structured_output_function_call_response(self):
-        giga = {
-            "choices": [
-                {
-                    "message": {
-                        "role": "assistant",
-                        "content": "",
-                        "function_call": {
-                            "name": "structured_output",
-                            "arguments": {"name": "John Smith"},
-                        },
-                    },
-                    "finish_reason": "function_call",
-                }
-            ],
-            "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
-        }
-        result = _build_anthropic_response(
-            giga,
-            "claude-test",
-            "rq456",
-            is_structured_output=True,
-        )
-        assert result["stop_reason"] == "end_turn"
-        assert result["content"][0]["type"] == "text"
-        assert json.loads(result["content"][0]["text"]) == {"name": "John Smith"}
-
     def test_function_call_unmaps_reserved_web_search(self):
         giga = {
             "choices": [
@@ -1254,7 +1215,6 @@ class TestMessagesEndpoint:
         app = make_app()
         app.state.config = ProxyConfig(
             proxy=ProxySettings(
-                structured_output_mode="function_call",
                 observability_capture_content=True,
                 observability_capture_messages=True,
                 observability_capture_responses=True,
@@ -1336,7 +1296,7 @@ class TestMessagesEndpoint:
         assert body["content"][0]["name"] == "get_weather"
 
     def test_non_stream_with_structured_output(self):
-        app = make_app(FakeGigachatStructuredFunctionCall())
+        app = make_app(FakeGigachatStructuredOutput())
         client = TestClient(app)
         payload = {
             "model": "claude-test",
@@ -1534,8 +1494,8 @@ class TestMessagesEndpoint:
                 assert parsed["delta"]["stop_reason"] == "tool_use"
                 break
 
-    def test_stream_structured_output_function_call_as_text(self):
-        app = make_app(FakeGigachatStructuredFunctionCall())
+    def test_stream_native_structured_output_as_text(self):
+        app = make_app(FakeGigachatStructuredOutput())
         client = TestClient(app)
         payload = {
             "model": "claude-test",
@@ -1675,7 +1635,6 @@ class TestMessagesEndpoint:
         app = make_app(FakeGigachatReasoning())
         app.state.config = ProxyConfig(
             proxy=ProxySettings(
-                structured_output_mode="function_call",
                 observability_capture_content=True,
                 observability_capture_messages=True,
                 observability_capture_responses=True,
@@ -1805,7 +1764,6 @@ class TestMessagesEndpoint:
         app = make_app()
         app.state.config = ProxyConfig(
             proxy=ProxySettings(
-                structured_output_mode="function_call",
                 observability_capture_content=True,
                 observability_capture_messages=True,
                 observability_capture_responses=True,
@@ -1850,7 +1808,6 @@ class TestMessagesEndpoint:
         app = make_app(FakeGigachatNullReasoningStream())
         app.state.config = ProxyConfig(
             proxy=ProxySettings(
-                structured_output_mode="function_call",
                 observability_capture_content=True,
                 observability_capture_messages=True,
                 observability_capture_responses=True,

@@ -194,8 +194,8 @@ calls продолжают работать.
 
 У `gpt2giga` есть отдельный механизм built-in tools GigaChat v2, включая
 совместимые варианты `web_search` и `code_interpreter`. Он управляется gateway
-route `/v2` и параметром `GPT2GIGA_DISABLE_BUILTIN_TOOL_MAPPING`, а не флагом
-Grok `supports_backend_search`. Не выставляйте `true`, пока конкретный поток
+route `/v2`, а не флагом Grok `supports_backend_search`. Не выставляйте `true`,
+пока конкретный поток
 server-side search не проверен end-to-end.
 
 ## Почему используется /v2 и Responses API

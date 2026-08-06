@@ -8,9 +8,7 @@ def test_proxy_settings_defaults(monkeypatch):
     monkeypatch.delenv("GPT2GIGA_PASS_MODEL", raising=False)
     monkeypatch.delenv("GPT2GIGA_PASS_TOKEN_CLIENT_CACHE_SIZE", raising=False)
     monkeypatch.delenv("GPT2GIGA_SHUTDOWN_TIMEOUT_SECONDS", raising=False)
-    monkeypatch.delenv("GPT2GIGA_STRUCTURED_OUTPUT_MODE", raising=False)
     monkeypatch.delenv("GPT2GIGA_GIGACHAT_API_MODE", raising=False)
-    monkeypatch.delenv("GPT2GIGA_DISABLE_BUILTIN_TOOL_MAPPING", raising=False)
     monkeypatch.delenv("GPT2GIGA_NORMALIZATION_MODE", raising=False)
     monkeypatch.delenv("GPT2GIGA_LEGACY_CHAT_FALLBACK", raising=False)
     monkeypatch.delenv("GPT2GIGA_TRAFFIC_LOG_ENABLED", raising=False)
@@ -61,9 +59,7 @@ def test_proxy_settings_defaults(monkeypatch):
     assert s.pass_model is True
     assert s.pass_token_client_cache_size == 32
     assert s.shutdown_timeout_seconds == 10.0
-    assert s.structured_output_mode == "function_call"
     assert s.gigachat_api_mode == "v1"
-    assert s.disable_builtin_tool_mapping is False
     assert s.normalization_mode == "off"
     assert s.legacy_chat_fallback is True
     assert s.conversation_stitching_enabled is False
@@ -114,9 +110,11 @@ def test_proxy_settings_defaults(monkeypatch):
     assert s.model_max_connections_acquire_timeout is None
 
 
-def test_proxy_settings_has_no_global_reasoning_toggles():
+def test_proxy_settings_has_no_global_request_workaround_toggles():
     assert "enable_reasoning" not in ProxySettings.model_fields
     assert "disable_reasoning" not in ProxySettings.model_fields
+    assert "structured_output_mode" not in ProxySettings.model_fields
+    assert "disable_builtin_tool_mapping" not in ProxySettings.model_fields
 
 
 def test_proxy_config_instantiation():
@@ -209,34 +207,10 @@ def test_proxy_settings_bool_cast_from_env(monkeypatch):
     assert s.use_https is True
 
 
-def test_proxy_settings_structured_output_mode_from_env(monkeypatch):
-    monkeypatch.setenv("GPT2GIGA_STRUCTURED_OUTPUT_MODE", "native")
-    s = ProxySettings()
-    assert s.structured_output_mode == "native"
-
-
-def test_proxy_settings_structured_output_mode_normalized(monkeypatch):
-    monkeypatch.setenv("GPT2GIGA_STRUCTURED_OUTPUT_MODE", " NATIVE ")
-    s = ProxySettings()
-    assert s.structured_output_mode == "native"
-
-
-def test_proxy_settings_invalid_structured_output_mode(monkeypatch):
-    monkeypatch.setenv("GPT2GIGA_STRUCTURED_OUTPUT_MODE", "unsupported")
-    with pytest.raises(Exception):
-        ProxySettings()
-
-
 def test_proxy_settings_gigachat_api_mode_from_env(monkeypatch):
     monkeypatch.setenv("GPT2GIGA_GIGACHAT_API_MODE", "v2")
     s = ProxySettings()
     assert s.gigachat_api_mode == "v2"
-
-
-def test_proxy_settings_disable_builtin_tool_mapping_from_env(monkeypatch):
-    monkeypatch.setenv("GPT2GIGA_DISABLE_BUILTIN_TOOL_MAPPING", "true")
-    s = ProxySettings()
-    assert s.disable_builtin_tool_mapping is True
 
 
 def test_proxy_settings_modular_feature_flags_from_env(monkeypatch):

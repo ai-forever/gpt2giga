@@ -76,7 +76,6 @@ async def generate_content(model: str, request: Request):
         model=effective_model,
         context=context,
         stream=False,
-        builtin_tool_mapping_enabled=_builtin_tool_mapping_enabled(request),
     )
     conversation_turn = await _stitch_gemini_request(
         request,
@@ -135,7 +134,6 @@ async def stream_generate_content(model: str, request: Request):
         model=effective_model,
         context=context,
         stream=True,
-        builtin_tool_mapping_enabled=_builtin_tool_mapping_enabled(request),
     )
     conversation_turn = await _stitch_gemini_request(
         request,
@@ -379,7 +377,6 @@ async def _try_normalized_count_tokens(
             payload,
             model=effective_model,
             context=context,
-            builtin_tool_mapping_enabled=_builtin_tool_mapping_enabled(request),
         )
         request_options = extract_gigachat_request_options(request, payload)
         response = await _provider_adapter(
@@ -432,10 +429,6 @@ def _gemini_adapter(request: Request) -> GeminiProtocolAdapter:
         adapter = GeminiProtocolAdapter()
         request.app.state.gemini_protocol_adapter = adapter
     return adapter
-
-
-def _builtin_tool_mapping_enabled(request: Request) -> bool:
-    return not request.app.state.config.proxy_settings.disable_builtin_tool_mapping
 
 
 def _normalization_settings(request: Request) -> Any:

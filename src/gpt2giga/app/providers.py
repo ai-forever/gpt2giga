@@ -35,11 +35,6 @@ class BridgeProviderRuntime:
             profile.profile_id: ProviderNetworkAuthorizer(profile)
             for profile in self.registry.config.profiles
         }
-        self._builtin_tools_enabled = not getattr(
-            state.config.proxy_settings,
-            "disable_builtin_tool_mapping",
-            False,
-        )
         for public_alias in self.registry.public_aliases():
             route = self.registry.resolve(public_alias)
             if route.provider_kind is not ProviderKind.GIGACHAT:
@@ -84,7 +79,7 @@ class BridgeProviderRuntime:
                 public_protocol=PublicProtocol.OPENAI_RESPONSES.value,
                 api_mode=api_mode,
                 route_id=route.profile_id,
-                builtin_tools_enabled=self._builtin_tools_enabled,
+                builtin_tools_enabled=True,
             )
             predicate_admission = capability_predicates_for_semantics(
                 effective,

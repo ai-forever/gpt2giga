@@ -100,7 +100,6 @@ async def lifespan(app: FastAPI):
         app.state.logger,
         mode=config.proxy_settings.mode,
         log_level=config.proxy_settings.log_level,
-        structured_output_mode=config.proxy_settings.structured_output_mode,
     )
     try:
         app.state.bridge_provider_runtime = BridgeProviderRuntime(app.state)

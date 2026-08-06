@@ -37,7 +37,6 @@ async def _stream_anthropic_generator(
     response_id: str,
     giga_client: Any,
     *,
-    is_structured_output: bool = False,
     request_options: Optional[GigaRequestOptions] = None,
     model_limiter: Optional[ModelConcurrencyLimiter] = None,
     effective_model: Optional[str] = None,
@@ -161,42 +160,6 @@ async def _stream_anthropic_generator(
                             thinking_block_stopped = True
 
                         arguments = delta_function_call.get("arguments")
-                        if is_structured_output:
-                            if arguments is None:
-                                continue
-
-                            arguments_str = (
-                                json.dumps(arguments, ensure_ascii=False)
-                                if isinstance(arguments, dict)
-                                else str(arguments)
-                            )
-                            if not arguments_str:
-                                continue
-
-                            if not content_block_started:
-                                yield sse(
-                                    "content_block_start",
-                                    {
-                                        "type": "content_block_start",
-                                        "index": content_index,
-                                        "content_block": {"type": "text", "text": ""},
-                                    },
-                                )
-                                content_block_started = True
-
-                            yield sse(
-                                "content_block_delta",
-                                {
-                                    "type": "content_block_delta",
-                                    "index": content_index,
-                                    "delta": {
-                                        "type": "text_delta",
-                                        "text": arguments_str,
-                                    },
-                                },
-                            )
-                            continue
-
                         if function_call_data is None:
                             tool_id = f"toolu_{uuid.uuid4().hex[:24]}"
                             function_call_data = {
@@ -438,7 +401,6 @@ async def _stream_anthropic_chat_completion_generator(
     response_id: str,
     giga_client: GigaChat,
     *,
-    is_structured_output: bool = False,
     request_options: Optional[GigaRequestOptions] = None,
     model_limiter: Optional[ModelConcurrencyLimiter] = None,
     effective_model: Optional[str] = None,
@@ -455,7 +417,6 @@ async def _stream_anthropic_chat_completion_generator(
         chat_request,
         response_id,
         adapter_client,
-        is_structured_output=is_structured_output,
         request_options=None,
         model_limiter=model_limiter,
         effective_model=effective_model,

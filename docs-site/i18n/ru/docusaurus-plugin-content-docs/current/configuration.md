@@ -217,16 +217,8 @@ GigaChat также поддерживает настройки клиентск
 
 Структурированный вывод:
 
-```dotenv
-GPT2GIGA_STRUCTURED_OUTPUT_MODE=function_call
-```
-
-Значения:
-
-- `function_call`: запасной путь совместимости через вызов функций;
-- `native`: передаёт JSON Schema через GigaChat `response_format`, если это поддерживают модель/API.
-
-Оба режима рассчитаны на структурированный вывод на основе схемы. OpenAI
+JSON Schema нативно передаётся через GigaChat `response_format`; gateway не
+создаёт искусственный function call для структурированного вывода. OpenAI
 `response_format.type=json_object` и Gemini `responseMimeType=application/json`
 без `responseJsonSchema` / `responseSchema` не проксируются в GigaChat, потому
 что вышестоящий сервис не поддерживает отдельный режим JSON без схемы.
@@ -255,16 +247,10 @@ Gateway поддерживает root compatibility methods SDK для v1 и res
 `storage.thread_id`. Это исключение не добавляет в gateway OpenAI-маршруты
 Assistants или Threads.
 
-Сопоставление built-in tools можно выключить отдельно:
-
-```dotenv
-GPT2GIGA_DISABLE_BUILTIN_TOOL_MAPPING=False
-```
-
-Когда значение `True`, OpenAI/Anthropic/Gemini provider built-in tools
-(`web_search*`, `code_execution*`, `urlContext` и похожие) не сопоставляются со
-встроенными инструментами GigaChat v2 и игнорируются. Пользовательские
-function/local tools остаются включены.
+Распознанные OpenAI/Anthropic/Gemini provider built-in tools (`web_search*`,
+`code_execution*`, `urlContext` и похожие) сопоставляются со встроенными
+инструментами GigaChat на маршрутах v2. Пользовательские function/local tools
+сопоставляются независимо.
 
 ## Флаги нормализованного слоя
 

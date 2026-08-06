@@ -42,7 +42,6 @@ class ResponseProcessor:
         logger=None,
         mode: str = "DEV",
         log_level: str = "INFO",
-        structured_output_mode: str = "function_call",
     ):
         if logger is None:
             from loguru import logger as default_logger
@@ -51,38 +50,8 @@ class ResponseProcessor:
         self.logger = logger
         self._mode = mode.upper() if isinstance(mode, str) else "DEV"
         self._log_level = log_level.upper() if isinstance(log_level, str) else "INFO"
-        self._structured_output_mode = (
-            structured_output_mode.lower()
-            if isinstance(structured_output_mode, str)
-            else "function_call"
-        )
         self._stream_reasoning_parsers: dict[str, ReasoningContentParser] = {}
         self._stream_source_renderers: dict[str, SourceMarkerStreamRenderer] = {}
-
-    def _uses_structured_output_function_call(self) -> bool:
-        return self._structured_output_mode == "function_call"
-
-    def _is_chat_structured_output_function_call(
-        self, request_data: Optional[Dict]
-    ) -> bool:
-        if not self._uses_structured_output_function_call():
-            return False
-        response_format = None
-        if isinstance(request_data, dict):
-            response_format = request_data.get("response_format")
-        return (
-            isinstance(response_format, dict)
-            and response_format.get("type") == "json_schema"
-        )
-
-    def _is_responses_structured_output_function_call(self, data: dict) -> bool:
-        if not self._uses_structured_output_function_call():
-            return False
-        text_param = data.get("text")
-        if not isinstance(text_param, dict):
-            return False
-        fmt = text_param.get("format")
-        return isinstance(fmt, dict) and fmt.get("type") == "json_schema"
 
     def process_response(
         self,
@@ -98,34 +67,24 @@ class ResponseProcessor:
         )
         is_tool_call = giga_dict["choices"][0]["finish_reason"] == "function_call"
 
-        is_structured_output = self._is_chat_structured_output_function_call(
-            request_data
-        )
         provider_metadata = self._extract_provider_response_metadata(giga_dict)
-        if is_structured_output:
-            provider_metadata.pop("gigachat_called_tools", None)
-        else:
-            called_tools = self._extract_chat_messages_called_tool_items(
-                request_data or {}
+        called_tools = self._extract_chat_messages_called_tool_items(request_data or {})
+        called_tools.extend(
+            self._extract_called_tool_items_from_metadata(
+                provider_metadata.pop("gigachat_called_tools", None)
             )
-            called_tools.extend(
-                self._extract_called_tool_items_from_metadata(
-                    provider_metadata.pop("gigachat_called_tools", None)
-                )
+        )
+        called_tools.extend(
+            self._extract_called_tool_items_from_response(
+                giga_dict,
+                request_tools=(request_data or {}).get("tools"),
             )
-            called_tools.extend(
-                self._extract_called_tool_items_from_response(
-                    giga_dict,
-                    request_tools=(request_data or {}).get("tools"),
-                )
-            )
-            response_metadata.update(self._called_tools_metadata(called_tools))
+        )
+        response_metadata.update(self._called_tools_metadata(called_tools))
         response_metadata.update(provider_metadata)
 
         for choice in giga_dict["choices"]:
-            self._process_choice(
-                choice, is_tool_call, is_structured_output=is_structured_output
-            )
+            self._process_choice(choice, is_tool_call)
         result = {
             "id": f"chatcmpl-{response_id}",
             "object": "chat.completion",
@@ -168,24 +127,20 @@ class ResponseProcessor:
         is_tool_call = giga_dict["choices"][0]["finish_reason"] == "function_call"
 
         text_param = data.get("text")
-        is_structured_output = self._is_responses_structured_output_function_call(data)
         provider_metadata = self._extract_provider_response_metadata(giga_dict)
-        if is_structured_output:
-            provider_metadata.pop("gigachat_called_tools", None)
-        else:
-            called_tools = self._extract_responses_input_called_tool_items(data)
-            called_tools.extend(
-                self._extract_called_tool_items_from_metadata(
-                    provider_metadata.pop("gigachat_called_tools", None)
-                )
+        called_tools = self._extract_responses_input_called_tool_items(data)
+        called_tools.extend(
+            self._extract_called_tool_items_from_metadata(
+                provider_metadata.pop("gigachat_called_tools", None)
             )
-            called_tools.extend(
-                self._extract_called_tool_items_from_response(
-                    giga_dict,
-                    request_tools=data.get("tools"),
-                )
+        )
+        called_tools.extend(
+            self._extract_called_tool_items_from_response(
+                giga_dict,
+                request_tools=data.get("tools"),
             )
-            response_metadata.update(self._called_tools_metadata(called_tools))
+        )
+        response_metadata.update(self._called_tools_metadata(called_tools))
         response_metadata.update(provider_metadata)
 
         for choice in giga_dict["choices"]:
@@ -207,7 +162,6 @@ class ResponseProcessor:
                 giga_dict,
                 is_tool_call,
                 response_id,
-                is_structured_output=is_structured_output,
                 request_data=data,
             ),
             usage=self._build_response_usage(giga_dict.get("usage")),
@@ -339,7 +293,6 @@ class ResponseProcessor:
         is_tool_call: bool = False,
         response_id: Optional[str] = None,
         message_key: Literal["message", "delta"] = "message",
-        is_structured_output: bool = False,
         request_data: Optional[dict] = None,
     ) -> list:
         response_id = str(uuid.uuid4()) if response_id is None else response_id
@@ -349,14 +302,8 @@ class ResponseProcessor:
             message.get("reasoning_content"), response_id
         )
         try:
-            if is_tool_call and not is_structured_output:
+            if is_tool_call:
                 return reasoning_items + [message["output"]]
-            if is_tool_call and is_structured_output:
-                output_item = message["output"]
-                arguments = output_item.get("arguments", "{}")
-                return reasoning_items + [
-                    ResponseProcessor._create_message_item(arguments, response_id)
-                ]
             builtin_items = ResponseProcessor._create_builtin_tool_items(
                 message,
                 response_id,
@@ -676,23 +623,17 @@ class ResponseProcessor:
         provider_metadata = self._extract_provider_response_metadata(giga_dict)
         is_tool_call = giga_dict["choices"][0].get("finish_reason") == "function_call"
 
-        is_structured_output = self._is_chat_structured_output_function_call(
-            request_data
-        )
-        if is_structured_output:
-            provider_metadata.pop("gigachat_called_tools", None)
-        else:
-            called_tools: list[dict[str, Any]] = []
-            if self._is_terminal_stream_chunk(giga_dict):
-                called_tools = self._extract_chat_messages_called_tool_items(
-                    request_data or {}
-                )
-            called_tools.extend(
-                self._extract_called_tool_items_from_metadata(
-                    provider_metadata.pop("gigachat_called_tools", None)
-                )
+        called_tools: list[dict[str, Any]] = []
+        if self._is_terminal_stream_chunk(giga_dict):
+            called_tools = self._extract_chat_messages_called_tool_items(
+                request_data or {}
             )
-            response_metadata.update(self._called_tools_metadata(called_tools))
+        called_tools.extend(
+            self._extract_called_tool_items_from_metadata(
+                provider_metadata.pop("gigachat_called_tools", None)
+            )
+        )
+        response_metadata.update(self._called_tools_metadata(called_tools))
         response_metadata.update(provider_metadata)
 
         for choice in giga_dict["choices"]:
@@ -701,7 +642,6 @@ class ResponseProcessor:
                 is_tool_call,
                 is_stream=True,
                 response_id=response_id,
-                is_structured_output=is_structured_output,
             )
 
         result = {
@@ -814,7 +754,6 @@ class ResponseProcessor:
         is_tool_call: bool,
         is_stream: bool = False,
         response_id: Optional[str] = None,
-        is_structured_output: bool = False,
     ):
         """Обрабатывает отдельный choice."""
         message_key = "delta" if is_stream else "message"
@@ -822,31 +761,13 @@ class ResponseProcessor:
         choice["index"] = 0
         choice["logprobs"] = None
 
-        if is_structured_output and is_tool_call:
-            choice["finish_reason"] = (
-                "stop" if not is_stream or choice.get("finish_reason") else None
-            )
-
-            if message_key in choice:
-                message = choice[message_key]
-                message["refusal"] = None
-                if message.get("function_call"):
-                    args = message["function_call"]["arguments"]
-                    if isinstance(args, (dict, list)):
-                        content = json.dumps(args, ensure_ascii=False)
-                    else:
-                        content = str(args)
-
-                    message["content"] = content
-                    message.pop("function_call", None)
-
-        elif is_tool_call:
+        if is_tool_call:
             choice["finish_reason"] = "tool_calls"
 
         if message_key in choice:
             message = choice[message_key]
             message["refusal"] = None
-            if message.get("function_call") and not is_structured_output:
+            if message.get("function_call"):
                 self._process_function_call(message, is_tool_call)
             self._extract_reasoning_from_message(
                 message,

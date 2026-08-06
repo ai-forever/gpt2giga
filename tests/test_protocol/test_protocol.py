@@ -916,8 +916,8 @@ def test_response_processor_prod_debug_logging_omits_response():
     )
 
 
-def test_response_processor_native_so_preserves_chat_tool_call():
-    rp = ResponseProcessor(logger, structured_output_mode="native")
+def test_response_processor_preserves_chat_tool_call_with_response_format():
+    rp = ResponseProcessor(logger)
     giga_resp = MockResponse(
         {
             "choices": [
@@ -1249,8 +1249,8 @@ def test_response_processor_process_response_api_includes_reasoning_item():
     assert out["output"][1]["content"][0]["text"] == "Paris"
 
 
-def test_response_processor_native_so_preserves_responses_tool_call():
-    rp = ResponseProcessor(logger, structured_output_mode="native")
+def test_response_processor_preserves_responses_tool_call_with_response_format():
+    rp = ResponseProcessor(logger)
     giga_resp = MockResponse(
         {
             "choices": [
@@ -1305,7 +1305,7 @@ def test_response_processor_native_so_preserves_responses_tool_call():
 
 
 def test_response_processor_responses_tool_call_restores_namespace():
-    rp = ResponseProcessor(logger, structured_output_mode="native")
+    rp = ResponseProcessor(logger)
     tools = [
         {
             "type": "namespace",

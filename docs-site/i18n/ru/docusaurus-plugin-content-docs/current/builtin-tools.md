@@ -43,12 +43,6 @@ Chat Completions v2. На публичных маршрутах это озна�
 Принудительный `tool_choice` для поддерживаемых встроенных инструментов превращается в
 GigaChat `ChatToolConfig(mode="tool", tool_name="<canonical tool>")`.
 
-Чтобы временно отключить это сопоставление без отключения пользовательских
-function tools, задайте `GPT2GIGA_DISABLE_BUILTIN_TOOL_MAPPING=True`. Тогда
-известные провайдерские built-in tools принимаются для совместимости, но не
-отправляются upstream как исполняемые инструменты GigaChat; соответствующий
-`tool_choice` игнорируется.
-
 ## Сопоставление OpenAI
 
 Инструменты OpenAI Chat Completions и Responses нормализуются по `type`.

@@ -108,11 +108,6 @@ normalized parity.
 В остальных случаях прокси передаёт явно заданный клиентом reasoning effort и
 не применяет глобальный default или override.
 
-При `GPT2GIGA_DISABLE_BUILTIN_TOOL_MAPPING=True` прокси принимает provider
-built-in tools для совместимости, но не сопоставляет и не отправляет их в
-GigaChat как executable tools. Пользовательские function tools продолжают
-работать.
-
 Поля метаданных OpenAI, такие как `user`, `metadata`, `service_tier`,
 `safety_identifier`, `seed`, `prompt_cache_key` и `prompt_cache_retention`,
 принимаются и игнорируются там, где они классифицированы.

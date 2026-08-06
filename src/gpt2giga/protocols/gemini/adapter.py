@@ -93,7 +93,6 @@ class GeminiProtocolAdapter:
         model: str | None,
         context: RequestContext | None = None,
         stream: bool | None = None,
-        builtin_tool_mapping_enabled: bool = True,
     ) -> NormalizedChatRequest:
         """Convert a Gemini generateContent request body to normalized form."""
         _validate_generate_payload(payload)
@@ -102,16 +101,10 @@ class GeminiProtocolAdapter:
         )
         metadata, raw_extensions = _extensions(payload)
         raw_extensions.update(_gemini_protocol_extensions(payload))
-        unsupported_tools = _unsupported_gemini_tools(
-            payload.get("tools"),
-            builtin_tool_mapping_enabled=builtin_tool_mapping_enabled,
-        )
+        unsupported_tools = _unsupported_gemini_tools(payload.get("tools"))
         if unsupported_tools:
             raw_extensions["unsupportedTools"] = unsupported_tools
-        tools = _normalize_tools(
-            payload.get("tools"),
-            builtin_tool_mapping_enabled=builtin_tool_mapping_enabled,
-        )
+        tools = _normalize_tools(payload.get("tools"))
         function_calling_config = _function_calling_config(
             _mapping_value(payload, "toolConfig", "tool_config")
         )
@@ -149,7 +142,6 @@ class GeminiProtocolAdapter:
         *,
         model: str | None,
         context: RequestContext | None = None,
-        builtin_tool_mapping_enabled: bool = True,
     ) -> NormalizedTokenCountRequest:
         """Convert Gemini countTokens input to a normalized operation."""
         source = payload.get("generateContentRequest")
@@ -165,7 +157,6 @@ class GeminiProtocolAdapter:
             model=model,
             context=context,
             stream=False,
-            builtin_tool_mapping_enabled=builtin_tool_mapping_enabled,
         )
         return NormalizedTokenCountRequest(
             id=context.request_id if context is not None else None,
@@ -680,11 +671,7 @@ def _gemini_role_to_normalized(role: str) -> str:
     return normalized or "user"
 
 
-def _normalize_tools(
-    value: Any,
-    *,
-    builtin_tool_mapping_enabled: bool = True,
-) -> list[NormalizedTool]:
+def _normalize_tools(value: Any) -> list[NormalizedTool]:
     if not isinstance(value, list):
         return []
 
@@ -692,8 +679,7 @@ def _normalize_tools(
     for tool in value:
         if not isinstance(tool, Mapping):
             continue
-        if builtin_tool_mapping_enabled:
-            tools.extend(_gemini_builtin_tools_to_normalized(tool))
+        tools.extend(_gemini_builtin_tools_to_normalized(tool))
         declarations = _part_value(
             tool,
             "functionDeclarations",
@@ -733,11 +719,7 @@ def _gemini_builtin_tools_to_normalized(
     return normalized_tools
 
 
-def _unsupported_gemini_tools(
-    value: Any,
-    *,
-    builtin_tool_mapping_enabled: bool = True,
-) -> list[dict[str, Any]]:
+def _unsupported_gemini_tools(value: Any) -> list[dict[str, Any]]:
     if not isinstance(value, list):
         return []
     unsupported_tools = []
@@ -748,10 +730,7 @@ def _unsupported_gemini_tools(
             key: item
             for key, item in tool.items()
             if key not in _GEMINI_FUNCTION_DECLARATION_KEYS
-            and (
-                not builtin_tool_mapping_enabled
-                or normalize_gigachat_builtin_tool_type(key) is None
-            )
+            and normalize_gigachat_builtin_tool_type(key) is None
         }
         if tool_extensions:
             unsupported_tools.append(tool_extensions)

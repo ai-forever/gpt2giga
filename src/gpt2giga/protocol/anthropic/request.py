@@ -48,11 +48,6 @@ def _convert_anthropic_output_format_to_openai_response_format(
     return response_format
 
 
-def _is_anthropic_structured_output_request(data: Dict[str, Any]) -> bool:
-    """Return true when request asks for Anthropic JSON structured output."""
-    return _convert_anthropic_output_format_to_openai_response_format(data) is not None
-
-
 _ANTHROPIC_NAMED_BUILTIN_TOOL_TYPES = {
     "WebSearch": "web_search",
     "WebFetch": "url_content_extraction",
@@ -60,18 +55,13 @@ _ANTHROPIC_NAMED_BUILTIN_TOOL_TYPES = {
 }
 
 
-def _convert_anthropic_tools_to_openai(
-    tools: List[Dict],
-    *,
-    builtin_tool_mapping_enabled: bool = True,
-) -> List[Dict]:
+def _convert_anthropic_tools_to_openai(tools: List[Dict]) -> List[Dict]:
     """Convert Anthropic tool definitions to OpenAI format."""
     openai_tools: List[Dict] = []
     for tool in tools:
         builtin_tool = _convert_anthropic_builtin_tool_to_openai(tool)
         if builtin_tool is not None:
-            if builtin_tool_mapping_enabled:
-                openai_tools.append(builtin_tool)
+            openai_tools.append(builtin_tool)
             continue
 
         function_tool = _convert_anthropic_function_tool_to_openai(tool)
@@ -315,8 +305,6 @@ def _convert_user_blocks(
 def _build_openai_data_from_anthropic_request(
     data: Dict[str, Any],
     logger: Any,
-    *,
-    builtin_tool_mapping_enabled: bool = True,
 ) -> Dict[str, Any]:
     """Translate an Anthropic Messages request into an OpenAI-style payload."""
     data = sanitize_anthropic_messages_parameters(data)
@@ -354,10 +342,7 @@ def _build_openai_data_from_anthropic_request(
             openai_data["reasoning_effort"] = "low"
 
     if "tools" in data and data["tools"]:
-        openai_data["tools"] = _convert_anthropic_tools_to_openai(
-            data["tools"],
-            builtin_tool_mapping_enabled=builtin_tool_mapping_enabled,
-        )
+        openai_data["tools"] = _convert_anthropic_tools_to_openai(data["tools"])
         if not openai_data["tools"]:
             openai_data.pop("tools", None)
 
@@ -371,7 +356,7 @@ def _build_openai_data_from_anthropic_request(
                     tool_name,
                     data.get("tools"),
                 )
-                if builtin_tool_choice and builtin_tool_mapping_enabled:
+                if builtin_tool_choice:
                     openai_data["tool_choice"] = {"type": builtin_tool_choice}
                 elif not builtin_tool_choice:
                     openai_data["function_call"] = {"name": tool_name}

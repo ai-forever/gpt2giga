@@ -121,9 +121,7 @@ class FakeAppState:
         self.gigachat_client = client
         self.model_concurrency_limiter = limiter
         self.response_processor = ResponseProcessor(logger=logger)
-        self.config = ProxyConfig(
-            proxy=ProxySettings(structured_output_mode="function_call")
-        )
+        self.config = ProxyConfig(proxy=ProxySettings())
         self.logger = logger
 
 
@@ -150,7 +148,6 @@ def _make_app(
     app.state.request_transformer = transformer or RecordingTransformer()
     app.state.config = ProxyConfig(
         proxy=ProxySettings(
-            structured_output_mode="function_call",
             harness_model_key=harness_model_key,
         )
     )

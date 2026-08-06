@@ -99,25 +99,11 @@ class ProxySettings(BaseSettings):
         default=None,
         description="Seconds to wait for a free per-model slot; None means wait indefinitely.",
     )
-    structured_output_mode: Literal["function_call", "native"] = Field(
-        default="function_call",
-        description=(
-            "Режим structured output: function_call использует совместимый "
-            "function-calling fallback, native передает response_format в GigaChat"
-        ),
-    )
     gigachat_api_mode: Literal["v1", "v2"] = Field(
         default="v1",
         description=(
             "Backend contract for GigaChat chat-like requests: v1 uses "
             "legacy chat methods, v2 uses chat completion resource methods"
-        ),
-    )
-    disable_builtin_tool_mapping: bool = Field(
-        default=False,
-        description=(
-            "Disable mapping provider built-in tools to GigaChat Chat Completions "
-            "v2 built-in tools; custom function tools remain enabled."
         ),
     )
     normalization_mode: Literal["off", "shadow", "on"] = Field(
@@ -407,13 +393,6 @@ class ProxySettings(BaseSettings):
     def normalize_mode(cls, value):
         if isinstance(value, str):
             return value.strip().upper()
-        return value
-
-    @field_validator("structured_output_mode", mode="before")
-    @classmethod
-    def normalize_structured_output_mode(cls, value):
-        if isinstance(value, str):
-            return value.strip().lower()
         return value
 
     @field_validator(

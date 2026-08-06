@@ -64,15 +64,11 @@ class AnthropicProtocolAdapter:
         payload: Mapping[str, Any],
         *,
         context: RequestContext | None = None,
-        builtin_tool_mapping_enabled: bool = True,
     ) -> NormalizedChatRequest:
         """Convert one Anthropic Messages payload to normalized form."""
         original = dict(payload)
         data = sanitize_anthropic_messages_parameters(original)
-        tools = _normalize_tools(
-            data.get("tools"),
-            builtin_tool_mapping_enabled=builtin_tool_mapping_enabled,
-        )
+        tools = _normalize_tools(data.get("tools"))
         tool_choice, parallel_tool_calls = _normalize_tool_choice(
             data.get("tool_choice"),
             tools=tools,
@@ -99,13 +95,11 @@ class AnthropicProtocolAdapter:
         payload: Mapping[str, Any],
         *,
         context: RequestContext | None = None,
-        builtin_tool_mapping_enabled: bool = True,
     ) -> NormalizedTokenCountRequest:
         """Convert Anthropic count_tokens input to a normalized operation."""
         chat = self.messages_to_normalized(
             {**dict(payload), "stream": False},
             context=context,
-            builtin_tool_mapping_enabled=builtin_tool_mapping_enabled,
         )
         return NormalizedTokenCountRequest(
             id=context.request_id if context is not None else None,
@@ -273,11 +267,7 @@ def _tool_result_content(value: Any) -> Any:
     return "\n".join(texts)
 
 
-def _normalize_tools(
-    value: Any,
-    *,
-    builtin_tool_mapping_enabled: bool,
-) -> list[NormalizedTool]:
+def _normalize_tools(value: Any) -> list[NormalizedTool]:
     if not isinstance(value, list):
         return []
     tools: list[NormalizedTool] = []
@@ -286,8 +276,7 @@ def _normalize_tools(
             continue
         builtin = _builtin_tool(item)
         if builtin is not None:
-            if builtin_tool_mapping_enabled:
-                tools.append(builtin)
+            tools.append(builtin)
             continue
         name = item.get("name")
         if not isinstance(name, str) or not name:

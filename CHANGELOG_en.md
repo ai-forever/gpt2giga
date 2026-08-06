@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 - **Global reasoning workarounds**: removed `GPT2GIGA_ENABLE_REASONING` / `--proxy.enable-reasoning` and `GPT2GIGA_DISABLE_REASONING` / `--proxy.disable-reasoning`; reasoning is now controlled only by explicit client request parameters.
+- **Structured-output fallback**: removed `GPT2GIGA_STRUCTURED_OUTPUT_MODE` / `--proxy.structured-output-mode` and JSON Schema conversion into a synthetic function call; structured output now always uses native GigaChat `response_format`.
+- **Global built-in tool opt-out**: removed `GPT2GIGA_DISABLE_BUILTIN_TOOL_MAPPING` / `--proxy.disable-builtin-tool-mapping`; recognized provider built-in tools on GigaChat v2 routes are now always mapped when requested by the client.
 
 ## [0.3.0] - 2026-08-03
 
