@@ -8,6 +8,7 @@ from fastapi.responses import StreamingResponse
 
 from gpt2giga.app_state import get_gigachat_client, get_model_concurrency_limiter
 from gpt2giga.common.api_mode import resolve_gigachat_api_mode
+from gpt2giga.common.client_params import ClientCompatibilityError
 from gpt2giga.common.conversation import (
     commit_anthropic_response,
     stitch_anthropic_stream,
@@ -49,8 +50,14 @@ from gpt2giga.protocols.anthropic import (
     AnthropicStreamProjector,
     normalized_chat_response_to_anthropic,
 )
+from gpt2giga.protocols.normalized import BridgeMatrixAdmissionError, PublicProtocol
 from gpt2giga.providers.gigachat import GigaChatProviderAdapter
 from gpt2giga.providers.gigachat.model_resolution import resolve_upstream_model
+from gpt2giga.providers.profiles import (
+    ProviderAliasError,
+    ProviderKind,
+    ProviderModelInventory,
+)
 from gpt2giga.sinks.observability.anthropic import (
     emit_anthropic_message_observability,
     observe_anthropic_message_stream,
@@ -314,7 +321,10 @@ async def _try_normalized_count_tokens(
     request_options: Any,
 ) -> dict[str, int] | None:
     settings = _normalization_settings(request)
-    if settings is None or settings.normalization_mode != "on":
+    external_route = _external_provider_route(request, payload.get("model"))
+    if external_route is None and (
+        settings is None or settings.normalization_mode != "on"
+    ):
         return None
     try:
         context = get_request_context()
@@ -324,12 +334,17 @@ async def _try_normalized_count_tokens(
         )
         response = await _provider_adapter(
             request,
+            normalized_request=normalized_request.input,
             request_options=request_options,
             pinned_model=_claude_cli_model_override(request),
         ).count_tokens(normalized_request, context=context)
         return {"input_tokens": response.input_tokens}
     except Exception as exc:
-        if not settings.legacy_chat_fallback:
+        if (
+            external_route is not None
+            or settings is None
+            or not settings.legacy_chat_fallback
+        ):
             raise
         _log_normalized_fallback(request, exc, event="anthropic_count_tokens_fallback")
         return None
@@ -345,11 +360,11 @@ async def _try_normalized_non_stream_message(
     pinned_model: str | None,
 ) -> dict[str, Any] | None:
     settings = _normalization_settings(request)
+    external_route = _external_provider_route(request, payload.get("model"))
     if (
-        settings is None
-        or settings.normalization_mode != "on"
-        or payload.get("stream", False)
-    ):
+        external_route is None
+        and (settings is None or settings.normalization_mode != "on")
+    ) or payload.get("stream", False):
         return None
     try:
         context = get_request_context()
@@ -359,6 +374,7 @@ async def _try_normalized_non_stream_message(
         )
         normalized_response = await _provider_adapter(
             request,
+            normalized_request=normalized_request,
             request_options=request_options,
             pinned_model=pinned_model,
         ).chat(normalized_request, context=context)
@@ -376,7 +392,11 @@ async def _try_normalized_non_stream_message(
         )
         return result
     except Exception as exc:
-        if not settings.legacy_chat_fallback:
+        if (
+            external_route is not None
+            or settings is None
+            or not settings.legacy_chat_fallback
+        ):
             raise
         _log_normalized_fallback(request, exc, event="anthropic_message_fallback")
         return None
@@ -392,11 +412,11 @@ async def _try_normalized_stream_message(
     pinned_model: str | None,
 ) -> StreamingResponse | None:
     settings = _normalization_settings(request)
+    external_route = _external_provider_route(request, payload.get("model"))
     if (
-        settings is None
-        or settings.normalization_mode != "on"
-        or not payload.get("stream", False)
-    ):
+        external_route is None
+        and (settings is None or settings.normalization_mode != "on")
+    ) or not payload.get("stream", False):
         return None
     try:
         context = get_request_context()
@@ -406,6 +426,7 @@ async def _try_normalized_stream_message(
         )
         provider = _provider_adapter(
             request,
+            normalized_request=normalized_request,
             request_options=request_options,
             pinned_model=pinned_model,
             require_streaming=True,
@@ -438,7 +459,11 @@ async def _try_normalized_stream_message(
         )
         return StreamingResponse(body_iterator, media_type="text/event-stream")
     except Exception as exc:
-        if not settings.legacy_chat_fallback:
+        if (
+            external_route is not None
+            or settings is None
+            or not settings.legacy_chat_fallback
+        ):
             raise
         _log_normalized_fallback(request, exc, event="anthropic_stream_fallback")
         return None
@@ -447,11 +472,29 @@ async def _try_normalized_stream_message(
 def _provider_adapter(
     request: Request,
     *,
+    normalized_request: Any,
     request_options: Any,
     pinned_model: str | None,
     require_streaming: bool = False,
-) -> GigaChatProviderAdapter:
+) -> Any:
     state = request.app.state
+    route = _external_provider_route(request, normalized_request.model)
+    if route is not None:
+        try:
+            return state.bridge_provider_runtime.adapter_for(
+                normalized_request,
+                api_mode=resolve_gigachat_api_mode(request),
+                public_protocol=PublicProtocol.ANTHROPIC_MESSAGES,
+            )
+        except BridgeMatrixAdmissionError as exc:
+            error = exc.as_public_error()
+            raise ClientCompatibilityError(
+                error["message"],
+                provider="anthropic",
+                param=error["param"],
+                code=error["code"],
+                error_type=error["type"],
+            ) from exc
     return GigaChatProviderAdapter(
         config=state.config,
         request_transformer=state.request_transformer,
@@ -463,6 +506,29 @@ def _provider_adapter(
         provider_label="anthropic",
         forced_model=pinned_model,
     )
+
+
+def _external_provider_route(request: Request, model: Any) -> Any | None:
+    """Resolve an external alias without changing dynamic GigaChat behavior."""
+    runtime = getattr(request.app.state, "bridge_provider_runtime", None)
+    if runtime is None:
+        return None
+    try:
+        route = runtime.registry.resolve(model)
+    except ProviderAliasError as exc:
+        if any(
+            profile.provider_kind is ProviderKind.GIGACHAT
+            and profile.model_inventory is ProviderModelInventory.DYNAMIC
+            for profile in runtime.registry.config.profiles
+        ):
+            return None
+        raise ClientCompatibilityError(
+            exc.message,
+            provider="anthropic",
+            param="model",
+            code=exc.code,
+        ) from exc
+    return route if route.provider_kind is not ProviderKind.GIGACHAT else None
 
 
 def _anthropic_adapter(request: Request) -> AnthropicProtocolAdapter:

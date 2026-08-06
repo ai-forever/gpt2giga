@@ -392,6 +392,79 @@ def test_responses_adapter_treats_reasoning_none_as_disabled(
     assert normalized.reasoning is None
 
 
+def test_responses_adapter_accepts_codex_noop_metadata_and_developer_role() -> None:
+    normalized = OpenAIProtocolAdapter().responses_to_normalized(
+        {
+            "model": "bridge/chat-only",
+            "input": [
+                {
+                    "type": "message",
+                    "role": "developer",
+                    "content": [{"type": "input_text", "text": "Use tools."}],
+                },
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "Inspect."}],
+                },
+            ],
+            "reasoning": {},
+            "store": False,
+            "include": ["reasoning.encrypted_content"],
+            "prompt_cache_key": "session-1",
+            "client_metadata": {"session_id": "session-1"},
+            "parallel_tool_calls": False,
+        }
+    )
+
+    assert [message.role for message in normalized.messages] == [
+        "developer",
+        "user",
+    ]
+    assert normalized.reasoning is None
+    assert normalized.response_state is None
+    assert normalized.parallel_tool_calls is False
+
+
+def test_responses_adapter_flattens_namespaced_function_call_history() -> None:
+    normalized = OpenAIProtocolAdapter().responses_to_normalized(
+        {
+            "model": "bridge/chat-only",
+            "input": [
+                {
+                    "type": "function_call",
+                    "namespace": "multi_agent_v1",
+                    "name": "spawn_agent",
+                    "call_id": "call-1",
+                    "arguments": '{"task":"inspect"}',
+                },
+                {
+                    "type": "function_call_output",
+                    "call_id": "call-1",
+                    "output": "done",
+                },
+            ],
+            "tools": [
+                {
+                    "type": "namespace",
+                    "name": "multi_agent_v1",
+                    "tools": [
+                        {
+                            "type": "function",
+                            "name": "spawn_agent",
+                            "parameters": {"type": "object"},
+                            "strict": False,
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+
+    assert normalized.messages[0].tool_calls[0].name == ("multi_agent_v1__spawn_agent")
+    assert normalized.messages[1].tool_call_id == "call-1"
+
+
 def test_responses_adapter_preserves_previous_response_state() -> None:
     normalized = OpenAIProtocolAdapter().responses_to_normalized(
         {
@@ -413,7 +486,6 @@ def test_responses_adapter_preserves_previous_response_state() -> None:
     [
         "api_key",
         "base_url",
-        "parallel_tool_calls",
         "provider",
         "web_search_options",
     ],

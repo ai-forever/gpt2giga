@@ -3,7 +3,8 @@
 - Date: 2026-08-03
 - Status: accepted for gpt2giga 0.3
 - Decision owners: provider-profiles and integration lanes
-- Schema revisions: `gpt2giga.provider-profiles.v1`, `gpt2giga.provider-profiles.v2`
+- Schema revisions: `gpt2giga.provider-profiles.v1`,
+  `gpt2giga.provider-profiles.v2`, `gpt2giga.provider-profiles.v3`
 - Execution-context revision: `gpt2giga.execution-context.v1`
 
 ## Context
@@ -50,6 +51,10 @@ policy. It never replaces or filters the provider-visible catalog. A new model
 returned by the provider remains visible even when its effective capabilities
 are still `unknown`.
 
+When the registry contains no GigaChat profile, the immutable enabled aliases
+are the complete static catalog. OpenAI, Anthropic, and Gemini model-list
+projections plus `/bridge/models` use those aliases without provider I/O.
+
 ### Versioned schema
 
 Version 1 remains the static-alias compatibility schema. Version 2 adds an
@@ -67,14 +72,20 @@ profiles:
     model_inventory: dynamic
 ```
 
+Version 3 adds an exact `capabilities.features` and token-limit contract for
+each alias. Every enabled `openai_compatible` alias requires it before an
+adapter can be composed. Version 3 may omit `credential_env` only for an
+intentionally keyless upstream.
+
 Unknown schema fields are rejected. `schema_version`, `profile_id`,
-`provider_kind`, destination, policy references, and credential environment
-name are required. Version 1 and static version 2 profiles require at least one
-model alias. Version 2 permits `model_inventory: dynamic` only for one GigaChat
-profile; its alias list is optional policy and never filters discovery.
-Plaintext secret fields do not exist in the schema. `profile_id` and
-`public_alias` are globally unique after Unicode and whitespace validation;
-aliases are case-sensitive and are never guessed.
+`provider_kind`, destination, and policy references are required. Versions 1
+and 2 also require the credential environment name. Version 1 and every static
+profile require at least one model alias. Versions 2 and 3 permit
+`model_inventory: dynamic` only for one GigaChat profile; its alias list is
+optional policy and never filters discovery. Plaintext secret fields do not
+exist in the schema. `profile_id` and `public_alias` are globally unique after
+Unicode and whitespace validation; aliases are case-sensitive and are never
+guessed.
 
 ### Canonical digest and immutability
 

@@ -136,6 +136,8 @@ class OpenAICompatibleUpstreamProfile(NormalizedBaseModel):
     @property
     def chat_completions_url(self) -> str:
         """Return the exact Chat Completions endpoint."""
+        if urlsplit(self.base_url).path.rstrip("/").endswith("/chat/completions"):
+            return self.base_url
         return _endpoint_url(self.base_url, "chat/completions")
 
     @property
@@ -406,6 +408,22 @@ class OpenAICompatibleProviderAdapter:
             payload=None,
         )
         return parse_openai_compatible_models(payload)
+
+    def admit(
+        self,
+        request: NormalizedChatRequest,
+        *,
+        downstream: DownstreamProtocol,
+        downstream_capabilities: Collection[BridgeFeature] = (),
+        input_token_count: int | None = None,
+    ) -> ProtocolBridgeAdmission:
+        """Validate one request synchronously before a public response starts."""
+        return self._admit(
+            request,
+            downstream=downstream,
+            downstream_capabilities=downstream_capabilities,
+            input_token_count=input_token_count,
+        )
 
     def _admit(
         self,

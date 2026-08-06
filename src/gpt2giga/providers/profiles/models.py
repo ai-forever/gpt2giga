@@ -9,14 +9,28 @@ import re
 import unicodedata
 from urllib.parse import urlsplit, urlunsplit
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_serializer,
+    field_validator,
+    model_validator,
+)
+
+from gpt2giga.protocols.normalized.loss_matrix import BridgeFeature
 
 
 PROVIDER_PROFILE_SCHEMA_V1 = "gpt2giga.provider-profiles.v1"
 PROVIDER_PROFILE_SCHEMA_V2 = "gpt2giga.provider-profiles.v2"
-PROVIDER_PROFILE_SCHEMA_VERSION = PROVIDER_PROFILE_SCHEMA_V2
+PROVIDER_PROFILE_SCHEMA_V3 = "gpt2giga.provider-profiles.v3"
+PROVIDER_PROFILE_SCHEMA_VERSION = PROVIDER_PROFILE_SCHEMA_V3
 SUPPORTED_PROVIDER_PROFILE_SCHEMA_VERSIONS = frozenset(
-    {PROVIDER_PROFILE_SCHEMA_V1, PROVIDER_PROFILE_SCHEMA_V2}
+    {
+        PROVIDER_PROFILE_SCHEMA_V1,
+        PROVIDER_PROFILE_SCHEMA_V2,
+        PROVIDER_PROFILE_SCHEMA_V3,
+    }
 )
 _ENV_NAME = re.compile(r"^[A-Z_][A-Z0-9_]*$")
 _IDENTIFIER = re.compile(r"^[a-z0-9](?:[a-z0-9._-]{0,254}[a-z0-9])?$")
@@ -55,12 +69,43 @@ class _ProfileModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
 
+class ProviderTokenLimits(_ProfileModel):
+    """Declare reviewed token limits for one exact upstream model."""
+
+    context_window: int = Field(gt=0)
+    max_input_tokens: int | None = Field(default=None, gt=0)
+    max_output_tokens: int | None = Field(default=None, gt=0)
+
+    @model_validator(mode="after")
+    def _validate_bounds(self) -> ProviderTokenLimits:
+        for field_name in ("max_input_tokens", "max_output_tokens"):
+            value = getattr(self, field_name)
+            if value is not None and value > self.context_window:
+                raise ValueError(f"{field_name} cannot exceed context_window")
+        return self
+
+
+class ProviderModelCapabilities(_ProfileModel):
+    """Bind reviewed normalized features and limits to one model alias."""
+
+    features: frozenset[BridgeFeature] = Field(min_length=1)
+    limits: ProviderTokenLimits
+
+    @field_serializer("features")
+    def _serialize_features(
+        self,
+        value: frozenset[BridgeFeature],
+    ) -> list[str]:
+        return sorted(feature.value for feature in value)
+
+
 class ProviderModelAlias(_ProfileModel):
     """Bind one public model name to an exact upstream model and capability."""
 
     public_alias: str = Field(min_length=1, max_length=256)
     upstream_model: str = Field(min_length=1, max_length=256)
     capability_profile: str = Field(min_length=1, max_length=256)
+    capabilities: ProviderModelCapabilities | None = None
     support_status: ProviderSupportStatus
     enabled: bool = True
     deprecated: bool = False
@@ -77,7 +122,7 @@ class ProviderProfile(_ProfileModel):
     profile_id: str = Field(min_length=1, max_length=256)
     provider_kind: ProviderKind
     base_url: str
-    credential_env: str = Field(min_length=1, max_length=256)
+    credential_env: str | None = Field(default=None, min_length=1, max_length=256)
     network_policy_ref: str = Field(min_length=1, max_length=256)
     tls_policy_ref: str = Field(min_length=1, max_length=256)
     allow_loopback: bool = False
@@ -94,7 +139,9 @@ class ProviderProfile(_ProfileModel):
 
     @field_validator("credential_env")
     @classmethod
-    def _validate_credential_env(cls, value: str) -> str:
+    def _validate_credential_env(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         if value != value.strip() or not _ENV_NAME.fullmatch(value):
             raise ValueError("must be an uppercase environment variable name")
         return value
@@ -128,7 +175,9 @@ class ProviderProfile(_ProfileModel):
 class ProviderProfileConfig(_ProfileModel):
     """Versioned, immutable provider configuration loaded once at startup."""
 
-    schema_version: str = PROVIDER_PROFILE_SCHEMA_VERSION
+    # Keep omitted versions on the last implicit schema for compatibility.
+    # New executable OpenAI-compatible profiles must opt into v3 explicitly.
+    schema_version: str = PROVIDER_PROFILE_SCHEMA_V2
     profiles: tuple[ProviderProfile, ...] = Field(min_length=1)
 
     @model_validator(mode="before")
@@ -136,15 +185,24 @@ class ProviderProfileConfig(_ProfileModel):
     def _validate_versioned_fields(cls, value: object) -> object:
         if not isinstance(value, dict):
             return value
-        schema_version = value.get("schema_version", PROVIDER_PROFILE_SCHEMA_VERSION)
-        if schema_version != PROVIDER_PROFILE_SCHEMA_V1:
-            return value
+        schema_version = value.get("schema_version", PROVIDER_PROFILE_SCHEMA_V2)
         profiles = value.get("profiles")
-        if isinstance(profiles, (list, tuple)) and any(
-            isinstance(profile, dict) and "model_inventory" in profile
-            for profile in profiles
-        ):
-            raise ValueError("model_inventory requires provider-profiles.v2")
+        if isinstance(profiles, (list, tuple)):
+            if schema_version == PROVIDER_PROFILE_SCHEMA_V1 and any(
+                isinstance(profile, dict) and "model_inventory" in profile
+                for profile in profiles
+            ):
+                raise ValueError("model_inventory requires provider-profiles.v2")
+            if schema_version in {
+                PROVIDER_PROFILE_SCHEMA_V1,
+                PROVIDER_PROFILE_SCHEMA_V2,
+            } and any(
+                isinstance(model, dict) and "capabilities" in model
+                for profile in profiles
+                if isinstance(profile, dict)
+                for model in profile.get("models", ())
+            ):
+                raise ValueError("model capabilities require provider-profiles.v3")
         return value
 
     @field_validator("schema_version")
@@ -162,6 +220,30 @@ class ProviderProfileConfig(_ProfileModel):
             profile.model_inventory is not None for profile in self.profiles
         ):
             raise ValueError("model_inventory requires provider-profiles.v2")
+        if self.schema_version in {
+            PROVIDER_PROFILE_SCHEMA_V1,
+            PROVIDER_PROFILE_SCHEMA_V2,
+        }:
+            if any(
+                model.capabilities is not None
+                for profile in self.profiles
+                for model in profile.models
+            ):
+                raise ValueError("model capabilities require provider-profiles.v3")
+            if any(profile.credential_env is None for profile in self.profiles):
+                raise ValueError(
+                    "credential_env is required before provider-profiles.v3"
+                )
+        if self.schema_version == PROVIDER_PROFILE_SCHEMA_V3:
+            for profile in self.profiles:
+                if profile.provider_kind is not ProviderKind.OPENAI_COMPATIBLE:
+                    continue
+                for model in profile.models:
+                    if model.enabled and model.capabilities is None:
+                        raise ValueError(
+                            "enabled OpenAI-compatible aliases require reviewed "
+                            "capabilities"
+                        )
         profile_ids = [profile.profile_id for profile in self.profiles]
         if len(profile_ids) != len(set(profile_ids)):
             raise ValueError("provider configuration contains duplicate profile ids")

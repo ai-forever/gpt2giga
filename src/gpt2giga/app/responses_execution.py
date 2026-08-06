@@ -334,6 +334,7 @@ class NormalizedBridgeResponsesExecutor:
         )
 
         async def emit_stream():
+            pending_message_end = None
             try:
                 async for event in provider_adapter.stream_chat(
                     normalized_request,
@@ -341,7 +342,17 @@ class NormalizedBridgeResponsesExecutor:
                     is_disconnected=request.is_disconnected,
                     logger=getattr(state, "logger", None),
                 ):
+                    if event.type == "message_end":
+                        if pending_message_end is not None:
+                            raise ResponsesStreamProtocolError(
+                                "duplicate normalized message_end"
+                            )
+                        pending_message_end = event
+                        continue
                     for frame in projector.project(event):
+                        yield frame
+                if pending_message_end is not None:
+                    for frame in projector.project(pending_message_end):
                         yield frame
                 if await request.is_disconnected():
                     return
@@ -409,6 +420,12 @@ async def _normalized_provider_adapter(
 
 def _reject_unprofiled_injected_semantics(normalized_request) -> None:
     """Fail closed when a test-only route has no capability evidence."""
+    if normalized_request.parallel_tool_calls is not None:
+        raise ClientCompatibilityError(
+            "The selected bridge route cannot preserve this semantic.",
+            param="parallel_tool_calls",
+            code="unsupported_semantic",
+        )
     response_state = normalized_request.response_state
     if response_state is not None:
         if response_state.previous_response_id is not None:

@@ -17,6 +17,10 @@ from gpt2giga.providers.gigachat.client import (
     create_gigachat_client,
 )
 from gpt2giga.providers.gigachat.pool import GigaChatClientPool
+from gpt2giga.providers.profiles.static_catalog import (
+    STATIC_REGISTRY_PROFILE_ID,
+    static_registry_catalog_snapshot,
+)
 from gpt2giga.sinks.logs.factory import create_traffic_log_sink, flush_traffic_log_sink
 from gpt2giga.sinks.logs.query import (
     close_traffic_log_query_store,
@@ -107,6 +111,14 @@ async def lifespan(app: FastAPI):
         app.state.bridge_shutting_down = True
         await _close_runtime_dependencies(app, attachment_processor)
         raise
+    static_catalog = static_registry_catalog_snapshot(app.state.provider_registry)
+    if static_catalog is not None:
+        app.state.static_model_catalog_snapshot = static_catalog
+        app.state.model_catalog_readiness = {
+            "state": "fresh",
+            "provider_profile_id": STATIC_REGISTRY_PROFILE_ID,
+            "inventory_revision": app.state.provider_registry.config_revision,
+        }
     app.state.bridge_shutting_down = False
 
     logger.info("Application startup complete")

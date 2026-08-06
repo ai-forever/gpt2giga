@@ -152,12 +152,28 @@ class ProviderRegistry:
             raise ProviderAliasError("alias_disabled")
         raise ProviderAliasError("alias_unknown")  # pragma: no cover
 
-    def credential_for(self, route: ResolvedProviderRoute) -> str:
+    def credential_for(self, route: ResolvedProviderRoute) -> str | None:
         """Resolve a credential only after an exact route has been selected."""
         current = self.resolve(route.public_alias)
         if current != route:
             raise ProviderAliasError("route_revision_mismatch")
         return self._loaded.credential_for(route.profile_id)
+
+    def profile_for(self, route: ResolvedProviderRoute) -> ProviderProfile:
+        """Return the exact secret-free profile bound to a resolved route."""
+        current = self.resolve(route.public_alias)
+        if current != route:
+            raise ProviderAliasError("route_revision_mismatch")
+        profile, _model = self._entries[route.public_alias]
+        return profile
+
+    def model_alias_for(self, route: ResolvedProviderRoute) -> ProviderModelAlias:
+        """Return the exact model declaration bound to a resolved route."""
+        current = self.resolve(route.public_alias)
+        if current != route:
+            raise ProviderAliasError("route_revision_mismatch")
+        _profile, model = self._entries[route.public_alias]
+        return model
 
     def public_aliases(self) -> tuple[str, ...]:
         """Return enabled aliases in deterministic lexical order."""

@@ -131,6 +131,16 @@ def test_reviewed_profile_rejects_noncanonical_revisions():
         )
 
 
+def test_full_chat_completions_url_is_not_appended_twice():
+    profile = _profile().model_copy(
+        update={"base_url": "https://upstream.invalid/v1/chat/completions"}
+    )
+
+    assert profile.chat_completions_url == (
+        "https://upstream.invalid/v1/chat/completions"
+    )
+
+
 def _request(*, stream=False):
     return NormalizedChatRequest(
         model="fixture-model",

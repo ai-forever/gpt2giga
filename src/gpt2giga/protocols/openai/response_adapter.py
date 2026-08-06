@@ -8,6 +8,7 @@ from datetime import datetime
 from typing import Any
 
 from gpt2giga.core.context import RequestContext
+from gpt2giga.common.tools import split_gigachat_tool_name
 from gpt2giga.protocol.response.processor import ResponseProcessor
 from gpt2giga.protocols.normalized import (
     NormalizedChoice,
@@ -83,7 +84,7 @@ def normalized_chat_response_to_responses(
         )
         output.extend(hosted_items)
         text = _responses_message_text(message)
-        if text or not hosted_items:
+        if text or (not hosted_items and not message.tool_calls):
             output.append(
                 {
                     "type": "message",
@@ -100,7 +101,13 @@ def normalized_chat_response_to_responses(
                     ],
                 }
             )
-        output.extend(_responses_tool_calls(message, choice_index=choice_index))
+        output.extend(
+            _responses_tool_calls(
+                message,
+                choice_index=choice_index,
+                request_tools=request_payload.get("tools"),
+            )
+        )
 
     metadata = dict(request_payload.get("metadata") or {})
     metadata.update(_metadata_to_openai(response))
@@ -197,20 +204,26 @@ def _responses_tool_calls(
     message: NormalizedMessage,
     *,
     choice_index: int,
+    request_tools: Any,
 ) -> list[dict[str, Any]]:
     items = []
     for call_index, tool_call in enumerate(message.tool_calls):
         call_id = tool_call.id or f"call_{choice_index}_{call_index}"
-        items.append(
-            {
-                "id": f"fc_{call_id}",
-                "type": "function_call",
-                "status": "completed",
-                "call_id": call_id,
-                "name": tool_call.name or "",
-                "arguments": _responses_tool_arguments_to_json(tool_call.arguments),
-            }
+        name, namespace = split_gigachat_tool_name(
+            tool_call.name or "",
+            request_tools=request_tools,
         )
+        item = {
+            "id": f"fc_{call_id}",
+            "type": "function_call",
+            "status": "completed",
+            "call_id": call_id,
+            "name": name,
+            "arguments": _responses_tool_arguments_to_json(tool_call.arguments),
+        }
+        if namespace is not None:
+            item["namespace"] = namespace
+        items.append(item)
     return items
 
 

@@ -15,6 +15,7 @@ from gpt2giga.providers.profiles import (
     INSPECT_SCHEMA_VERSION,
     READINESS_SCHEMA_VERSION,
     ROUTE_SUPPORT_MATRIX_SCHEMA_VERSION,
+    PROVIDER_PROFILE_SCHEMA_V2,
     LoadedProviderProfileSet,
     ProviderMachineContracts,
     ProviderProfileConfig,
@@ -38,6 +39,7 @@ PROVIDERS = ("anthropic", "gemini", "gigachat", "openai_compatible")
 def _contracts() -> ProviderMachineContracts:
     config = ProviderProfileConfig.model_validate(
         {
+            "schema_version": PROVIDER_PROFILE_SCHEMA_V2,
             "profiles": [
                 {
                     "profile_id": "openai-main",
@@ -55,7 +57,7 @@ def _contracts() -> ProviderMachineContracts:
                         }
                     ],
                 }
-            ]
+            ],
         }
     )
     loaded = LoadedProviderProfileSet(

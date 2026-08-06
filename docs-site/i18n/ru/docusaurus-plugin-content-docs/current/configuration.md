@@ -254,8 +254,8 @@ Assistants или Threads.
 
 ## Флаги нормализованного слоя
 
-Режим нормализации управляет нормализованными путями OpenAI Chat Completions
-и Anthropic Messages и по умолчанию сохраняет прежнее поведение для этих маршрутов:
+Режим нормализации управляет встроенными GigaChat-путями OpenAI Chat
+Completions и Anthropic Messages и по умолчанию сохраняет их прежнее поведение:
 
 ```dotenv
 GPT2GIGA_NORMALIZATION_MODE=off
@@ -274,16 +274,22 @@ GPT2GIGA_LEGACY_CHAT_FALLBACK=True
   Gemini `countTokens` на нормализованный путь с откатом к прежнему до старта
   ответа, если откат включён.
 
+Эти флаги не переопределяют явный внешний маршрут. Модель из профиля
+`openai_compatible` всегда проходит через нормализованный адаптер для Responses,
+Chat Completions, Anthropic Messages и Gemini GenerateContent. Отката на
+постороннюю модель GigaChat нет.
+
 Gemini GenerateContent использует свой выделенный адаптер Gemini-в-нормализованное и
 путь провайдера GigaChat независимо от этих флагов. Его принятое bridge-
 подмножество использует типизированные inline-изображения и полностью
 смоделированные поля functions/JSON Schema; safety settings, cached content,
 files, неподдерживаемые tools и прочая несмоделированная семантика остаются
 явными и отклоняются admission для OpenAI-compatible bridge до provider I/O.
-OpenAI Responses остаётся на прежнем пути выполнения. Семантика Anthropic вне
-normalized v1, включая prompt caching, computer use, files и неподдерживаемые
-блоки контента, не объявляется поддержанной нормализованным путём и может
-использовать прежний fallback.
+OpenAI Responses для встроенного маршрута GigaChat остаётся на существующем
+пути, а для явного внешнего алиаса использует нормализованный bridge. Семантика
+Anthropic вне normalized v1, включая prompt caching, computer use, files и
+неподдерживаемые блоки контента, не перенаправляется на другого провайдера, а
+отклоняется.
 
 Подробное описание моделей и текущих путей выполнения: [Нормализованные сообщения](./architecture/normalized-messages.md).
 

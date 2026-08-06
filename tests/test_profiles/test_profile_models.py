@@ -11,6 +11,7 @@ from gpt2giga.providers.profiles import (
     PROVIDER_KINDS,
     PROVIDER_PROFILE_SCHEMA_V1,
     PROVIDER_PROFILE_SCHEMA_V2,
+    PROVIDER_PROFILE_SCHEMA_V3,
     PROVIDER_PROFILE_SCHEMA_VERSION,
     ProviderModelInventory,
     ProviderModelAlias,
@@ -124,6 +125,38 @@ def test_only_one_dynamic_gigachat_inventory_is_unambiguous() -> None:
 
     with pytest.raises(ValidationError, match="multiple dynamic model inventories"):
         ProviderProfileConfig(profiles=(dynamic, second))
+
+
+def test_v3_binds_explicit_openai_compatible_capabilities_and_allows_keyless() -> None:
+    payload = _config().model_dump(mode="json", exclude_none=True)
+    profile = payload["profiles"][0]
+    profile.update(
+        {
+            "provider_kind": "openai_compatible",
+            "base_url": "https://upstream.example/v1/chat/completions",
+            "network_policy_ref": "public-openai",
+        }
+    )
+    profile.pop("credential_env")
+
+    with pytest.raises(ValidationError, match="reviewed capabilities"):
+        ProviderProfileConfig.model_validate(payload)
+
+    profile["models"][0]["capabilities"] = {
+        "features": ["roles", "text", "context_token_limits"],
+        "limits": {
+            "context_window": 8192,
+            "max_input_tokens": 6144,
+            "max_output_tokens": 2048,
+        },
+    }
+    config = ProviderProfileConfig.model_validate(payload)
+
+    assert config.schema_version == PROVIDER_PROFILE_SCHEMA_V3
+    model = config.profiles[0].models[0]
+    assert model.capabilities is not None
+    assert model.capabilities.limits.context_window == 8192
+    assert config.profiles[0].credential_env is None
 
 
 def test_canonical_digest_is_key_order_independent_and_array_order_sensitive() -> None:

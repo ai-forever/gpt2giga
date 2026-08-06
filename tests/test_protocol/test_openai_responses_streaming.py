@@ -131,6 +131,52 @@ def test_responses_stream_projector_orders_tool_lifecycle() -> None:
     }
 
 
+def test_responses_stream_projector_restores_namespace_tool_identity() -> None:
+    projector = ResponsesStreamProjector(
+        request_payload={
+            "input": "inspect",
+            "model": "bridge/codex-test",
+            "stream": True,
+            "tools": [
+                {
+                    "type": "namespace",
+                    "name": "multi_agent_v1",
+                    "tools": [
+                        {
+                            "type": "function",
+                            "name": "spawn_agent",
+                            "parameters": {"type": "object"},
+                        }
+                    ],
+                }
+            ],
+        },
+        requested_model="bridge/codex-test",
+        response_id="fixture",
+        created_at=100,
+    )
+    frames = projector.project(NormalizedStreamEvent(type="message_start", sequence=0))
+    frames.extend(
+        projector.project(
+            NormalizedStreamEvent(
+                type="tool_call_start",
+                sequence=1,
+                tool_call=NormalizedToolCall(
+                    id="call_agent",
+                    name="multi_agent_v1__spawn_agent",
+                    arguments='{"task":"inspect"}',
+                ),
+                finish_reason="tool_calls",
+            )
+        )
+    )
+    projector.finish()
+
+    item = _event_data(frames[-2])["item"]
+    assert item["name"] == "spawn_agent"
+    assert item["namespace"] == "multi_agent_v1"
+
+
 def test_responses_stream_projector_projects_gigachat_hosted_results() -> None:
     projector = ResponsesStreamProjector(
         request_payload={

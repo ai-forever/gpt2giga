@@ -35,7 +35,7 @@ the illustrative upstream model ids and policy references with values reviewed
 for your deployment.
 
 ```yaml
-schema_version: gpt2giga.provider-profiles.v2
+schema_version: gpt2giga.provider-profiles.v3
 profiles:
   - profile_id: gigachat-main
     provider_kind: gigachat
@@ -49,12 +49,34 @@ profiles:
     provider_kind: openai_compatible
     base_url: https://gateway.example.com/v1
     credential_env: OPENAI_COMPATIBLE_API_KEY
-    network_policy_ref: public-openai-compatible
+    network_policy_ref: public-openai
     tls_policy_ref: system-default
     models:
       - public_alias: openai-compatible/default
         upstream_model: exact-reviewed-model-id
         capability_profile: openai-compatible-default-v1
+        capabilities:
+          features:
+            - roles
+            - ordered_content_parts
+            - text
+            - generation_controls
+            - function_tools
+            - tool_choice
+            - parallel_tool_calls
+            - tool_results
+            - stream_deltas
+            - stream_terminal_events
+            - stop_reason
+            - usage
+            - model_identity
+            - request_error_classes
+            - cancellation
+            - context_token_limits
+          limits:
+            context_window: 32768
+            max_input_tokens: 28672
+            max_output_tokens: 4096
         support_status: technical_preview
 
   - profile_id: anthropic-main
@@ -94,26 +116,31 @@ GEMINI_API_KEY=<secret-from-service-manager>
 
 Do not add `api_key`, bearer tokens, arbitrary headers, client certificates, or
 TLS-disable flags to the profile file. They are not schema fields and make
-startup fail. `credential_env` must be an uppercase environment-variable name;
-the enabled profile fails preflight when that variable has no value.
+startup fail. When present, `credential_env` must be an uppercase
+environment-variable name; the enabled profile fails preflight when that
+variable has no value. Schema v3 also permits an intentionally keyless profile
+by omitting the field.
 
 ## Schema reference
 
 | Field | Contract |
 |---|---|
-| `schema_version` | `gpt2giga.provider-profiles.v1` or `gpt2giga.provider-profiles.v2`; new files should use v2. |
+| `schema_version` | `gpt2giga.provider-profiles.v1`, `.v2`, or `.v3`; new executable OpenAI-compatible profiles must use v3. |
 | `profile_id` | Unique lowercase reviewed identifier. |
 | `provider_kind` | `gigachat`, `openai_compatible`, `anthropic`, or `gemini`. |
-| `base_url` | Canonical public HTTPS destination without userinfo, query, or fragment. |
-| `credential_env` | Name of the environment variable holding the credential; never its value. |
+| `base_url` | Canonical public HTTPS destination without userinfo, query, or fragment. An OpenAI-compatible profile may use an API base or the full `/chat/completions` endpoint. |
+| `credential_env` | Name of the environment variable holding the credential; never its value. Required by v1/v2 and optional in v3 for a deliberately keyless upstream. |
 | `network_policy_ref` | Identifier from the application's reviewed network-policy catalog. |
 | `tls_policy_ref` | Identifier from the application's reviewed TLS-policy catalog. |
 | `allow_loopback` | Defaults to `false`; permits only an explicit HTTP loopback development profile. |
-| `model_inventory` | v2-only. `dynamic` is allowed only for one GigaChat profile; omitted means static aliases. |
+| `model_inventory` | v2 and v3. `dynamic` is allowed only for one GigaChat profile; omitted means static aliases. |
 | `models` | Exact public-alias bindings. Required for static profiles; optional aliases for dynamic GigaChat. |
 | `public_alias` | Globally unique, case-sensitive model name accepted from clients. |
 | `upstream_model` | Exact provider-owned model id; clients cannot override it. |
 | `capability_profile` | Reviewed semantic capability set used during admission. |
+| `capabilities` | v3 reviewed execution contract. Required for every enabled `openai_compatible` alias. |
+| `capabilities.features` | Exact normalized features verified for this upstream model. Unsupported features must be omitted. |
+| `capabilities.limits` | Exact `context_window` plus optional `max_input_tokens` and `max_output_tokens`. |
 | `support_status` | `stable`, `technical_preview`, or `blocked`. |
 | `enabled` | Defaults to `true`; a disabled alias is not resolvable. |
 | `deprecated` | Defaults to `false`; marks an alias without silently remapping it. |
@@ -129,8 +156,13 @@ Version 1 remains accepted unchanged and requires a non-empty `models` list for
 every profile. It does not accept `model_inventory`. Version 2 makes provider
 discovery explicit: `model_inventory: dynamic` removes the need to enumerate
 every credential-visible GigaChat model, while any configured `models` entries
-remain exact aliases rather than an inventory filter. Static external-provider
-profiles continue to require at least one alias.
+remain exact aliases rather than an inventory filter. Version 3 adds the
+per-alias `capabilities` and token-limit contract used for executable
+OpenAI-compatible routes and permits a keyless upstream. Static profiles
+continue to require at least one alias.
+
+For a complete Chat Completions-only setup for Codex, Claude Code, and Gemini
+CLI, see [Chat Completions bridge](chat-completions-bridge.md).
 
 ## Alias and revision behavior
 

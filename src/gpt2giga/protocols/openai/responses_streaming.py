@@ -7,6 +7,7 @@ import time
 from typing import Any
 
 from gpt2giga.common.sources import merge_inline_data
+from gpt2giga.common.tools import split_gigachat_tool_name
 from gpt2giga.protocol.response.processor import ResponseProcessor
 from gpt2giga.protocols.normalized import (
     NormalizedStreamEvent,
@@ -44,6 +45,7 @@ class ResponsesStreamProjector:
         self._text_item: dict[str, Any] | None = None
         self._text_output_index: int | None = None
         self._tool_item: dict[str, Any] | None = None
+        self._tool_provider_name: str | None = None
         self._tool_output_index: int | None = None
         self._hosted_message: dict[str, Any] = {
             "tool_executions": [],
@@ -210,15 +212,22 @@ class ResponsesStreamProjector:
             if not start:
                 raise ResponsesStreamProtocolError("tool delta received before start")
             call_id = tool_call.id or "call_0"
+            self._tool_provider_name = tool_call.name or ""
+            visible_name, namespace = split_gigachat_tool_name(
+                self._tool_provider_name,
+                request_tools=self.request_payload.get("tools"),
+            )
             self._tool_output_index = len(self._output)
             self._tool_item = {
                 "id": f"fc_{call_id}",
                 "type": "function_call",
                 "status": "in_progress",
                 "call_id": call_id,
-                "name": tool_call.name or "",
+                "name": visible_name,
                 "arguments": "",
             }
+            if namespace is not None:
+                self._tool_item["namespace"] = namespace
             self._output.append(self._tool_item)
             frames.append(
                 self._frame(
@@ -235,9 +244,9 @@ class ResponsesStreamProjector:
         if tool_call.id and tool_call.id != self._tool_item["call_id"]:
             raise ResponsesStreamProtocolError("tool call id changed during stream")
         if tool_call.name:
-            if self._tool_item["name"] and tool_call.name != self._tool_item["name"]:
+            if self._tool_provider_name and tool_call.name != self._tool_provider_name:
                 raise ResponsesStreamProtocolError("tool name changed during stream")
-            self._tool_item["name"] = tool_call.name
+            self._tool_provider_name = tool_call.name
         arguments = _arguments_delta(tool_call.arguments)
         if arguments:
             self._tool_item["arguments"] += arguments

@@ -27,19 +27,27 @@ from gpt2giga.openapi_specs.gemini import (
 from gpt2giga.openapi_tags import OPENAPI_TAG_GEMINI_GENERATE_CONTENT
 from gpt2giga.protocols.gemini import (
     GeminiProtocolAdapter,
+    gemini_invalid_request,
     normalized_chat_response_to_gemini,
     normalized_stream_event_to_gemini_sse,
 )
 from gpt2giga.protocols.normalized import (
+    BridgeMatrixAdmissionError,
     NormalizedChoice,
     NormalizedError,
     NormalizedMessage,
     NormalizedResponse,
     NormalizedStreamEvent,
     NormalizedUsage,
+    PublicProtocol,
 )
 from gpt2giga.providers.gigachat import GigaChatProviderAdapter
 from gpt2giga.providers.gigachat.model_resolution import resolve_upstream_model
+from gpt2giga.providers.profiles import (
+    ProviderAliasError,
+    ProviderKind,
+    ProviderModelInventory,
+)
 from gpt2giga.sinks.base import is_sink_active
 from gpt2giga.sinks.observability.factory import emit_observability_event
 from gpt2giga.sinks.observability.llm import (
@@ -63,7 +71,10 @@ async def generate_content(model: str, request: Request):
     """Create a Gemini-compatible content response."""
     data = await read_request_json(request)
     requested_model = _normalize_model_name(model)
-    pinned_model = _gemini_cli_model_override(request)
+    external_route = _external_provider_route(request, requested_model)
+    pinned_model = (
+        None if external_route is not None else _gemini_cli_model_override(request)
+    )
     effective_model = pinned_model or requested_model
     update_request_context(
         model_requested=requested_model,
@@ -85,6 +96,7 @@ async def generate_content(model: str, request: Request):
     request_options = extract_gigachat_request_options(request, data)
     provider_adapter = _provider_adapter(
         request,
+        normalized_request=normalized_request,
         request_options=request_options,
         forced_model=pinned_model,
     )
@@ -121,7 +133,10 @@ async def stream_generate_content(model: str, request: Request):
     """Create a Gemini-compatible content stream."""
     data = await read_request_json(request)
     requested_model = _normalize_model_name(model)
-    pinned_model = _gemini_cli_model_override(request)
+    external_route = _external_provider_route(request, requested_model)
+    pinned_model = (
+        None if external_route is not None else _gemini_cli_model_override(request)
+    )
     effective_model = pinned_model or requested_model
     update_request_context(
         model_requested=requested_model,
@@ -143,6 +158,7 @@ async def stream_generate_content(model: str, request: Request):
     request_options = extract_gigachat_request_options(request, data)
     provider_adapter = _provider_adapter(
         request,
+        normalized_request=normalized_request,
         request_options=request_options,
         require_streaming=True,
         forced_model=pinned_model,
@@ -319,21 +335,30 @@ async def count_tokens(model: str, request: Request):
     """Count prompt tokens for a Gemini-compatible request."""
     data = await read_request_json(request)
     requested_model = _normalize_model_name(model)
-    pinned_model = _gemini_cli_model_override(request)
-    resolution = resolve_upstream_model(
-        {"model": requested_model},
-        request.app.state.config,
-        forced_model=pinned_model,
-        provider="gemini",
+    external_route = _external_provider_route(request, requested_model)
+    pinned_model = (
+        None if external_route is not None else _gemini_cli_model_override(request)
     )
-    effective_model = resolution.model
+    if external_route is not None:
+        resolution = None
+        effective_model = requested_model
+        model_source = "provider_profile"
+    else:
+        resolution = resolve_upstream_model(
+            {"model": requested_model},
+            request.app.state.config,
+            forced_model=pinned_model,
+            provider="gemini",
+        )
+        effective_model = resolution.model
+        model_source = resolution.source
     update_request_context(
         model_requested=requested_model,
         model_effective=effective_model,
         metadata={
             "protocol": "gemini",
             "api_format": "count_tokens",
-            "model_source": resolution.source,
+            "model_source": model_source,
         },
     )
     normalized = await _try_normalized_count_tokens(
@@ -343,6 +368,11 @@ async def count_tokens(model: str, request: Request):
     )
     if normalized is not None:
         return normalized
+    if resolution is None:  # pragma: no cover - external count rejects above
+        raise gemini_invalid_request(
+            "The selected Chat Completions upstream has no exact token-count API.",
+            param="model",
+        )
     texts = _extract_texts_for_token_count(data)
     if not texts:
         return {"totalTokens": 0}
@@ -369,8 +399,16 @@ async def _try_normalized_count_tokens(
     effective_model: str,
 ) -> dict[str, int] | None:
     settings = _normalization_settings(request)
-    if settings is None or settings.normalization_mode != "on":
+    external_route = _external_provider_route(request, effective_model)
+    if external_route is None and (
+        settings is None or settings.normalization_mode != "on"
+    ):
         return None
+    if external_route is not None:
+        raise gemini_invalid_request(
+            "The selected Chat Completions upstream has no exact token-count API.",
+            param="model",
+        )
     try:
         context = get_request_context()
         normalized_request = _gemini_adapter(request).count_tokens_to_normalized(
@@ -381,12 +419,13 @@ async def _try_normalized_count_tokens(
         request_options = extract_gigachat_request_options(request, payload)
         response = await _provider_adapter(
             request,
+            normalized_request=normalized_request.input,
             request_options=request_options,
             forced_model=_gemini_cli_model_override(request),
         ).count_tokens(normalized_request, context=context)
         return {"totalTokens": response.input_tokens}
     except Exception as exc:
-        if not settings.legacy_chat_fallback:
+        if settings is None or not settings.legacy_chat_fallback:
             raise
         _log_normalized_fallback(request, exc, event="gemini_count_tokens_fallback")
         return None
@@ -395,11 +434,26 @@ async def _try_normalized_count_tokens(
 def _provider_adapter(
     request: Request,
     *,
+    normalized_request: Any,
     request_options: Any,
     require_streaming: bool = False,
     forced_model: str | None = None,
-) -> GigaChatProviderAdapter:
+) -> Any:
     state = request.app.state
+    route = _external_provider_route(request, normalized_request.model)
+    if route is not None:
+        try:
+            return state.bridge_provider_runtime.adapter_for(
+                normalized_request,
+                api_mode=resolve_gigachat_api_mode(request),
+                public_protocol=PublicProtocol.GEMINI_GENERATE_CONTENT,
+            )
+        except BridgeMatrixAdmissionError as exc:
+            error = exc.as_public_error()
+            raise gemini_invalid_request(
+                error["message"],
+                param=error["param"],
+            ) from exc
     return GigaChatProviderAdapter(
         config=state.config,
         request_transformer=state.request_transformer,
@@ -411,6 +465,24 @@ def _provider_adapter(
         provider_label="gemini",
         forced_model=forced_model,
     )
+
+
+def _external_provider_route(request: Request, model: Any) -> Any | None:
+    """Resolve an external alias without changing dynamic GigaChat behavior."""
+    runtime = getattr(request.app.state, "bridge_provider_runtime", None)
+    if runtime is None:
+        return None
+    try:
+        route = runtime.registry.resolve(model)
+    except ProviderAliasError as exc:
+        if any(
+            profile.provider_kind is ProviderKind.GIGACHAT
+            and profile.model_inventory is ProviderModelInventory.DYNAMIC
+            for profile in runtime.registry.config.profiles
+        ):
+            return None
+        raise gemini_invalid_request(exc.message, param="model") from exc
+    return route if route.provider_kind is not ProviderKind.GIGACHAT else None
 
 
 def _gemini_cli_model_override(request: Request) -> str | None:

@@ -253,8 +253,8 @@ on v2 routes. User function/local tools are mapped independently.
 
 ## Normalized layer flags
 
-The normalized mode controls the OpenAI Chat Completions and Anthropic Messages
-normalized paths and by default keeps the legacy behavior for these routes:
+The normalized mode controls the built-in GigaChat OpenAI Chat Completions and
+Anthropic Messages paths and by default keeps their legacy behavior:
 
 ```dotenv
 GPT2GIGA_NORMALIZATION_MODE=off
@@ -272,15 +272,22 @@ the legacy path. Configure `GPT2GIGA_LEGACY_CHAT_FALLBACK` independently.
   Gemini `countTokens` to the normalized path, with a legacy fallback before the
   response starts if the fallback is enabled.
 
+These flags do not override an explicit external provider route. A model that
+resolves to an `openai_compatible` profile always uses the normalized adapter
+for Responses, Chat Completions, Anthropic Messages, and Gemini
+GenerateContent. It never falls back to an unrelated GigaChat model.
+
 Gemini GenerateContent uses its own dedicated Gemini-to-normalized adapter and
 GigaChat provider path independently of these flags. Its admitted bridge subset
 uses typed inline images and fully modeled function/JSON Schema fields; safety
 settings, cached content, files, unsupported tools, and other unmodeled
 semantics remain explicit and fail OpenAI-compatible bridge admission before
-provider I/O. OpenAI Responses stays on the legacy execution path. Anthropic
-semantics outside normalized v1, including prompt caching, computer use, files,
-and unsupported content blocks, are not claimed by the normalized path and
-remain eligible for the legacy fallback.
+provider I/O. OpenAI Responses for the built-in GigaChat route keeps its
+existing execution path; Responses for an explicit external alias uses the
+normalized bridge. Anthropic semantics outside normalized v1, including prompt
+caching, computer use, files, and unsupported content blocks, are not claimed
+by an external route and are rejected rather than redirected to another
+provider.
 
 A detailed description of the models and current execution paths: [Normalized messages architecture](./architecture/normalized-messages.md).
 

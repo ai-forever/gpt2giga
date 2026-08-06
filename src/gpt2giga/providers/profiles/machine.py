@@ -76,6 +76,22 @@ class ProviderMachineContracts:
                             "public_alias": model.public_alias,
                             "upstream_model": model.upstream_model,
                             "capability_profile": model.capability_profile,
+                            **(
+                                {
+                                    "capabilities": {
+                                        "features": sorted(
+                                            feature.value
+                                            for feature in model.capabilities.features
+                                        ),
+                                        "limits": model.capabilities.limits.model_dump(
+                                            mode="json",
+                                            exclude_none=True,
+                                        ),
+                                    }
+                                }
+                                if model.capabilities is not None
+                                else {}
+                            ),
                             "support_status": model.support_status.value,
                             "enabled": model.enabled,
                             "deprecated": model.deprecated,

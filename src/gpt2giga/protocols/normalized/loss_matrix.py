@@ -651,6 +651,26 @@ def _build_bridge_loss_matrix() -> BridgeLossMatrix:
                     ),
                 }[protocol]
                 provider_window = "gigachat-python>=0.2.3,<0.3.0"
+            elif (
+                provider is UpstreamProvider.OPENAI_COMPATIBLE
+                and protocol is not PublicProtocol.OPENAI_CHAT_COMPLETIONS
+            ):
+                status = BridgeSupportStatus.TECHNICAL_PREVIEW
+                reason_ids = ("openai_chat_completions_facade",)
+                evidence_ids = (
+                    {
+                        PublicProtocol.OPENAI_RESPONSES: (
+                            "E2E-RESPONSES-TO-OPENAI-COMPATIBLE-2026-08-06"
+                        ),
+                        PublicProtocol.ANTHROPIC_MESSAGES: (
+                            "E2E-ANTHROPIC-TO-OPENAI-COMPATIBLE-2026-08-06"
+                        ),
+                        PublicProtocol.GEMINI_GENERATE_CONTENT: (
+                            "E2E-GEMINI-TO-OPENAI-COMPATIBLE-2026-08-06"
+                        ),
+                    }[protocol],
+                )
+                provider_window = "openai-chat-completions-v1"
             else:
                 status = BridgeSupportStatus.BLOCKED
                 reason_ids = ("route_not_integrated",)

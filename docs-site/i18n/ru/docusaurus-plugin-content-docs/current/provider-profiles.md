@@ -32,7 +32,7 @@ GPT2GIGA_CONFIG=/etc/gpt2giga/providers.yaml
 идентификаторы моделей и политик значениями, проверенными для вашей установки.
 
 ```yaml
-schema_version: gpt2giga.provider-profiles.v2
+schema_version: gpt2giga.provider-profiles.v3
 profiles:
   - profile_id: gigachat-main
     provider_kind: gigachat
@@ -46,12 +46,34 @@ profiles:
     provider_kind: openai_compatible
     base_url: https://gateway.example.com/v1
     credential_env: OPENAI_COMPATIBLE_API_KEY
-    network_policy_ref: public-openai-compatible
+    network_policy_ref: public-openai
     tls_policy_ref: system-default
     models:
       - public_alias: openai-compatible/default
         upstream_model: exact-reviewed-model-id
         capability_profile: openai-compatible-default-v1
+        capabilities:
+          features:
+            - roles
+            - ordered_content_parts
+            - text
+            - generation_controls
+            - function_tools
+            - tool_choice
+            - parallel_tool_calls
+            - tool_results
+            - stream_deltas
+            - stream_terminal_events
+            - stop_reason
+            - usage
+            - model_identity
+            - request_error_classes
+            - cancellation
+            - context_token_limits
+          limits:
+            context_window: 32768
+            max_input_tokens: 28672
+            max_output_tokens: 4096
         support_status: technical_preview
 
   - profile_id: anthropic-main
@@ -90,28 +112,32 @@ GEMINI_API_KEY=<secret-from-service-manager>
 ```
 
 Не добавляйте в профиль `api_key`, bearer-токены, произвольные заголовки,
-клиентские сертификаты или флаги отключения TLS. Схема их не принимает.
-`credential_env` должен содержать имя переменной окружения в верхнем регистре.
-Если переменная не задана, включённый профиль не пройдёт предварительную
-проверку.
+клиентские сертификаты или флаги отключения TLS. Схема их не принимает. Если
+`credential_env` задан, он должен содержать имя переменной окружения в верхнем
+регистре. При отсутствии значения включённый профиль не пройдёт предварительную
+проверку. В схеме v3 поле можно не указывать для намеренно открытого upstream
+без ключа.
 
 ## Поля профиля
 
 | Поле | Назначение |
 |---|---|
-| `schema_version` | Версия схемы: `gpt2giga.provider-profiles.v1` или `gpt2giga.provider-profiles.v2`. Для новых файлов используйте v2. |
+| `schema_version` | Версия схемы: `gpt2giga.provider-profiles.v1`, `.v2` или `.v3`. Для исполняемых OpenAI-compatible профилей используйте v3. |
 | `profile_id` | Уникальный идентификатор профиля в нижнем регистре. |
 | `provider_kind` | Тип провайдера: `gigachat`, `openai_compatible`, `anthropic` или `gemini`. |
-| `base_url` | Канонический публичный HTTPS-адрес без `userinfo`, строки запроса и фрагмента. |
-| `credential_env` | Имя переменной окружения с секретом, но не сам секрет. |
+| `base_url` | Канонический публичный HTTPS-адрес без `userinfo`, строки запроса и фрагмента. В OpenAI-compatible профиле можно указать базу API или полный `/chat/completions` endpoint. |
+| `credential_env` | Имя переменной окружения с секретом, но не сам секрет. Обязательно в v1/v2 и необязательно в v3 для upstream без ключа. |
 | `network_policy_ref` | Идентификатор разрешённой сетевой политики приложения. |
 | `tls_policy_ref` | Идентификатор разрешённой политики TLS. |
 | `allow_loopback` | По умолчанию `false`. Разрешает HTTP только для явно заданного локального профиля разработки. |
-| `model_inventory` | Только для v2. Значение `dynamic` разрешено одному профилю GigaChat; без поля используются статические алиасы. |
+| `model_inventory` | Для v2 и v3. Значение `dynamic` разрешено одному профилю GigaChat; без поля используются статические алиасы. |
 | `models` | Точные привязки публичных алиасов. Обязательны для статических профилей и необязательны для динамического профиля GigaChat. |
 | `public_alias` | Уникальное и регистрозависимое имя модели, которое видит клиент. |
 | `upstream_model` | Точный идентификатор модели у провайдера. Клиент не может его изменить. |
 | `capability_profile` | Проверенный набор поддерживаемых возможностей. |
+| `capabilities` | Проверенный контракт исполнения v3. Обязателен для каждого включённого алиаса `openai_compatible`. |
+| `capabilities.features` | Точный список возможностей, проверенных для этой модели upstream. Неподдерживаемые возможности не указываются. |
+| `capabilities.limits` | Точный `context_window` и необязательные `max_input_tokens` и `max_output_tokens`. |
 | `support_status` | Статус `stable`, `technical_preview` или `blocked`. |
 | `enabled` | По умолчанию `true`. Отключённый алиас недоступен. |
 | `deprecated` | По умолчанию `false`. Помечает устаревший алиас, но не перенаправляет его на другую модель. |
@@ -122,7 +148,7 @@ GEMINI_API_KEY=<secret-from-service-manager>
 явно включённого loopback-профиля разработки. Редиректы и адрес из клиентского
 запроса не участвуют в маршрутизации.
 
-### Отличия схем v1 и v2
+### Отличия схем v1, v2 и v3
 
 Схема v1 остаётся совместимой: в каждом профиле должен быть непустой список
 `models`, а поле `model_inventory` не поддерживается.
@@ -131,6 +157,15 @@ GEMINI_API_KEY=<secret-from-service-manager>
 доступные учётной записи GigaChat. Если список `models` всё же задан, его алиасы
 не фильтруют каталог провайдера. Для остальных провайдеров по-прежнему нужен
 хотя бы один статический алиас.
+
+Схема v3 добавляет проверенные для каждого алиаса `capabilities` и токенные
+лимиты. Этот контракт обязателен для исполняемого OpenAI-compatible маршрута.
+Также v3 разрешает профиль upstream без ключа. Статическому профилю по-прежнему
+нужен хотя бы один алиас.
+
+Полная настройка сервера только с Chat Completions для Codex, Claude Code и
+Gemini CLI приведена в разделе
+[«Мост Chat Completions»](chat-completions-bridge.md).
 
 ## Алиасы и ревизии
 

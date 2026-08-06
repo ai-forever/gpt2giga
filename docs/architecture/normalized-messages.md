@@ -18,7 +18,9 @@ dedicated Gemini-to-normalized adapter in the main execution path.
   their protocol adapters, normalized models, and `GigaChatProviderAdapter`; a
   legacy fallback is available before the response starts via
   `GPT2GIGA_LEGACY_CHAT_FALLBACK=True`.
-- OpenAI Responses is still executed through legacy route transforms.
+- OpenAI Responses keeps the existing GigaChat execution path for built-in
+  GigaChat models. An exact alias from an `openai_compatible` provider profile
+  is normalized and executed through the bound Chat Completions adapter.
 - Gemini GenerateContent and streamGenerateContent are executed through
   `GeminiProtocolAdapter`, normalized models, and `GigaChatProviderAdapter`
   independently of the OpenAI Chat normalization flags. Their admitted request,
@@ -26,11 +28,13 @@ dedicated Gemini-to-normalized adapter in the main execution path.
   image contracts are frozen by Gemini golden fixtures.
 - Debug endpoints can translate between the `openai`, `anthropic`, `normalized`, and
   `gigachat` formats for protected admin workflows.
-- Explicitly admitted OpenAI-compatible and vLLM profiles can use the normalized
-  Chat Completions adapter. It is an internal execution component, not a public
-  route switch.
-- Anthropic requests, responses, SSE, and token counting project directly
-  through the normalized layer.
+- Explicitly admitted OpenAI-compatible and vLLM profiles use the normalized
+  Chat Completions adapter as the public route switch for their exact aliases.
+  Responses, Chat Completions, Anthropic Messages, and Gemini GenerateContent
+  share that execution owner.
+- Anthropic requests, responses, and SSE project directly through the
+  normalized layer. Exact token counting is available only when the selected
+  provider exposes that capability; a Chat Completions-only route rejects it.
 - The admitted Gemini subset uses typed image references and
   `NormalizedTokenCountRequest` for `countTokens`. Provider selection comes
   from the profile, not the client request.
@@ -247,10 +251,12 @@ observability:
 - Responses output items are collapsed into an assistant message and tool calls for
   LLM spans.
 
-Execution of `/responses` stays in the legacy route path:
-`gpt2giga/routers/openai/responses.py` uses the existing GigaChat v1/v2
-request transformers and response processor. So the normalized Responses helper
-is currently needed for consistent observability, not for the main execution path.
+For the built-in GigaChat route, `/responses` keeps the existing GigaChat v1/v2
+request transformers and response processor. When the requested model resolves
+to an explicit `openai_compatible` alias, the same router sends the normalized
+request through `OpenAICompatibleProviderAdapter` and projects the normalized
+response or stream back to Responses. Stateful Responses-only semantics remain
+outside that Chat Completions route and fail admission.
 
 ## Differences from Gemini GenerateContent
 
