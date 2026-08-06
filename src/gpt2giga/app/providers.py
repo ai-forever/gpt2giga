@@ -354,6 +354,7 @@ class BridgeProviderRuntime:
                 **capabilities.limits.model_dump(mode="python", exclude_none=True)
             ),
             network_policy_ref=profile.network_policy_ref,
+            upstream_stream_mode=profile.upstream_stream_mode or "sse",
             credential_reference_id=credential_reference_id,
             tls_policy_ref=profile.tls_policy_ref,
         )

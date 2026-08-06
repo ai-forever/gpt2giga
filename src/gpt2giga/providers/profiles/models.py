@@ -6,6 +6,7 @@ from enum import Enum
 import hashlib
 import json
 import re
+from typing import Literal
 import unicodedata
 from urllib.parse import urlsplit, urlunsplit
 
@@ -126,6 +127,7 @@ class ProviderProfile(_ProfileModel):
     network_policy_ref: str = Field(min_length=1, max_length=256)
     tls_policy_ref: str = Field(min_length=1, max_length=256)
     allow_loopback: bool = False
+    upstream_stream_mode: Literal["sse", "buffered"] | None = None
     model_inventory: ProviderModelInventory | None = None
     models: tuple[ProviderModelAlias, ...] = ()
 
@@ -159,6 +161,13 @@ class ProviderProfile(_ProfileModel):
             and self.provider_kind is not ProviderKind.GIGACHAT
         ):
             raise ValueError("only GigaChat profiles may use dynamic model inventory")
+        if (
+            self.upstream_stream_mode is not None
+            and self.provider_kind is not ProviderKind.OPENAI_COMPATIBLE
+        ):
+            raise ValueError(
+                "upstream_stream_mode is only supported for OpenAI-compatible profiles"
+            )
         if inventory is ProviderModelInventory.STATIC and not self.models:
             raise ValueError("static model inventory requires at least one model alias")
         aliases = [model.public_alias for model in self.models]
@@ -188,6 +197,14 @@ class ProviderProfileConfig(_ProfileModel):
         schema_version = value.get("schema_version", PROVIDER_PROFILE_SCHEMA_V2)
         profiles = value.get("profiles")
         if isinstance(profiles, (list, tuple)):
+            if schema_version in {
+                PROVIDER_PROFILE_SCHEMA_V1,
+                PROVIDER_PROFILE_SCHEMA_V2,
+            } and any(
+                isinstance(profile, dict) and "upstream_stream_mode" in profile
+                for profile in profiles
+            ):
+                raise ValueError("upstream_stream_mode requires provider-profiles.v3")
             if schema_version == PROVIDER_PROFILE_SCHEMA_V1 and any(
                 isinstance(profile, dict) and "model_inventory" in profile
                 for profile in profiles
@@ -224,6 +241,10 @@ class ProviderProfileConfig(_ProfileModel):
             PROVIDER_PROFILE_SCHEMA_V1,
             PROVIDER_PROFILE_SCHEMA_V2,
         }:
+            if any(
+                profile.upstream_stream_mode is not None for profile in self.profiles
+            ):
+                raise ValueError("upstream_stream_mode requires provider-profiles.v3")
             if any(
                 model.capabilities is not None
                 for profile in self.profiles

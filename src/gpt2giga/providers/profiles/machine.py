@@ -66,6 +66,11 @@ class ProviderMachineContracts:
                     "network_policy_ref": profile.network_policy_ref,
                     "tls_policy_ref": profile.tls_policy_ref,
                     "allow_loopback": profile.allow_loopback,
+                    **(
+                        {"upstream_stream_mode": profile.upstream_stream_mode}
+                        if profile.upstream_stream_mode is not None
+                        else {}
+                    ),
                     "model_inventory": (
                         profile.model_inventory.value
                         if profile.model_inventory is not None

@@ -63,7 +63,12 @@ class _NetworkAuthorizer:
         return authorization
 
 
-def _profile(*, credential=True, features=frozenset(BridgeFeature)):
+def _profile(
+    *,
+    credential=True,
+    features=frozenset(BridgeFeature),
+    upstream_stream_mode="sse",
+):
     return openai_compatible_profile(
         profile_id="vllm-fixture",
         revision="fixture-r1",
@@ -81,6 +86,7 @@ def _profile(*, credential=True, features=frozenset(BridgeFeature)):
         ),
         credential_reference_id="a" * 64 if credential else None,
         network_policy_ref="egress:fixture",
+        upstream_stream_mode=upstream_stream_mode,
         timeout_seconds=2.0,
     )
 
@@ -468,6 +474,86 @@ async def test_adapter_streams_tool_events_usage_and_terminal_event():
     assert events[3].stop_reason == "tool_calls"
     assert events[4].usage.total_tokens == 11
     assert app.state.requests[0]["payload"]["stream_options"] == {"include_usage": True}
+
+
+async def test_buffered_stream_mode_synthesizes_legacy_tool_response_events():
+    observed = []
+
+    def handler(request):
+        observed.append(json.loads(request.content))
+        return httpx.Response(
+            200,
+            json={
+                "id": "chatcmpl-buffered",
+                "object": "chat.completion",
+                "created": 1_700_000_000,
+                "model": "fixture-model",
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {
+                            "role": "assistant",
+                            "content": "",
+                            "reasoning_content": "private provider reasoning",
+                            "tool_calls": [
+                                {
+                                    "id": "call-buffered",
+                                    "type": "function",
+                                    "function": {
+                                        "name": "lookup",
+                                        "arguments": '{"q":"ping"}',
+                                    },
+                                }
+                            ],
+                        },
+                        "finish_reason": "function_call",
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": 7,
+                    "completion_tokens": 3,
+                    "total_tokens": 10,
+                },
+            },
+        )
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    adapter = OpenAICompatibleProviderAdapter(
+        _profile(credential=False, upstream_stream_mode="buffered"),
+        credential=None,
+        authorize_network=_NetworkAuthorizer(),
+        http_client=client,
+    )
+
+    events = [
+        event
+        async for event in adapter.stream_chat(
+            _request(stream=True),
+            downstream=DownstreamProtocol.OPENAI,
+            downstream_capabilities=_all_downstream_capabilities(),
+            input_token_count=7,
+        )
+    ]
+    await client.aclose()
+
+    assert observed[0]["stream"] is False
+    assert "stream_options" not in observed[0]
+    assert [event.type for event in events] == [
+        "message_start",
+        "tool_call_start",
+        "message_end",
+        "usage",
+    ]
+    assert (
+        events[0].provider_metadata["openai_compatible"]["upstream_stream_mode"]
+        == "buffered"
+    )
+    assert events[1].tool_call.id == "call-buffered"
+    assert events[1].tool_call.arguments == '{"q":"ping"}'
+    assert events[1].tool_call.raw_extensions["index"] == 0
+    assert events[2].finish_reason == "function_call"
+    assert events[2].stop_reason == "tool_calls"
+    assert events[3].usage.total_tokens == 10
 
 
 async def test_parallel_stream_tool_calls_preserve_indexes_and_identity():

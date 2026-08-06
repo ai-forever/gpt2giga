@@ -159,6 +159,42 @@ def test_v3_binds_explicit_openai_compatible_capabilities_and_allows_keyless() -
     assert config.profiles[0].credential_env is None
 
 
+def test_v3_buffered_stream_mode_is_explicit_and_openai_compatible_only() -> None:
+    payload = _config().model_dump(mode="json", exclude_none=True)
+    profile = payload["profiles"][0]
+    profile.update(
+        {
+            "provider_kind": "openai_compatible",
+            "base_url": "https://upstream.example/v1/chat/completions",
+            "network_policy_ref": "public-openai",
+            "upstream_stream_mode": "buffered",
+        }
+    )
+    profile["models"][0]["capabilities"] = {
+        "features": ["roles", "text", "stream_deltas", "stream_terminal_events"],
+        "limits": {"context_window": 8192},
+    }
+
+    config = ProviderProfileConfig.model_validate(payload)
+
+    assert config.profiles[0].upstream_stream_mode == "buffered"
+    assert (
+        json.loads(config.canonical_json())["profiles"][0]["upstream_stream_mode"]
+        == "buffered"
+    )
+
+    legacy_payload = json.loads(json.dumps(payload))
+    legacy_payload["schema_version"] = PROVIDER_PROFILE_SCHEMA_V2
+    legacy_payload["profiles"][0]["models"][0].pop("capabilities")
+    with pytest.raises(ValidationError, match="requires provider-profiles.v3"):
+        ProviderProfileConfig.model_validate(legacy_payload)
+
+    other_provider = _config().model_dump(mode="json", exclude_none=True)
+    other_provider["profiles"][0]["upstream_stream_mode"] = "buffered"
+    with pytest.raises(ValidationError, match="only supported for OpenAI-compatible"):
+        ProviderProfileConfig.model_validate(other_provider)
+
+
 def test_canonical_digest_is_key_order_independent_and_array_order_sensitive() -> None:
     first = _config()
     reordered_input = {

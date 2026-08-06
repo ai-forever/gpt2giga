@@ -8,6 +8,7 @@ from typing import Any
 
 from fastapi.testclient import TestClient
 import httpx
+import pytest
 
 from gpt2giga.app.factory import create_app
 from gpt2giga.models.config import ProxyConfig
@@ -48,6 +49,7 @@ def _write_profile(
     path: Path,
     *,
     features: list[str] | None = None,
+    upstream_stream_mode: str | None = None,
 ) -> Path:
     payload = {
         "schema_version": "gpt2giga.provider-profiles.v3",
@@ -82,6 +84,8 @@ def _write_profile(
             }
         ],
     }
+    if upstream_stream_mode is not None:
+        payload["profiles"][0]["upstream_stream_mode"] = upstream_stream_mode
     path.write_text(json.dumps(payload), encoding="utf-8")
     return path
 
@@ -91,10 +95,12 @@ def _app(
     handler: Any,
     *,
     features: list[str] | None = None,
+    upstream_stream_mode: str | None = None,
 ):
     profile_path = _write_profile(
         tmp_path / "providers.json",
         features=features,
+        upstream_stream_mode=upstream_stream_mode,
     )
     app = create_app(ProxyConfig(config=str(profile_path)))
     app.state.openai_compatible_network_authorizer_factory = lambda _profile: (
@@ -590,12 +596,20 @@ def test_three_facades_complete_function_result_round_trip(tmp_path: Path) -> No
     }
 
 
-def test_three_facades_project_streaming_text(tmp_path: Path) -> None:
+@pytest.mark.parametrize("upstream_stream_mode", [None, "buffered"])
+def test_three_facades_project_streaming_text(
+    tmp_path: Path,
+    upstream_stream_mode: str | None,
+) -> None:
     observed: list[dict[str, Any]] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         payload = json.loads(request.content)
         observed.append(payload)
+        if upstream_stream_mode == "buffered":
+            assert payload["stream"] is False
+            assert "stream_options" not in payload
+            return httpx.Response(200, json=_chat_response())
         assert payload["stream"] is True
         assert payload["stream_options"] == {"include_usage": True}
         return httpx.Response(
@@ -604,7 +618,11 @@ def test_three_facades_project_streaming_text(tmp_path: Path) -> None:
             headers={"content-type": "text/event-stream"},
         )
 
-    app = _app(tmp_path, handler)
+    app = _app(
+        tmp_path,
+        handler,
+        upstream_stream_mode=upstream_stream_mode,
+    )
     with TestClient(app) as client:
         responses = client.post(
             "/v1/responses",
@@ -628,20 +646,33 @@ def test_three_facades_project_streaming_text(tmp_path: Path) -> None:
     assert anthropic.status_code == 200, anthropic.text
     assert gemini.status_code == 200, gemini.text
     assert "response.output_text.delta" in responses.text
-    assert "facade-" in responses.text and "stream" in responses.text
     assert "event: content_block_delta" in anthropic.text
-    assert "facade-" in anthropic.text and "stream" in anthropic.text
-    assert '"text": "facade-"' in gemini.text
-    assert '"text": "stream"' in gemini.text
+    if upstream_stream_mode == "buffered":
+        assert "facade-ok" in responses.text
+        assert "facade-ok" in anthropic.text
+        assert '"text": "facade-ok"' in gemini.text
+    else:
+        assert "facade-" in responses.text and "stream" in responses.text
+        assert "facade-" in anthropic.text and "stream" in anthropic.text
+        assert '"text": "facade-"' in gemini.text
+        assert '"text": "stream"' in gemini.text
     assert len(observed) == 3
 
 
-def test_three_facades_project_streaming_function_calls(tmp_path: Path) -> None:
+@pytest.mark.parametrize("upstream_stream_mode", [None, "buffered"])
+def test_three_facades_project_streaming_function_calls(
+    tmp_path: Path,
+    upstream_stream_mode: str | None,
+) -> None:
     observed: list[dict[str, Any]] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         payload = json.loads(request.content)
         observed.append(payload)
+        if upstream_stream_mode == "buffered":
+            assert payload["stream"] is False
+            assert "stream_options" not in payload
+            return httpx.Response(200, json=_chat_response(tool_call=True))
         assert payload["stream"] is True
         return httpx.Response(
             200,
@@ -654,7 +685,11 @@ def test_three_facades_project_streaming_function_calls(tmp_path: Path) -> None:
         "properties": {"q": {"type": "string"}},
         "required": ["q"],
     }
-    app = _app(tmp_path, handler)
+    app = _app(
+        tmp_path,
+        handler,
+        upstream_stream_mode=upstream_stream_mode,
+    )
     with TestClient(app) as client:
         responses = client.post(
             "/v1/responses",
@@ -701,10 +736,15 @@ def test_three_facades_project_streaming_function_calls(tmp_path: Path) -> None:
     assert "response.function_call_arguments.delta" in responses.text
     assert '"arguments": "{\\"q\\":\\"ping\\"}"' in responses.text
     assert '"type": "tool_use"' in anthropic.text
-    assert '"partial_json": "{\\"q\\":"' in anthropic.text
-    assert '"partial_json": "\\"ping\\"}"' in anthropic.text
-    assert '"input_tokens": 5' in anthropic.text
-    assert '"output_tokens": 2' in anthropic.text
+    if upstream_stream_mode == "buffered":
+        assert '"partial_json": "{\\"q\\":\\"ping\\"}"' in anthropic.text
+    else:
+        assert '"partial_json": "{\\"q\\":"' in anthropic.text
+        assert '"partial_json": "\\"ping\\"}"' in anthropic.text
+    expected_input_tokens = 2 if upstream_stream_mode == "buffered" else 5
+    expected_output_tokens = 1 if upstream_stream_mode == "buffered" else 2
+    assert f'"input_tokens": {expected_input_tokens}' in anthropic.text
+    assert f'"output_tokens": {expected_output_tokens}' in anthropic.text
     gemini_chunks = [
         json.loads(line.removeprefix("data: "))
         for line in gemini.text.splitlines()

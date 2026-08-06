@@ -23,12 +23,14 @@ You need:
 - the real context, input, and output token limits;
 - an optional bearer token;
 - non-streaming Chat Completions JSON;
-- Chat Completions SSE with a terminal `data: [DONE]` frame;
+- either Chat Completions SSE with a terminal `data: [DONE]` frame or the
+  explicit buffered mode described below;
 - function tools and tool calls if the coding clients should use local tools.
 
-The gateway requests stream usage with
-`stream_options: {"include_usage": true}`. Missing usage remains missing; the
-gateway never invents token counts.
+In the default SSE mode, the gateway requests stream usage with
+`stream_options: {"include_usage": true}`. Buffered mode instead sends
+`stream: false` and uses the usage object from the complete JSON response.
+Missing usage remains missing; the gateway never invents token counts.
 
 ## 1. Declare the upstream
 
@@ -90,6 +92,29 @@ The endpoint may also be written as `https://inference.example/v1`; gpt2giga
 then appends `chat/completions`. A full endpoint ending in
 `/chat/completions` is used unchanged.
 
+### Buffered upstream responses
+
+Some OpenAI-compatible servers accept `stream: true` but still return one
+complete `application/json` Chat Completion. Enable delayed stream synthesis
+for such a server in its v3 profile:
+
+```yaml
+    upstream_stream_mode: buffered
+```
+
+The gateway then sends `stream: false` upstream, validates the complete
+response, and emits one downstream text delta or one complete delta per
+function call, followed by the terminal event and usage. This is sufficient for
+ordinary Codex, Claude Code, and Gemini CLI tool loops.
+
+Buffered mode is not token-by-token upstream streaming. The first content or
+function-call event arrives only after the model has finished the complete
+response, so model TTFT and incremental cancellation cannot be measured through
+this mode. The default is strict `sse`; gpt2giga never enables buffering merely
+because an upstream violated its declared streaming contract. Provider-specific
+fields such as `reasoning_content` are outside the reviewed bridge subset and
+are ignored.
+
 ### Local upstream
 
 For a server on the same host, use the explicit loopback exception:
@@ -98,6 +123,7 @@ For a server on the same host, use the explicit loopback exception:
     base_url: http://127.0.0.1:8001/v1/chat/completions
     allow_loopback: true
     network_policy_ref: loopback-development
+    upstream_stream_mode: buffered  # only when this server has no real SSE
 ```
 
 Direct private, link-local, and metadata-network destinations are rejected. For

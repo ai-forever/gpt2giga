@@ -133,6 +133,7 @@ by omitting the field.
 | `network_policy_ref` | Identifier from the application's reviewed network-policy catalog. |
 | `tls_policy_ref` | Identifier from the application's reviewed TLS-policy catalog. |
 | `allow_loopback` | Defaults to `false`; permits only an explicit HTTP loopback development profile. |
+| `upstream_stream_mode` | v3 OpenAI-compatible profiles only. Omit it or use `sse` for strict upstream SSE. `buffered` sends `stream: false` upstream and synthesizes a delayed downstream stream from the complete JSON response. |
 | `model_inventory` | v2 and v3. `dynamic` is allowed only for one GigaChat profile; omitted means static aliases. |
 | `models` | Exact public-alias bindings. Required for static profiles; optional aliases for dynamic GigaChat. |
 | `public_alias` | Globally unique, case-sensitive model name accepted from clients. |
@@ -158,8 +159,9 @@ discovery explicit: `model_inventory: dynamic` removes the need to enumerate
 every credential-visible GigaChat model, while any configured `models` entries
 remain exact aliases rather than an inventory filter. Version 3 adds the
 per-alias `capabilities` and token-limit contract used for executable
-OpenAI-compatible routes and permits a keyless upstream. Static profiles
-continue to require at least one alias.
+OpenAI-compatible routes, permits a keyless upstream, and can explicitly select
+buffered stream synthesis for an OpenAI-compatible server without real SSE.
+Static profiles continue to require at least one alias.
 
 For a complete Chat Completions-only setup for Codex, Claude Code, and Gemini
 CLI, see [Chat Completions bridge](chat-completions-bridge.md).

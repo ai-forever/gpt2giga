@@ -98,6 +98,7 @@ class OpenAICompatibleUpstreamProfile(NormalizedBaseModel):
     network_policy_ref: str = Field(min_length=1, max_length=256)
     tls_policy_ref: str | None = Field(default=None, min_length=1, max_length=256)
     proxy_policy_ref: str | None = Field(default=None, min_length=1, max_length=256)
+    upstream_stream_mode: Literal["sse", "buffered"] = "sse"
     route: OpenAICompatibleRouteBinding | None = None
 
     @field_validator("base_url")
@@ -252,6 +253,8 @@ class OpenAICompatibleProviderAdapter:
             "credential_reference_id": self.profile.credential_reference_id,
             "network_policy_ref": self.profile.network_policy_ref,
         }
+        if self.profile.upstream_stream_mode == "buffered":
+            projection["upstream_stream_mode"] = "buffered"
         if self.profile.route is not None:
             projection["route"] = self.profile.route.to_execution_context()
         return projection
@@ -315,7 +318,6 @@ class OpenAICompatibleProviderAdapter:
             downstream_capabilities=downstream_capabilities,
             input_token_count=input_token_count,
         )
-        payload = normalized_chat_to_openai_compatible_payload(request)
         sequence = 0
         terminal_choices: set[int] = set()
         started_tool_calls: dict[tuple[int, int], tuple[str, str]] = {}
@@ -341,6 +343,16 @@ class OpenAICompatibleProviderAdapter:
                 stop_reason="cancelled",
             )
             return
+        if self.profile.upstream_stream_mode == "buffered":
+            async for event in self._stream_buffered_chat(
+                request,
+                admission=admission,
+                sequence=sequence,
+                is_disconnected=is_disconnected,
+            ):
+                yield event
+            return
+        payload = normalized_chat_to_openai_compatible_payload(request)
         try:
             async for chunk in self._stream_json(
                 url=self.profile.chat_completions_url,
@@ -398,6 +410,52 @@ class OpenAICompatibleProviderAdapter:
             return
         for event in pending_terminal_events:
             yield event
+
+    async def _stream_buffered_chat(
+        self,
+        request: NormalizedChatRequest,
+        *,
+        admission: ProtocolBridgeAdmission,
+        sequence: int,
+        is_disconnected: Callable[[], Any] | None,
+    ) -> AsyncGenerator[NormalizedStreamEvent, None]:
+        """Synthesize normalized stream events from one complete upstream reply."""
+        buffered_request = request.model_copy(update={"stream": False})
+        payload = normalized_chat_to_openai_compatible_payload(buffered_request)
+        try:
+            raw_response = await self._request_json(
+                url=self.profile.chat_completions_url,
+                method="POST",
+                purpose=_REQUEST_PURPOSE_CHAT,
+                payload=payload,
+            )
+            response = openai_compatible_response_to_normalized(
+                raw_response,
+                profile=self.profile,
+                admission=admission,
+            )
+            if await _is_disconnected(is_disconnected):
+                yield NormalizedStreamEvent(
+                    type="cancelled",
+                    sequence=sequence,
+                    cancellation=request.cancellation,
+                    stop_reason="cancelled",
+                )
+                return
+            for event in _buffered_response_to_stream_events(
+                response,
+                sequence=sequence,
+            ):
+                yield event
+        except asyncio.CancelledError:
+            raise
+        except OpenAICompatibleUpstreamError as exc:
+            yield NormalizedStreamEvent(
+                type="error",
+                sequence=sequence,
+                error=exc.error,
+                stop_reason="error",
+            )
 
     async def discover_models(self) -> tuple[str, ...]:
         """Return strict bounded model ids without inferring capabilities."""
@@ -740,6 +798,85 @@ def openai_compatible_response_to_normalized(
     )
 
 
+def _buffered_response_to_stream_events(
+    response: NormalizedResponse,
+    *,
+    sequence: int,
+) -> list[NormalizedStreamEvent]:
+    """Project one complete response into a delayed normalized stream."""
+    if len(response.choices) != 1:
+        raise _protocol_error(
+            "invalid_buffered_choices",
+            "Buffered upstream streaming requires exactly one response choice.",
+        )
+    choice = response.choices[0]
+    message = choice.message
+    if message is None:
+        raise _protocol_error(
+            "invalid_buffered_message",
+            "Buffered upstream response is missing its assistant message.",
+        )
+    if message.content and message.tool_calls:
+        raise _protocol_error(
+            "mixed_buffered_output",
+            "Buffered upstream response mixed text and function calls.",
+        )
+
+    events: list[NormalizedStreamEvent] = []
+    common = {
+        "id": response.id,
+        "created_at": response.created_at,
+        "model": response.model,
+        "choice_index": choice.index,
+    }
+    if message.content:
+        events.append(
+            NormalizedStreamEvent(
+                type="content_delta",
+                sequence=sequence + len(events),
+                content_delta=message.content,
+                **common,
+            )
+        )
+    for call_index, tool_call in enumerate(message.tool_calls):
+        events.append(
+            NormalizedStreamEvent(
+                type="tool_call_start",
+                sequence=sequence + len(events),
+                tool_call=tool_call.model_copy(
+                    update={
+                        "raw_extensions": {
+                            **tool_call.raw_extensions,
+                            "index": call_index,
+                        }
+                    }
+                ),
+                **common,
+            )
+        )
+    events.append(
+        NormalizedStreamEvent(
+            type="message_end",
+            sequence=sequence + len(events),
+            finish_reason=choice.finish_reason,
+            stop_reason=choice.stop_reason,
+            **common,
+        )
+    )
+    if response.usage is not None:
+        events.append(
+            NormalizedStreamEvent(
+                type="usage",
+                sequence=sequence + len(events),
+                id=response.id,
+                created_at=response.created_at,
+                model=response.model,
+                usage=response.usage,
+            )
+        )
+    return events
+
+
 def parse_openai_compatible_models(payload: Mapping[str, Any]) -> tuple[str, ...]:
     """Parse the bounded standard model-list response."""
     if payload.get("object") != "list":
@@ -1074,6 +1211,8 @@ def _response_provider_metadata(
         "dialect": profile.dialect,
         "admission_schema_version": admission.schema_version,
     }
+    if profile.upstream_stream_mode == "buffered":
+        payload["upstream_stream_mode"] = "buffered"
     if profile.route is not None:
         payload["route"] = profile.route.to_execution_context()
     if system_fingerprint is not None:
@@ -1313,6 +1452,7 @@ def openai_compatible_profile(
     features: Collection[BridgeFeature],
     limits: NormalizedTokenLimits,
     network_policy_ref: str,
+    upstream_stream_mode: Literal["sse", "buffered"] = "sse",
     credential_reference_id: str | None = None,
     tls_policy_ref: str | None = None,
     proxy_policy_ref: str | None = None,
@@ -1335,6 +1475,7 @@ def openai_compatible_profile(
         max_response_bytes=max_response_bytes,
         credential_reference_id=credential_reference_id,
         network_policy_ref=network_policy_ref,
+        upstream_stream_mode=upstream_stream_mode,
         tls_policy_ref=tls_policy_ref,
         proxy_policy_ref=proxy_policy_ref,
         route=OpenAICompatibleRouteBinding(

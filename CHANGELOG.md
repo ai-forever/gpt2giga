@@ -7,6 +7,9 @@
 
 ## [0.3.1a1] - 2026-08-06
 
+### Добавлено
+- **Буферизованный Chat Completions streaming**: OpenAI-compatible профиль v3 может явно задать `upstream_stream_mode: buffered`; шлюз отправит upstream `stream: false` и синтезирует отложенный Responses, Anthropic Messages или Gemini stream с text/tool-call событиями, terminal event и usage. Строгий SSE остаётся режимом по умолчанию.
+
 ### Исправлено
 - **Нативные схемы function calling**: OpenAI, Responses, Anthropic и Gemini больше не пропускают JSON Schema функций через GigaChat-специфичные обходные преобразования. Схемы с `$defs`/`$ref`, композициями, union-типами, mixed `enum`, boolean subschemas и дополнительными keywords передаются без потерь в GigaChat v1 и v2 через SDK `gigachat>=0.2.4a1`.
 - **Отключение reasoning на уровне запроса**: OpenAI `reasoning.effort="none"` и `reasoning_effort="none"`, включая Codex `model_reasoning_effort=none`, теперь удаляют reasoning из upstream payload.
