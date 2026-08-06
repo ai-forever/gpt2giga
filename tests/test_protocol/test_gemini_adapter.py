@@ -890,6 +890,69 @@ def test_gemini_bridge_rejects_unmodeled_semantics_before_transport():
     assert transport_called is False
 
 
+def test_gemini_bridge_accepts_only_synthetic_cli_tool_thought_signature():
+    adapter = GeminiProtocolAdapter()
+    payload = {
+        "contents": [
+            {
+                "role": "model",
+                "parts": [
+                    {
+                        "functionCall": {
+                            "id": "call-1",
+                            "name": "lookup",
+                            "args": {"q": "ping"},
+                        },
+                        "thoughtSignature": "skip_thought_signature_validator",
+                    }
+                ],
+            },
+            {
+                "role": "user",
+                "parts": [
+                    {
+                        "functionResponse": {
+                            "id": "call-1",
+                            "name": "lookup",
+                            "response": {"value": "pong"},
+                        }
+                    }
+                ],
+            },
+        ]
+    }
+
+    normalized = adapter.generate_content_to_normalized(
+        payload,
+        model="local-model",
+    )
+    admission = admit_protocol_bridge_request(
+        normalized,
+        downstream=DownstreamProtocol.GEMINI,
+        upstream=_bridge_capabilities(),
+        downstream_capabilities=frozenset(BridgeFeature),
+        input_token_count=1,
+    )
+
+    assert admission.downstream is DownstreamProtocol.GEMINI
+    assert normalized.messages[0].tool_calls[0].raw_extensions == {}
+
+    payload["contents"][0]["parts"][0]["thoughtSignature"] = "opaque-signature"
+    normalized = adapter.generate_content_to_normalized(
+        payload,
+        model="local-model",
+    )
+
+    with pytest.raises(UnsupportedSemanticLossError, match="raw_extensions"):
+        admit_protocol_bridge_request(
+            normalized,
+            downstream=DownstreamProtocol.GEMINI,
+            upstream=_bridge_capabilities(),
+            downstream_capabilities=frozenset(BridgeFeature),
+            input_token_count=1,
+        )
+
+
 def test_gemini_adapter_maps_count_tokens_to_normalized_operation():
     normalized = GeminiProtocolAdapter().count_tokens_to_normalized(
         {

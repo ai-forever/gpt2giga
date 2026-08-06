@@ -170,7 +170,8 @@ def _normalize_input_message(
     *,
     path: str,
 ) -> NormalizedMessage:
-    _reject_unknown_fields(item, {"content", "role", "type"}, path=path)
+    _reject_unknown_fields(item, {"content", "id", "role", "status", "type"}, path=path)
+    _validate_replayed_output_item(item, path=path)
     role = item.get("role")
     if role not in {"developer", "system", "user", "assistant"}:
         if isinstance(role, str):
@@ -197,7 +198,9 @@ def _normalize_text_part(
 ) -> NormalizedContentPart:
     if not isinstance(value, Mapping):
         _invalid(path)
-    _reject_unknown_fields(value, {"text", "type"}, path=path)
+    _reject_unknown_fields(
+        value, {"annotations", "logprobs", "text", "type"}, path=path
+    )
     part_type = value.get("type")
     expected_type = "output_text" if role == "assistant" else "input_text"
     if part_type != expected_type:
@@ -207,6 +210,10 @@ def _normalize_text_part(
     text = value.get("text")
     if not isinstance(text, str):
         _invalid(f"{path}.text")
+    for field in ("annotations", "logprobs"):
+        metadata = value.get(field)
+        if metadata is not None and metadata != []:
+            _unsupported(f"{path}.{field}")
     return NormalizedContentPart(type="text", text=text)
 
 
@@ -218,9 +225,10 @@ def _normalize_function_call(
 ) -> NormalizedMessage:
     _reject_unknown_fields(
         item,
-        {"arguments", "call_id", "name", "namespace", "type"},
+        {"arguments", "call_id", "id", "name", "namespace", "status", "type"},
         path=path,
     )
+    _validate_replayed_output_item(item, path=path)
     call_id = _required_string(item.get("call_id"), f"{path}.call_id")
     name = _required_string(item.get("name"), f"{path}.name")
     arguments = item.get("arguments")
@@ -251,7 +259,12 @@ def _normalize_function_output(
     *,
     path: str,
 ) -> NormalizedMessage:
-    _reject_unknown_fields(item, {"call_id", "output", "type"}, path=path)
+    _reject_unknown_fields(
+        item,
+        {"call_id", "id", "output", "status", "type"},
+        path=path,
+    )
+    _validate_replayed_output_item(item, path=path)
     call_id = _required_string(item.get("call_id"), f"{path}.call_id")
     output = item.get("output")
     if not isinstance(output, str):
@@ -261,6 +274,21 @@ def _normalize_function_output(
         content=output,
         tool_call_id=call_id,
     )
+
+
+def _validate_replayed_output_item(
+    item: Mapping[str, Any],
+    *,
+    path: str,
+) -> None:
+    item_id = item.get("id")
+    if item_id is not None:
+        _required_string(item_id, f"{path}.id")
+    status = item.get("status")
+    if status is not None and status != "completed":
+        if isinstance(status, str):
+            _unsupported(f"{path}.status")
+        _invalid(f"{path}.status")
 
 
 def _normalize_text_format(value: Any) -> NormalizedResponseFormat | None:

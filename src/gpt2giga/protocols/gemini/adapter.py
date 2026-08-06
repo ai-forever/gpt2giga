@@ -51,6 +51,7 @@ _GEMINI_FUNCTION_PARAMETERS_KEYS = {
     "parametersJsonSchema",
     "parameters_json_schema",
 }
+_SYNTHETIC_THOUGHT_SIGNATURE = "skip_thought_signature_validator"
 
 
 class GeminiProtocolAdapter:
@@ -1050,16 +1051,26 @@ def _part_to_normalized(part: Mapping[str, Any]) -> NormalizedContentPart:
 def _function_call_to_normalized(part: Mapping[str, Any]) -> NormalizedToolCall:
     function_call = _part_value(part, "functionCall", "function_call")
     function_call = function_call if isinstance(function_call, Mapping) else {}
+    raw_extensions = {
+        key: value
+        for key, value in function_call.items()
+        if key not in {"id", "name", "args"}
+    }
+    part_extensions = {
+        key: value
+        for key, value in part.items()
+        if key not in {"functionCall", "function_call"}
+    }
+    if part_extensions.get("thoughtSignature") == _SYNTHETIC_THOUGHT_SIGNATURE:
+        part_extensions.pop("thoughtSignature")
+    if part_extensions:
+        raw_extensions["part"] = part_extensions
     return NormalizedToolCall(
         id=_string_or_none(function_call.get("id")),
         type="function",
         name=_string_or_none(function_call.get("name")),
         arguments=function_call.get("args", {}),
-        raw_extensions={
-            key: value
-            for key, value in function_call.items()
-            if key not in {"id", "name", "args"}
-        },
+        raw_extensions=raw_extensions,
     )
 
 
@@ -1078,16 +1089,24 @@ def _function_response_to_normalized(
 ) -> NormalizedMessage:
     function_response = _function_response_payload(part)
     tool_call_id = _string_or_none(function_response.get("id"))
+    raw_extensions = {
+        key: value
+        for key, value in function_response.items()
+        if key not in {"id", "name", "response"}
+    }
+    part_extensions = {
+        key: value
+        for key, value in part.items()
+        if key not in {"functionResponse", "function_response"}
+    }
+    if part_extensions:
+        raw_extensions["part"] = part_extensions
     return NormalizedMessage(
         role="tool",
         content=json.dumps(function_response.get("response", {}), ensure_ascii=False),
         name=_string_or_none(function_response.get("name")),
         tool_call_id=tool_call_id or _string_or_none(function_response.get("name")),
-        raw_extensions={
-            key: value
-            for key, value in function_response.items()
-            if key not in {"id", "name", "response"}
-        },
+        raw_extensions=raw_extensions,
     )
 
 

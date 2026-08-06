@@ -21,10 +21,13 @@ class AnthropicStreamProjector:
         self.response_id = response_id
         self._block_index = 0
         self._block_type: str | None = None
+        self._input_tokens = 0
         self._output_tokens = 0
 
     def project(self, event: NormalizedStreamEvent) -> list[str]:
         """Render zero or more Anthropic SSE frames for one normalized event."""
+        if event.usage is not None and event.usage.input_tokens is not None:
+            self._input_tokens = int(event.usage.input_tokens)
         if event.usage is not None and event.usage.output_tokens is not None:
             self._output_tokens = int(event.usage.output_tokens)
         if event.type == "message_start":
@@ -181,7 +184,10 @@ class AnthropicStreamProjector:
                             "stop_reason": stop_reason,
                             "stop_sequence": None,
                         },
-                        "usage": {"output_tokens": self._output_tokens},
+                        "usage": {
+                            "input_tokens": self._input_tokens,
+                            "output_tokens": self._output_tokens,
+                        },
                     },
                 ),
                 _sse("message_stop", {"type": "message_stop"}),

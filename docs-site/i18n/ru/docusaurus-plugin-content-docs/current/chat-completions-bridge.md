@@ -173,10 +173,55 @@ export GPT2GIGA_API_KEY='<local-gateway-key>'
 codex --profile chat-bridge
 ```
 
+### Минимальная команда Codex для бенчмарка
+
+Для герметичного CLI-бенчмарка отключите пользовательские MCP, приложения,
+плагины и multi-agent, а настройки моста передайте явно:
+
+```sh
+codex -a never exec --json \
+  --ignore-user-config \
+  --strict-config \
+  --skip-git-repo-check \
+  --ephemeral \
+  --sandbox workspace-write \
+  --disable apps \
+  --disable plugins \
+  --disable multi_agent \
+  --disable apply_patch_freeform \
+  -m bridge/chat-only \
+  -c model_provider=gpt2giga_chat \
+  -c model_providers.gpt2giga_chat.name=gpt2giga_chat \
+  -c model_providers.gpt2giga_chat.base_url=http://127.0.0.1:8090/v1 \
+  -c model_providers.gpt2giga_chat.env_key=GPT2GIGA_API_KEY \
+  -c model_providers.gpt2giga_chat.wire_api=responses \
+  -c model_providers.gpt2giga_chat.supports_websockets=false \
+  -c model_reasoning_effort=none \
+  -c web_search=disabled \
+  'Выполни задачу бенчмарка.'
+```
+
+Эту же строку можно передать в runner, например в `harness_bench run-cli`.
+Codex CLI 0.146.0 проверен с таким минимальным набором:
+`exec_command`, `write_stdin`, `update_plan`, `request_user_input` и
+`view_image`. Все они передаются как обычные function tools. В живой
+двухходовой проверке Codex получил потоковый `exec_command`, выполнил его,
+вернул результат и получил финальный ответ модели через upstream Chat
+Completions.
+
+Responses custom/freeform tools намеренно не входят в поддержанное подмножество.
+В частности, не включайте `apply_patch_freeform`. Для неизвестного публичного
+алиаса из примера текущий Codex редактирует файлы через `exec_command` и не
+выставляет `apply_patch`. Если бенчмарк проверяет именно wire-контракт custom
+`apply_patch`, нужен нативный Responses upstream или отдельно рассмотренное
+расширение для custom tools.
+
 Codex работает по Responses API. Шлюз принимает его stateless-envelope,
 переводит сообщения `developer` в `system` для Chat Completions, разворачивает
 namespace tools перед вызовом upstream и восстанавливает namespace в
-вернувшихся function calls.
+вернувшихся function calls. Он принимает служебные item id, которые Codex
+повторяет в истории, и сохраняет идентификатор вызова до следующего
+`function_call_output`.
 
 Текущий Codex CLI может предупредить, что `/v1/models` не содержит расширенных
 метаданных собственного каталога Codex. gpt2giga намеренно возвращает
@@ -193,7 +238,7 @@ namespace tools перед вызовом upstream и восстанавлива
 
 ```sh
 export ANTHROPIC_BASE_URL=http://127.0.0.1:8090
-export ANTHROPIC_AUTH_TOKEN="$GPT2GIGA_API_KEY"
+export ANTHROPIC_API_KEY="$GPT2GIGA_API_KEY"
 export ANTHROPIC_MODEL=bridge/chat-only
 export ANTHROPIC_SMALL_FAST_MODEL=bridge/chat-only
 
@@ -207,8 +252,8 @@ export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
 claude --model bridge/chat-only
 ```
 
-Через `ANTHROPIC_AUTH_TOKEN` Claude Code отправляет локальный ключ шлюза как
-bearer-токен. gpt2giga также принимает `x-api-key`.
+Через `ANTHROPIC_API_KEY` Claude Code отправляет локальный ключ шлюза в
+`x-api-key`. gpt2giga также принимает bearer-аутентификацию.
 
 Thinking и prompt caching отключены, потому что Chat Completions не может
 сохранить эту семантику Anthropic. Значение
@@ -230,15 +275,21 @@ Thinking и prompt caching отключены, потому что Chat Completi
 Для неизвестной модели Gemini CLI применяет встроенную конфигурацию
 `chat-base`, которая сейчас добавляет `topK` и `thinkingConfig`. У этих
 параметров нет точного представления в Chat Completions, поэтому мост их
-отклоняет. Нужен минимальный пользовательский алиас.
+отклоняет. Нужен минимальный пользовательский алиас с ключом, точно совпадающим
+с публичным id модели.
 
 Добавьте этот блок в `~/.gemini/settings.json`, не удаляя остальные настройки:
 
 ```json
 {
+  "security": {
+    "auth": {
+      "selectedType": "gemini-api-key"
+    }
+  },
   "modelConfigs": {
     "customAliases": {
-      "chat-bridge": {
+      "bridge/chat-only": {
         "modelConfig": {
           "model": "bridge/chat-only",
           "generateContentConfig": {
@@ -254,22 +305,30 @@ Thinking и prompt caching отключены, потому что Chat Completi
 ```
 
 Не наследуйтесь от `chat-base` и не добавляйте `topK` либо `thinkingConfig` для
-этого маршрута. Запускайте Gemini CLI с пользовательским алиасом, а не с
-публичным именем модели напрямую:
+этого маршрута. Ключ алиаса должен оставаться `bridge/chat-only`: после вызова
+инструмента Gemini CLI продолжает работу с разрешённым id модели, поэтому алиас
+с другим именем повлияет только на первый запрос.
+
+Запускайте Gemini CLI с публичным id модели:
 
 ```sh
 export GOOGLE_GEMINI_BASE_URL=http://127.0.0.1:8090
 export GEMINI_API_KEY="$GPT2GIGA_API_KEY"
-export GEMINI_MODEL=chat-bridge
+export GEMINI_MODEL=bridge/chat-only
 export OTEL_SDK_DISABLED=true
 
-gemini --model chat-bridge
+gemini --model bridge/chat-only
 ```
 
 Gemini передаёт `GEMINI_API_KEY` в Google-совместимой форме, которую шлюз
-принимает как свой локальный API key. Пользовательский алиас сначала
-преобразуется в `bridge/chat-only`, а профиль провайдера затем связывает это имя
-с точной моделью upstream.
+принимает как свой локальный API key. Профиль провайдера затем связывает
+публичный id с точной моделью upstream. Синтетический маркер Gemini CLI
+`skip_thought_signature_validator` принимается только как клиентский no-op;
+настоящая thought signature остаётся неподдержанной.
+
+Если задан `GEMINI_CLI_HOME`, Gemini CLI считает его корнем домашней папки.
+Глобальные настройки должны находиться в
+`$GEMINI_CLI_HOME/.gemini/settings.json`, а не прямо в `$GEMINI_CLI_HOME`.
 
 Если алиас хранится в проектном `.gemini/settings.json`, сначала доверьте
 рабочую папку клиенту. Для headless-запуска задайте
@@ -286,6 +345,12 @@ Gemini передаёт `GEMINI_API_KEY` в Google-совместимой фор
 потоковые ответы, terminal stop reasons, usage при наличии в upstream,
 отмену и заявленные лимиты контекста.
 
+Поддержан полный stateless-цикл инструмента: клиент передаёт определения
+функций, получает потоковый или обычный вызов, выполняет его локально и в
+следующем запросе повторяет вызов вместе с результатом. Мост сохраняет call id
+и переводит следующий ход обратно в Chat Completions. Сценарий проверен для
+Responses, Anthropic Messages и Gemini GenerateContent.
+
 Мост не эмулирует:
 
 - состояние Responses: `previous_response_id`, conversations, background jobs
@@ -293,6 +358,7 @@ Gemini передаёт `GEMINI_API_KEY` в Google-совместимой фор
 - reasoning/thinking и reasoning summaries;
 - семантику prompt cache и точный cached-token accounting;
 - hosted web search, computer use, code execution и provider-native tools;
+- Responses custom/freeform tools, например `apply_patch`;
 - files, audio и неподдерживаемые мультимодальные данные;
 - точный подсчёт токенов;
 - Gemini safety settings, cached content, `topK` и thinking configuration.
@@ -309,7 +375,7 @@ Gemini передаёт `GEMINI_API_KEY` в Google-совместимой фор
 | `credential_unavailable` при запуске | Задайте переменную из `credential_env` или удалите поле для намеренно открытого upstream. |
 | `unsupported_semantic` | Клиент запросил смысл, который нельзя сохранить в Chat Completions. Отключите эту функцию; не добавляйте capability без реальной проверки upstream. |
 | Отказ по токенным лимитам | Синхронизируйте context/output клиента с точными значениями профиля. |
-| В запросе Gemini есть `topK` или `thinkingConfig` | Выберите минимальный алиас `chat-bridge`, а не исходную модель или `chat-base`. |
+| В запросе Gemini есть `topK` или `thinkingConfig` | Задайте минимальный пользовательский алиас под точным публичным id `bridge/chat-only`: алиас с другим именем действует только на первый запрос tool-loop. |
 | Claude вызывает `count_tokens` | Для upstream только с Chat Completions эта операция намеренно не поддерживается. |
 | Codex предупреждает о метаданных модели | Оставьте явные context/compaction значения в профиле Codex; обычные запросы продолжат работу. |
 | `provider_protocol_error` в потоке | Проверьте корректный Chat Completions SSE, terminal choice, порядок optional usage и завершающий `[DONE]`. |

@@ -9,6 +9,82 @@ from gpt2giga.protocols.gemini.response_adapter import _usage_to_gemini
 from gpt2giga.protocols.normalized import NormalizedStreamEvent, NormalizedToolCall
 
 
+class GeminiStreamProjector:
+    """Accumulate Chat Completions tool deltas into Gemini function calls."""
+
+    def __init__(self, *, requested_model: str, response_id: str) -> None:
+        self.requested_model = requested_model
+        self.response_id = response_id
+        self._tool_calls: dict[tuple[int, int], NormalizedToolCall] = {}
+
+    def project(self, event: NormalizedStreamEvent) -> list[str]:
+        """Project one event, buffering partial function-call arguments."""
+        if event.type in {"tool_call_start", "tool_call_delta"}:
+            self._collect_tool_call(event)
+            return []
+        if event.type == "message_end" and self._tool_calls:
+            return [self._complete_tool_calls(event)]
+        frame = normalized_stream_event_to_gemini_sse(
+            event,
+            requested_model=self.requested_model,
+            response_id=self.response_id,
+        )
+        return [frame] if frame is not None else []
+
+    def _collect_tool_call(self, event: NormalizedStreamEvent) -> None:
+        call = event.tool_call
+        if call is None:
+            raise ValueError("Gemini tool event is missing its function call")
+        raw_index = call.raw_extensions.get("index")
+        call_index = raw_index if isinstance(raw_index, int) else 0
+        key = (event.choice_index, call_index)
+        existing = self._tool_calls.get(key)
+        if event.type == "tool_call_start":
+            if existing is not None:
+                raise ValueError("Gemini tool call started more than once")
+            self._tool_calls[key] = call.model_copy(
+                update={"arguments": _arguments_text(call.arguments)}
+            )
+            return
+        if existing is None:
+            raise ValueError("Gemini tool call delta arrived before its start")
+        if call.id is not None and existing.id != call.id:
+            raise ValueError("Gemini tool call id changed during streaming")
+        if call.name is not None and existing.name != call.name:
+            raise ValueError("Gemini tool call name changed during streaming")
+        existing.arguments = _arguments_text(existing.arguments) + _arguments_text(
+            call.arguments
+        )
+
+    def _complete_tool_calls(self, event: NormalizedStreamEvent) -> str:
+        matching = [
+            (key, call)
+            for key, call in sorted(self._tool_calls.items())
+            if key[0] == event.choice_index
+        ]
+        if not matching:
+            raise ValueError("Gemini terminal event has no matching tool calls")
+        parts = [_tool_call_part(call) for _key, call in matching]
+        if event.content_delta:
+            parts.insert(0, {"text": event.content_delta})
+        for key, _call in matching:
+            self._tool_calls.pop(key)
+        payload = _base_chunk(
+            event,
+            requested_model=self.requested_model,
+            response_id=self.response_id,
+            candidates=[
+                {
+                    "index": event.choice_index,
+                    "content": {"role": "model", "parts": parts},
+                    "finishReason": _finish_reason(event.finish_reason),
+                }
+            ],
+            usage=_usage_to_gemini(event.usage),
+        )
+        return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+
 def normalized_stream_event_to_gemini_sse(
     event: NormalizedStreamEvent,
     *,
@@ -139,6 +215,14 @@ def _tool_call_part(tool_call: NormalizedToolCall | None) -> dict[str, Any]:
             }
         )
     }
+
+
+def _arguments_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
 
 
 def _compact_dict(payload: dict[str, Any]) -> dict[str, Any]:

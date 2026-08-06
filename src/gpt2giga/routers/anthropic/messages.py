@@ -438,13 +438,28 @@ async def _try_normalized_stream_message(
         )
 
         async def emit_stream() -> AsyncIterator[str]:
+            pending_message_end = None
             async for event in provider.stream_chat(
                 normalized_request,
                 context=context,
                 is_disconnected=request.is_disconnected,
                 logger=getattr(request.app.state, "logger", None),
             ):
+                if event.type == "message_end":
+                    pending_message_end = event
+                    continue
+                if event.type == "usage" and pending_message_end is not None:
+                    pending_message_end = pending_message_end.model_copy(
+                        update={
+                            "sequence": event.sequence,
+                            "usage": event.usage,
+                        }
+                    )
+                    continue
                 for frame in projector.project(event):
+                    yield frame
+            if pending_message_end is not None:
+                for frame in projector.project(pending_message_end):
                     yield frame
 
         body_iterator = observe_anthropic_message_stream(

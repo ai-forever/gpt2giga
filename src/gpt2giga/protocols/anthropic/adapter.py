@@ -393,7 +393,9 @@ def _provider_metadata(data: Mapping[str, Any]) -> dict[str, Any]:
 
 def _ignored_extensions(payload: Mapping[str, Any]) -> dict[str, Any]:
     ignored = {
-        key: payload[key] for key in ANTHROPIC_ACCEPTED_IGNORED_PARAMS if key in payload
+        key: payload[key]
+        for key in ANTHROPIC_ACCEPTED_IGNORED_PARAMS
+        if key in payload and key != "metadata"
     }
     return {"accepted_ignored": ignored} if ignored else {}
 

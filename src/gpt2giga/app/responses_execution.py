@@ -349,6 +349,14 @@ class NormalizedBridgeResponsesExecutor:
                             )
                         pending_message_end = event
                         continue
+                    if event.type == "usage" and pending_message_end is not None:
+                        pending_message_end = pending_message_end.model_copy(
+                            update={
+                                "sequence": event.sequence,
+                                "usage": event.usage,
+                            }
+                        )
+                        continue
                     for frame in projector.project(event):
                         yield frame
                 if pending_message_end is not None:

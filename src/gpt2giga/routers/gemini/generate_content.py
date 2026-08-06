@@ -27,6 +27,7 @@ from gpt2giga.openapi_specs.gemini import (
 from gpt2giga.openapi_tags import OPENAPI_TAG_GEMINI_GENERATE_CONTENT
 from gpt2giga.protocols.gemini import (
     GeminiProtocolAdapter,
+    GeminiStreamProjector,
     gemini_invalid_request,
     normalized_chat_response_to_gemini,
     normalized_stream_event_to_gemini_sse,
@@ -165,6 +166,10 @@ async def stream_generate_content(model: str, request: Request):
     )
     response_id = context.request_id if context is not None else "gemini-stream"
     observer = _GeminiStreamObserver(response_id=response_id, model=requested_model)
+    projector = GeminiStreamProjector(
+        requested_model=requested_model,
+        response_id=response_id,
+    )
     span_events: list[dict[str, Any]] = []
 
     async def emit_stream() -> AsyncIterator[str]:
@@ -208,12 +213,8 @@ async def stream_generate_content(model: str, request: Request):
                         )
                 if event.type == "content_delta" and event.content_delta:
                     seen_content_delta = True
-                chunk = normalized_stream_event_to_gemini_sse(
-                    event,
-                    requested_model=requested_model,
-                    response_id=response_id,
-                )
-                if chunk is not None:
+                chunks = projector.project(event)
+                for chunk in chunks:
                     emitted_chunk = True
                     yield chunk
         except asyncio.CancelledError:

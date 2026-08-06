@@ -185,6 +185,77 @@ def _stream_body() -> str:
     )
 
 
+def _tool_stream_body() -> str:
+    chunks = [
+        {
+            "id": "chatcmpl-facade-tool-stream",
+            "model": UPSTREAM_MODEL,
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": {
+                        "role": "assistant",
+                        "tool_calls": [
+                            {
+                                "index": 0,
+                                "id": "call_fixture",
+                                "type": "function",
+                                "function": {
+                                    "name": "lookup",
+                                    "arguments": '{"q":',
+                                },
+                            }
+                        ],
+                    },
+                    "finish_reason": None,
+                }
+            ],
+        },
+        {
+            "id": "chatcmpl-facade-tool-stream",
+            "model": UPSTREAM_MODEL,
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": {
+                        "tool_calls": [
+                            {
+                                "index": 0,
+                                "function": {"arguments": '"ping"}'},
+                            }
+                        ]
+                    },
+                    "finish_reason": None,
+                }
+            ],
+        },
+        {
+            "id": "chatcmpl-facade-tool-stream",
+            "model": UPSTREAM_MODEL,
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": {},
+                    "finish_reason": "tool_calls",
+                }
+            ],
+        },
+        {
+            "id": "chatcmpl-facade-tool-stream",
+            "model": UPSTREAM_MODEL,
+            "choices": [],
+            "usage": {
+                "prompt_tokens": 5,
+                "completion_tokens": 2,
+                "total_tokens": 7,
+            },
+        },
+    ]
+    return "".join(f"data: {json.dumps(chunk)}\n\n" for chunk in chunks) + (
+        "data: [DONE]\n\n"
+    )
+
+
 def test_responses_anthropic_and_gemini_share_one_chat_upstream(
     tmp_path: Path,
 ) -> None:
@@ -341,6 +412,184 @@ def test_three_facades_project_function_calls(tmp_path: Path) -> None:
     assert len(observed) == 3
 
 
+def test_three_facades_complete_function_result_round_trip(tmp_path: Path) -> None:
+    observed: list[dict[str, Any]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        observed.append(payload)
+        if payload["messages"][-1]["role"] != "tool":
+            return httpx.Response(200, json=_chat_response(tool_call=True))
+        assert payload["messages"][-2]["tool_calls"][0]["id"] == "call_fixture"
+        assert payload["messages"][-1]["tool_call_id"] == "call_fixture"
+        return httpx.Response(200, json=_chat_response())
+
+    tool_schema = {
+        "type": "object",
+        "properties": {"q": {"type": "string"}},
+        "required": ["q"],
+    }
+    responses_tool = {
+        "type": "function",
+        "name": "lookup",
+        "description": "Lookup a value.",
+        "parameters": tool_schema,
+    }
+    anthropic_tool = {
+        "name": "lookup",
+        "description": "Lookup a value.",
+        "input_schema": tool_schema,
+    }
+    gemini_tool = {
+        "functionDeclarations": [
+            {
+                "name": "lookup",
+                "description": "Lookup a value.",
+                "parameters": tool_schema,
+            }
+        ]
+    }
+
+    app = _app(tmp_path, handler)
+    with TestClient(app) as client:
+        responses_first = client.post(
+            "/v1/responses",
+            json={
+                "model": MODEL_ALIAS,
+                "input": "lookup",
+                "tools": [responses_tool],
+            },
+        )
+        responses_call = responses_first.json()["output"][0]
+        responses_final = client.post(
+            "/v1/responses",
+            json={
+                "model": MODEL_ALIAS,
+                "input": [
+                    {
+                        "type": "message",
+                        "id": "msg_user",
+                        "role": "user",
+                        "content": [{"type": "input_text", "text": "lookup"}],
+                    },
+                    responses_call,
+                    {
+                        "type": "function_call_output",
+                        "id": "fco_lookup",
+                        "call_id": responses_call["call_id"],
+                        "output": "lookup-ok",
+                    },
+                ],
+                "tools": [responses_tool],
+            },
+        )
+
+        anthropic_first = client.post(
+            "/v1/messages",
+            json={
+                "model": MODEL_ALIAS,
+                "max_tokens": 32,
+                "messages": [{"role": "user", "content": "lookup"}],
+                "tools": [anthropic_tool],
+            },
+        )
+        anthropic_call = anthropic_first.json()["content"][0]
+        anthropic_final = client.post(
+            "/v1/messages",
+            json={
+                "model": MODEL_ALIAS,
+                "max_tokens": 32,
+                "messages": [
+                    {"role": "user", "content": "lookup"},
+                    {"role": "assistant", "content": [anthropic_call]},
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": anthropic_call["id"],
+                                "content": "lookup-ok",
+                            }
+                        ],
+                    },
+                ],
+                "tools": [anthropic_tool],
+            },
+        )
+
+        gemini_first = client.post(
+            f"/v1beta/models/{MODEL_ALIAS}:generateContent",
+            json={
+                "contents": [{"parts": [{"text": "lookup"}], "role": "user"}],
+                "tools": [gemini_tool],
+            },
+        )
+        gemini_call = gemini_first.json()["candidates"][0]["content"]["parts"][0][
+            "functionCall"
+        ]
+        gemini_final = client.post(
+            f"/v1beta/models/{MODEL_ALIAS}:generateContent",
+            json={
+                "contents": [
+                    {"parts": [{"text": "lookup"}], "role": "user"},
+                    {
+                        "parts": [
+                            {
+                                "functionCall": gemini_call,
+                                "thoughtSignature": (
+                                    "skip_thought_signature_validator"
+                                ),
+                            }
+                        ],
+                        "role": "model",
+                    },
+                    {
+                        "parts": [
+                            {
+                                "functionResponse": {
+                                    "id": gemini_call["id"],
+                                    "name": gemini_call["name"],
+                                    "response": {"value": "lookup-ok"},
+                                }
+                            }
+                        ],
+                        "role": "user",
+                    },
+                ],
+                "tools": [gemini_tool],
+            },
+        )
+
+    assert responses_first.status_code == 200, responses_first.text
+    assert responses_final.status_code == 200, responses_final.text
+    assert anthropic_first.status_code == 200, anthropic_first.text
+    assert anthropic_final.status_code == 200, anthropic_final.text
+    assert gemini_first.status_code == 200, gemini_first.text
+    assert gemini_final.status_code == 200, gemini_final.text
+    assert responses_final.json()["output"][0]["content"][0]["text"] == "facade-ok"
+    assert anthropic_final.json()["content"][0]["text"] == "facade-ok"
+    assert (
+        gemini_final.json()["candidates"][0]["content"]["parts"][0]["text"]
+        == "facade-ok"
+    )
+    second_turns = [
+        payload for payload in observed if payload["messages"][-1]["role"] == "tool"
+    ]
+    assert len(second_turns) == 3
+    assert [message["role"] for message in second_turns[0]["messages"]] == [
+        "user",
+        "assistant",
+        "tool",
+    ]
+    assert second_turns[0]["messages"][-1]["content"] == "lookup-ok"
+    assert json.loads(second_turns[1]["messages"][-1]["content"]) == {
+        "result": "lookup-ok"
+    }
+    assert json.loads(second_turns[2]["messages"][-1]["content"]) == {
+        "value": "lookup-ok"
+    }
+
+
 def test_three_facades_project_streaming_text(tmp_path: Path) -> None:
     observed: list[dict[str, Any]] = []
 
@@ -384,6 +633,97 @@ def test_three_facades_project_streaming_text(tmp_path: Path) -> None:
     assert "facade-" in anthropic.text and "stream" in anthropic.text
     assert '"text": "facade-"' in gemini.text
     assert '"text": "stream"' in gemini.text
+    assert len(observed) == 3
+
+
+def test_three_facades_project_streaming_function_calls(tmp_path: Path) -> None:
+    observed: list[dict[str, Any]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        observed.append(payload)
+        assert payload["stream"] is True
+        return httpx.Response(
+            200,
+            text=_tool_stream_body(),
+            headers={"content-type": "text/event-stream"},
+        )
+
+    tool_schema = {
+        "type": "object",
+        "properties": {"q": {"type": "string"}},
+        "required": ["q"],
+    }
+    app = _app(tmp_path, handler)
+    with TestClient(app) as client:
+        responses = client.post(
+            "/v1/responses",
+            json={
+                "model": MODEL_ALIAS,
+                "input": "lookup",
+                "stream": True,
+                "tools": [
+                    {
+                        "type": "function",
+                        "name": "lookup",
+                        "parameters": tool_schema,
+                    }
+                ],
+            },
+        )
+        anthropic = client.post(
+            "/v1/messages",
+            json={
+                "model": MODEL_ALIAS,
+                "max_tokens": 32,
+                "messages": [{"role": "user", "content": "lookup"}],
+                "stream": True,
+                "tools": [{"name": "lookup", "input_schema": tool_schema}],
+            },
+        )
+        gemini = client.post(
+            f"/v1beta/models/{MODEL_ALIAS}:streamGenerateContent",
+            json={
+                "contents": [{"parts": [{"text": "lookup"}], "role": "user"}],
+                "tools": [
+                    {
+                        "functionDeclarations": [
+                            {"name": "lookup", "parameters": tool_schema}
+                        ]
+                    }
+                ],
+            },
+        )
+
+    assert responses.status_code == 200, responses.text
+    assert anthropic.status_code == 200, anthropic.text
+    assert gemini.status_code == 200, gemini.text
+    assert "response.function_call_arguments.delta" in responses.text
+    assert '"arguments": "{\\"q\\":\\"ping\\"}"' in responses.text
+    assert '"type": "tool_use"' in anthropic.text
+    assert '"partial_json": "{\\"q\\":"' in anthropic.text
+    assert '"partial_json": "\\"ping\\"}"' in anthropic.text
+    assert '"input_tokens": 5' in anthropic.text
+    assert '"output_tokens": 2' in anthropic.text
+    gemini_chunks = [
+        json.loads(line.removeprefix("data: "))
+        for line in gemini.text.splitlines()
+        if line.startswith("data: ")
+    ]
+    gemini_calls = [
+        part["functionCall"]
+        for chunk in gemini_chunks
+        for candidate in chunk.get("candidates", [])
+        for part in candidate.get("content", {}).get("parts", [])
+        if "functionCall" in part
+    ]
+    assert gemini_calls == [
+        {
+            "id": "call_fixture",
+            "name": "lookup",
+            "args": {"q": "ping"},
+        }
+    ]
     assert len(observed) == 3
 
 
@@ -535,6 +875,7 @@ def test_codex_runtime_envelope_reaches_chat_and_restores_namespace(
                 "input": [
                     {
                         "type": "message",
+                        "id": "msg_developer",
                         "role": "developer",
                         "content": [
                             {"type": "input_text", "text": "Use tools carefully."}
@@ -542,6 +883,7 @@ def test_codex_runtime_envelope_reaches_chat_and_restores_namespace(
                     },
                     {
                         "type": "message",
+                        "id": "msg_user",
                         "role": "user",
                         "content": [{"type": "input_text", "text": "Inspect."}],
                     },
@@ -601,6 +943,7 @@ def test_claude_code_runtime_envelope_reaches_chat(tmp_path: Path) -> None:
             {"type": "text", "text": "Use tools carefully."}
         ]
         assert payload["max_tokens"] == 4096
+        assert payload["metadata"] == {"user_id": "claude-code-session"}
         assert payload["stream"] is True
         assert payload["tools"][0]["function"]["name"] == "lookup"
         return httpx.Response(
@@ -635,6 +978,7 @@ def test_claude_code_runtime_envelope_reaches_chat(tmp_path: Path) -> None:
                     }
                 ],
                 "output_config": {"effort": "high"},
+                "metadata": {"user_id": "claude-code-session"},
                 "stream": True,
             },
         )
