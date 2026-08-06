@@ -967,16 +967,24 @@ wheels = [
 
 [[package]]
 name = "gigachat"
-version = "0.2.3"
-source = { registry = "https://pypi.org/simple" }
+version = "0.2.4a1"
+source = { path = "gigachat-0.2.4a1-py3-none-any.whl" }
 dependencies = [
     { name = "httpx" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/a9/3e/42105fe7be2aa33907349fd177a2d8a97e14f434cfc1b8cbf3ba7b4a03f8/gigachat-0.2.3.tar.gz", hash = "sha256:b298dc70d28153e83780cdb7f40ec7273462ce497daafb1bee7e08509126aab3", size = 42631, upload-time = "2026-07-31T14:30:32.776Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/89/c6/cea9fd75f06c4c5a3f00a96c157c183146cb42b20e58b7580cd723c359bb/gigachat-0.2.3-py3-none-any.whl", hash = "sha256:61a51bcb9c3888c7643a9ffabe191695279f7cfca6b9d9d639e60c073a2385da", size = 55335, upload-time = "2026-07-31T14:30:34.101Z" },
+    { filename = "gigachat-0.2.4a1-py3-none-any.whl", hash = "sha256:8ed570144e5dd4f11dcd5c6b085818535cd4e03f40610a97a688491bc63a96aa" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "httpx", specifier = ">=0.24,<1" },
+    { name = "pydantic", specifier = ">=2.0,<3" },
+    { name = "pydantic-settings", marker = "python_full_version == '3.8.*'", specifier = ">=2.0,<2.9.0" },
+    { name = "pydantic-settings", marker = "python_full_version == '3.9.*'", specifier = ">=2.0,<2.12.0" },
+    { name = "pydantic-settings", marker = "python_full_version >= '3.10'", specifier = ">=2.0,<3" },
 ]
 
 [[package]]
@@ -1032,7 +1040,7 @@ wheels = [
 
 [[package]]
 name = "gpt2giga"
-version = "0.3.0"
+version = "0.3.1a1"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
@@ -1096,7 +1104,7 @@ requires-dist = [
     { name = "arize-phoenix-otel", marker = "extra == 'phoenix'", specifier = ">=0.16.1,<1" },
     { name = "asyncpg", marker = "extra == 'postgres'", specifier = ">=0.31.0,<1" },
     { name = "fastapi", specifier = ">=0.140.13,<1" },
-    { name = "gigachat", specifier = ">=0.2.3,<0.3.0" },
+    { name = "gigachat", path = "gigachat-0.2.4a1-py3-none-any.whl" },
     { name = "google-genai", specifier = ">=2.14.0,<3" },
     { name = "httpx", specifier = ">=0.28.1,<1" },
     { name = "loguru", specifier = ">=0.7.3,<0.8" },
