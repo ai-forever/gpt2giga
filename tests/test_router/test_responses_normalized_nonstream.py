@@ -177,6 +177,23 @@ def test_responses_normalized_rejects_state_and_reasoning_before_provider_io(
     assert giga_client.calls == []
 
 
+def test_responses_normalized_accepts_reasoning_none_as_disabled() -> None:
+    app, giga_client, transformer = _app()
+
+    response = TestClient(app).post(
+        "/responses",
+        json={
+            "input": "hello",
+            "model": "bridge/codex-test",
+            "reasoning": {"effort": "none", "summary": "auto"},
+        },
+    )
+
+    assert response.status_code == 200
+    assert len(transformer.chat_calls) == 1
+    assert len(giga_client.calls) == 1
+
+
 def test_responses_native_path_requires_no_workaround_flag() -> None:
     app, giga_client, _transformer = _app()
     native_transformer = _Transformer(allow_native=True)

@@ -218,6 +218,7 @@ GPT2GIGA_DISABLE_REASONING=False
 
 - `GPT2GIGA_ENABLE_REASONING=True` adds `reasoning_effort="high"` if the client did not pass an explicit reasoning setting.
 - `GPT2GIGA_DISABLE_REASONING=True` removes `reasoning` and `reasoning_effort`, including explicit client fields and `extra_body` passthrough.
+- Client `reasoning.effort="none"` or `reasoning_effort="none"` disables reasoning for that request and removes reasoning fields from the GigaChat payload. A global `GPT2GIGA_DISABLE_REASONING` setting is not required.
 
 Structured output:
 

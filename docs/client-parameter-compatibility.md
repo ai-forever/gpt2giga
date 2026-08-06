@@ -105,6 +105,9 @@ is rejected, because the GigaChat upstream does not support a separate JSON mode
 
 With `GPT2GIGA_DISABLE_REASONING=True`, the proxy accepts `reasoning` and
 `reasoning_effort` but does not pass them to the upstream payload sent to GigaChat.
+An explicit `reasoning.effort="none"` or `reasoning_effort="none"` applies the
+same behavior to one request, including Codex `model_reasoning_effort=none`,
+without requiring the global setting.
 
 With `GPT2GIGA_DISABLE_BUILTIN_TOOL_MAPPING=True`, the proxy accepts provider
 built-in tools for compatibility but does not map or send them to GigaChat as

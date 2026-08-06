@@ -323,6 +323,8 @@ def _normalize_reasoning_intent(
     mode = reasoning_data.get("mode")
     if mode is not None:
         _required_string(mode, "reasoning.mode")
+    if effort == "none":
+        return None
     return NormalizedReasoningIntent(
         effort=effort,
         summary=summary,

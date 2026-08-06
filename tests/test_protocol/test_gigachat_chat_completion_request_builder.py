@@ -471,6 +471,23 @@ async def test_prepare_chat_completion_disable_reasoning_omits_model_option():
     assert "reasoning" not in request.model_dump(exclude_none=True)
 
 
+async def test_prepare_response_chat_completion_omits_explicit_reasoning_none():
+    cfg = ProxyConfig(proxy=ProxySettings(enable_reasoning=True))
+    rt = RequestTransformer(cfg, logger=logger)
+
+    request = await rt.prepare_response_chat_completion(
+        {
+            "model": "GigaChat-2-Max",
+            "input": "hello",
+            "temperature": 0.4,
+            "reasoning": {"effort": "none", "summary": "auto"},
+        }
+    )
+
+    assert request.model_options.temperature == 0.4
+    assert request.model_options.reasoning is None
+
+
 async def test_prepare_chat_completion_respects_pass_model_false():
     cfg = ProxyConfig(proxy=ProxySettings(pass_model=False))
     rt = RequestTransformer(cfg, logger=logger)

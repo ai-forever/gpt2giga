@@ -458,10 +458,19 @@ class RequestTransformer:
         elif extra_body is not None and additional_fields is None:
             transformed["additional_fields"] = extra_body
 
-        disable_reasoning = getattr(
+        configured_disable_reasoning = getattr(
             self.config.proxy_settings, "disable_reasoning", False
         )
         reasoning = transformed.pop("reasoning", None)
+        if not configured_disable_reasoning and isinstance(reasoning, dict):
+            effort = reasoning.get("effort")
+            if effort is not None:
+                transformed["reasoning_effort"] = effort
+
+        disable_reasoning = (
+            configured_disable_reasoning
+            or transformed.get("reasoning_effort") == "none"
+        )
         if disable_reasoning:
             transformed.pop("reasoning_effort", None)
             additional_fields = transformed.get("additional_fields")
@@ -473,10 +482,6 @@ class RequestTransformer:
                     transformed["additional_fields"] = additional_fields
                 else:
                     transformed.pop("additional_fields", None)
-        elif isinstance(reasoning, dict):
-            effort = reasoning.get("effort")
-            if effort is not None:
-                transformed["reasoning_effort"] = effort
 
         if not disable_reasoning and getattr(
             self.config.proxy_settings, "enable_reasoning", False

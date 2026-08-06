@@ -506,6 +506,42 @@ def test_transform_responses_parameters_maps_reasoning_object_to_reasoning_effor
     assert "reasoning" not in out
 
 
+@pytest.mark.parametrize(
+    "reasoning_fields",
+    [
+        {"reasoning": {"effort": "none", "summary": "auto"}},
+        {"reasoning_effort": "none"},
+    ],
+)
+def test_explicit_reasoning_none_disables_reasoning_for_request(reasoning_fields):
+    cfg = ProxyConfig(proxy=ProxySettings(enable_reasoning=True))
+    rt = RequestTransformer(cfg, logger=logger)
+    out = rt.transform_responses_parameters(
+        {
+            "model": "gpt-x",
+            **reasoning_fields,
+            "extra_body": {
+                "model_options": {
+                    "reasoning": {"effort": "high"},
+                    "top_p": 0.2,
+                },
+                "reasoning": {"effort": "high"},
+            },
+            "additional_fields": {
+                "reasoning_effort": "low",
+                "storage": True,
+            },
+        }
+    )
+
+    assert "reasoning" not in out
+    assert "reasoning_effort" not in out
+    assert out.get("additional_fields") == {
+        "model_options": {"top_p": 0.2},
+        "storage": True,
+    }
+
+
 def test_disable_reasoning_removes_responses_reasoning_object():
     cfg = ProxyConfig(proxy=ProxySettings(disable_reasoning=True))
     rt = RequestTransformer(cfg, logger=logger)

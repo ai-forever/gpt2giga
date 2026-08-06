@@ -105,6 +105,9 @@ normalized parity.
 
 При `GPT2GIGA_DISABLE_REASONING=True` прокси принимает `reasoning` и
 `reasoning_effort`, но не передаёт их в полезную нагрузку, отправляемую в GigaChat.
+Явные `reasoning.effort="none"` или `reasoning_effort="none"` применяют то же
+поведение к отдельному запросу, включая Codex `model_reasoning_effort=none`,
+без глобальной настройки.
 
 При `GPT2GIGA_DISABLE_BUILTIN_TOOL_MAPPING=True` прокси принимает provider
 built-in tools для совместимости, но не сопоставляет и не отправляет их в

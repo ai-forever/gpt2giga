@@ -371,6 +371,27 @@ def test_responses_adapter_preserves_reasoning_and_state_intent() -> None:
     }
 
 
+@pytest.mark.parametrize(
+    "reasoning_fields",
+    [
+        {"reasoning": {"effort": "none", "summary": "auto"}},
+        {"reasoning_effort": "none"},
+    ],
+)
+def test_responses_adapter_treats_reasoning_none_as_disabled(
+    reasoning_fields: dict,
+) -> None:
+    normalized = OpenAIProtocolAdapter().responses_to_normalized(
+        {
+            "model": "bridge/codex-test",
+            "input": "Answer directly.",
+            **reasoning_fields,
+        }
+    )
+
+    assert normalized.reasoning is None
+
+
 def test_responses_adapter_preserves_previous_response_state() -> None:
     normalized = OpenAIProtocolAdapter().responses_to_normalized(
         {
