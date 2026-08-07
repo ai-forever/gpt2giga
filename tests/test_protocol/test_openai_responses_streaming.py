@@ -131,6 +131,72 @@ def test_responses_stream_projector_orders_tool_lifecycle() -> None:
     }
 
 
+def test_responses_stream_projector_preserves_reasoning_before_tool_call() -> None:
+    projector = ResponsesStreamProjector(
+        request_payload={
+            "input": "inspect",
+            "model": "bridge/codex-test",
+            "stream": True,
+            "reasoning": {"effort": "xhigh", "summary": "auto"},
+        },
+        requested_model="bridge/codex-test",
+        response_id="reasoning",
+        created_at=100,
+    )
+    frames = projector.project(NormalizedStreamEvent(type="message_start", sequence=0))
+    frames.extend(
+        projector.project(
+            NormalizedStreamEvent(
+                type="reasoning_delta",
+                sequence=1,
+                reasoning_delta="Need repository state.",
+            )
+        )
+    )
+    frames.extend(
+        projector.project(
+            NormalizedStreamEvent(
+                type="tool_call_start",
+                sequence=2,
+                tool_call=NormalizedToolCall(
+                    id="call-status",
+                    name="git_status",
+                    arguments="{}",
+                ),
+            )
+        )
+    )
+    frames.extend(
+        projector.project(
+            NormalizedStreamEvent(
+                type="message_end",
+                sequence=3,
+                finish_reason="tool_calls",
+            )
+        )
+    )
+    projector.finish()
+
+    assert _event_names(frames) == [
+        "response.created",
+        "response.output_item.added",
+        "response.reasoning_summary_part.added",
+        "response.reasoning_summary_text.delta",
+        "response.reasoning_summary_text.done",
+        "response.reasoning_summary_part.done",
+        "response.output_item.done",
+        "response.output_item.added",
+        "response.function_call_arguments.delta",
+        "response.function_call_arguments.done",
+        "response.output_item.done",
+        "response.completed",
+    ]
+    completed = _event_data(frames[-1])["response"]
+    assert completed["reasoning"] == {"effort": "xhigh", "summary": "auto"}
+    assert completed["output"][0]["summary"][0]["text"] == ("Need repository state.")
+    assert completed["output"][1]["call_id"] == "call-status"
+
+
 def test_responses_stream_projector_restores_namespace_tool_identity() -> None:
     projector = ResponsesStreamProjector(
         request_payload={

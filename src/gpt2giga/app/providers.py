@@ -65,6 +65,9 @@ _CONDITIONAL_FEATURES = {
     BridgeSemantic.FILES_AND_IMAGES: BridgeFeature.IMAGE_REFERENCES,
     BridgeSemantic.PARALLEL_TOOL_CALLS: BridgeFeature.PARALLEL_TOOL_CALLS,
     BridgeSemantic.STRUCTURED_OUTPUT_JSON_SCHEMA: BridgeFeature.JSON_SCHEMA_OUTPUT,
+    BridgeSemantic.REASONING_CONTROLS_AND_SUMMARIES: (
+        BridgeFeature.REASONING_CONTROLS_AND_SUMMARIES
+    ),
 }
 
 
@@ -449,7 +452,9 @@ def _requested_semantics(
         semantics[BridgeSemantic.PARALLEL_TOOL_CALLS] = "parallel_tool_calls"
     if request.response_format is not None:
         semantics[BridgeSemantic.STRUCTURED_OUTPUT_JSON_SCHEMA] = "text.format"
-    if request.reasoning is not None:
+    if request.reasoning is not None or any(
+        message.reasoning_content is not None for message in request.messages
+    ):
         semantics[BridgeSemantic.REASONING_CONTROLS_AND_SUMMARIES] = "reasoning"
     if request.response_state is not None:
         if request.response_state.previous_response_id is not None:

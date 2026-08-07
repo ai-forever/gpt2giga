@@ -12,6 +12,7 @@ from gpt2giga.protocols.normalized import (
     NormalizedChatRequest,
     NormalizedGenerationConfig,
     NormalizedMessage,
+    NormalizedReasoningIntent,
     NormalizedResponseFormat,
     NormalizedTokenLimits,
     NormalizedTool,
@@ -180,6 +181,7 @@ def test_payload_preserves_tool_results_parallel_control_and_json_schema():
             NormalizedMessage(
                 role="assistant",
                 content=None,
+                reasoning_content="Inspect the lookup result.",
                 tool_calls=[
                     NormalizedToolCall(
                         id="call-1",
@@ -195,6 +197,7 @@ def test_payload_preserves_tool_results_parallel_control_and_json_schema():
             ),
         ],
         parallel_tool_calls=False,
+        reasoning=NormalizedReasoningIntent(effort="xhigh", summary="auto"),
         response_format=NormalizedResponseFormat(
             type="json_schema",
             json_schema={
@@ -208,8 +211,10 @@ def test_payload_preserves_tool_results_parallel_control_and_json_schema():
     payload = normalized_chat_to_openai_compatible_payload(request)
 
     assert payload["messages"][0]["tool_calls"][0]["id"] == "call-1"
+    assert payload["messages"][0]["reasoning_content"] == ("Inspect the lookup result.")
     assert payload["messages"][1]["tool_call_id"] == "call-1"
     assert payload["parallel_tool_calls"] is False
+    assert payload["reasoning_effort"] == "xhigh"
     assert payload["response_format"] == {
         "type": "json_schema",
         "json_schema": {
@@ -248,6 +253,7 @@ def _fake_app():
                             "index": 0,
                             "delta": {
                                 "role": "assistant",
+                                "reasoning_content": "Need a lookup.",
                                 "tool_calls": [
                                     {
                                         "index": 0,
@@ -464,15 +470,17 @@ async def test_adapter_streams_tool_events_usage_and_terminal_event():
 
     assert [event.type for event in events] == [
         "message_start",
+        "reasoning_delta",
         "tool_call_start",
         "tool_call_delta",
         "message_end",
         "usage",
     ]
-    assert events[1].tool_call.name == "lookup"
-    assert events[2].tool_call.arguments == '"ping"}'
-    assert events[3].stop_reason == "tool_calls"
-    assert events[4].usage.total_tokens == 11
+    assert events[1].reasoning_delta == "Need a lookup."
+    assert events[2].tool_call.name == "lookup"
+    assert events[3].tool_call.arguments == '"ping"}'
+    assert events[4].stop_reason == "tool_calls"
+    assert events[5].usage.total_tokens == 11
     assert app.state.requests[0]["payload"]["stream_options"] == {"include_usage": True}
 
 
@@ -528,7 +536,13 @@ async def test_buffered_stream_mode_synthesizes_legacy_tool_response_events():
     events = [
         event
         async for event in adapter.stream_chat(
-            _request(stream=True),
+            _request(stream=True).model_copy(
+                update={
+                    "reasoning": NormalizedReasoningIntent(
+                        effort="xhigh", summary="auto"
+                    )
+                }
+            ),
             downstream=DownstreamProtocol.OPENAI,
             downstream_capabilities=_all_downstream_capabilities(),
             input_token_count=7,
@@ -537,9 +551,11 @@ async def test_buffered_stream_mode_synthesizes_legacy_tool_response_events():
     await client.aclose()
 
     assert observed[0]["stream"] is False
+    assert observed[0]["reasoning_effort"] == "xhigh"
     assert "stream_options" not in observed[0]
     assert [event.type for event in events] == [
         "message_start",
+        "reasoning_delta",
         "tool_call_start",
         "message_end",
         "usage",
@@ -548,12 +564,13 @@ async def test_buffered_stream_mode_synthesizes_legacy_tool_response_events():
         events[0].provider_metadata["openai_compatible"]["upstream_stream_mode"]
         == "buffered"
     )
-    assert events[1].tool_call.id == "call-buffered"
-    assert events[1].tool_call.arguments == '{"q":"ping"}'
-    assert events[1].tool_call.raw_extensions["index"] == 0
-    assert events[2].finish_reason == "function_call"
-    assert events[2].stop_reason == "tool_calls"
-    assert events[3].usage.total_tokens == 10
+    assert events[1].reasoning_delta == "private provider reasoning"
+    assert events[2].tool_call.id == "call-buffered"
+    assert events[2].tool_call.arguments == '{"q":"ping"}'
+    assert events[2].tool_call.raw_extensions["index"] == 0
+    assert events[3].finish_reason == "function_call"
+    assert events[3].stop_reason == "tool_calls"
+    assert events[4].usage.total_tokens == 10
 
 
 async def test_parallel_stream_tool_calls_preserve_indexes_and_identity():

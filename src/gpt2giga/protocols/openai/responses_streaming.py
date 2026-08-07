@@ -41,6 +41,10 @@ class ResponsesStreamProjector:
         self._terminal = False
         self._output: list[dict[str, Any]] = []
         self._usage: NormalizedUsage | None = None
+        self._reasoning = ""
+        self._reasoning_item: dict[str, Any] | None = None
+        self._reasoning_output_index: int | None = None
+        self._reasoning_done = False
         self._text = ""
         self._text_item: dict[str, Any] | None = None
         self._text_output_index: int | None = None
@@ -76,6 +80,8 @@ class ResponsesStreamProjector:
             return []
         if event.type == "usage":
             return []
+        if event.type == "reasoning_delta":
+            return self._reasoning_delta(event.reasoning_delta or "")
         if event.type == "content_delta":
             return self._content_delta(event.content_delta or "")
         if event.type == "tool_call_start":
@@ -98,10 +104,6 @@ class ResponsesStreamProjector:
             return self._incomplete("client_disconnected")
         if event.type == "error":
             return self._error(event)
-        if event.type == "reasoning_delta":
-            raise ResponsesStreamProtocolError(
-                "reasoning_delta is outside the admitted Responses subset"
-            )
         raise ResponsesStreamProtocolError(f"unsupported event type: {event.type}")
 
     def finish(self) -> None:
@@ -137,7 +139,8 @@ class ResponsesStreamProjector:
         ]
 
     def _content_delta(self, delta: str) -> list[str]:
-        frames = self._ensure_text_item()
+        frames = self._complete_reasoning()
+        frames.extend(self._ensure_text_item())
         self._text += delta
         frames.append(
             self._frame(
@@ -152,6 +155,65 @@ class ResponsesStreamProjector:
             )
         )
         return frames
+
+    def _reasoning_delta(self, delta: str) -> list[str]:
+        reasoning = _reasoning_config(self.request_payload)
+        if not any(reasoning.values()):
+            raise ResponsesStreamProtocolError(
+                "reasoning delta was not requested by the Responses client"
+            )
+        if (
+            self._reasoning_done
+            or self._text_item is not None
+            or self._tool_item is not None
+        ):
+            raise ResponsesStreamProtocolError(
+                "reasoning delta arrived after answer output started"
+            )
+        frames = self._ensure_reasoning_item()
+        self._reasoning += delta
+        frames.append(
+            self._frame(
+                "response.reasoning_summary_text.delta",
+                {
+                    "item_id": self._reasoning_item["id"],
+                    "output_index": self._reasoning_output_index,
+                    "summary_index": 0,
+                    "delta": delta,
+                },
+            )
+        )
+        return frames
+
+    def _ensure_reasoning_item(self) -> list[str]:
+        if self._reasoning_item is not None:
+            return []
+        self._reasoning_output_index = len(self._output)
+        self._reasoning_item = {
+            "id": f"rs_{self.response_id}",
+            "type": "reasoning",
+            "summary": [],
+        }
+        self._output.append(self._reasoning_item)
+        part = {"type": "summary_text", "text": ""}
+        return [
+            self._frame(
+                "response.output_item.added",
+                {
+                    "output_index": self._reasoning_output_index,
+                    "item": dict(self._reasoning_item),
+                },
+            ),
+            self._frame(
+                "response.reasoning_summary_part.added",
+                {
+                    "item_id": self._reasoning_item["id"],
+                    "output_index": self._reasoning_output_index,
+                    "summary_index": 0,
+                    "part": part,
+                },
+            ),
+        ]
 
     def _ensure_text_item(self) -> list[str]:
         if self._text_item is not None:
@@ -207,7 +269,7 @@ class ResponsesStreamProjector:
                 "mixed text and tool output is outside the admitted stream subset"
             )
 
-        frames: list[str] = []
+        frames = self._complete_reasoning()
         if self._tool_item is None:
             if not start:
                 raise ResponsesStreamProtocolError("tool delta received before start")
@@ -263,12 +325,11 @@ class ResponsesStreamProjector:
         return frames
 
     def _complete(self, reason: str | None) -> list[str]:
+        frames = self._complete_reasoning()
         if self._text_item is None and self._tool_item is None:
-            frames = self._complete_hosted_tools()
+            frames.extend(self._complete_hosted_tools())
             if not frames:
-                frames = self._ensure_text_item()
-        else:
-            frames = []
+                frames.extend(self._ensure_text_item())
         if self._text_item is not None:
             frames.extend(self._complete_text())
         if self._tool_item is not None:
@@ -288,6 +349,40 @@ class ResponsesStreamProjector:
                 )
             )
         return frames
+
+    def _complete_reasoning(self) -> list[str]:
+        if self._reasoning_item is None or self._reasoning_done:
+            return []
+        self._reasoning_done = True
+        part = {"type": "summary_text", "text": self._reasoning}
+        self._reasoning_item["summary"] = [part]
+        return [
+            self._frame(
+                "response.reasoning_summary_text.done",
+                {
+                    "item_id": self._reasoning_item["id"],
+                    "output_index": self._reasoning_output_index,
+                    "summary_index": 0,
+                    "text": self._reasoning,
+                },
+            ),
+            self._frame(
+                "response.reasoning_summary_part.done",
+                {
+                    "item_id": self._reasoning_item["id"],
+                    "output_index": self._reasoning_output_index,
+                    "summary_index": 0,
+                    "part": part,
+                },
+            ),
+            self._frame(
+                "response.output_item.done",
+                {
+                    "output_index": self._reasoning_output_index,
+                    "item": dict(self._reasoning_item),
+                },
+            ),
+        ]
 
     def _complete_hosted_tools(self) -> list[str]:
         if self._hosted_items_emitted:
@@ -461,7 +556,7 @@ class ResponsesStreamProjector:
             "output": list(self._output) if output is None else output,
             "parallel_tool_calls": True,
             "previous_response_id": None,
-            "reasoning": {"effort": None, "summary": None},
+            "reasoning": _reasoning_config(self.request_payload),
             "store": True,
             "temperature": self.request_payload.get("temperature", 1),
             "text": text,
@@ -499,6 +594,14 @@ def _arguments_delta(value: Any) -> str:
     if isinstance(value, str):
         return value
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+
+def _reasoning_config(request_payload: dict[str, Any]) -> dict[str, Any]:
+    reasoning = request_payload.get("reasoning")
+    values = reasoning if isinstance(reasoning, dict) else {}
+    effort = values.get("effort", request_payload.get("reasoning_effort"))
+    summary = values.get("summary", values.get("generate_summary"))
+    return {"effort": effort, "summary": summary}
 
 
 def _usage(usage: NormalizedUsage | None) -> dict[str, int] | None:

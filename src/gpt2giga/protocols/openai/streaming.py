@@ -140,6 +140,8 @@ def _message_content(message: NormalizedMessage | None) -> str:
 def _message_reasoning(message: NormalizedMessage | None) -> str:
     if message is None:
         return ""
+    if message.reasoning_content is not None:
+        return message.reasoning_content
     value = message.raw_extensions.get("reasoning_content")
     return value if isinstance(value, str) else ""
 

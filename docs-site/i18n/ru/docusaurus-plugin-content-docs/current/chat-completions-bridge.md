@@ -27,6 +27,8 @@ Gemini CLI (GenerateContent) ┘
   включённый буферизованный режим из раздела ниже;
 - function tools и tool calls, если кодовые агенты должны вызывать локальные
   инструменты.
+- `reasoning_effort` и текстовый `reasoning_content`, если рассуждение Codex
+  должно переживать перевод Responses и следующий ход с результатом tool call.
 
 В стандартном SSE-режиме шлюз передаёт
 `stream_options: {"include_usage": true}`. В буферизованном режиме он вместо
@@ -56,6 +58,7 @@ profiles:
             - ordered_content_parts
             - text
             - generation_controls
+            - reasoning_controls_and_summaries
             - function_tools
             - tool_choice
             - parallel_tool_calls
@@ -89,6 +92,13 @@ profiles:
 проверки конкретной модели. Не добавляйте `count_tokens`: у одного Chat
 Completions endpoint нет точной операции подсчёта токенов.
 
+Указывайте `reasoning_controls_and_summaries`, только если модель принимает
+стандартный верхнеуровневый `reasoning_effort`, возвращает текстовый
+`reasoning_content` и снова принимает это поле в assistant-сообщении с tool
+call. Допустимые effort зависят от модели. Например, модель может принимать
+`xhigh`, но отклонять `max`; используйте максимальное значение, проверенное на
+этом конкретном endpoint.
+
 Можно указать и базу `https://inference.example/v1`: тогда gpt2giga добавит
 `chat/completions`. Полный адрес, заканчивающийся на `/chat/completions`,
 используется без изменения.
@@ -113,8 +123,10 @@ Completions endpoint нет точной операции подсчёта то�
 этом режиме нельзя измерять TTFT модели и инкрементальную отмену. По умолчанию
 используется строгий `sse`: gpt2giga не включает буферизацию автоматически,
 если upstream нарушил заявленный streaming-контракт. Специфичные для провайдера
-поля, например `reasoning_content`, не входят в проверенное подмножество моста и
-игнорируются.
+поля не входят в мост без явно заявленной capability. При
+`reasoning_controls_and_summaries` поле `reasoning_content` выдаётся перед
+ответом или function call как Responses reasoning summary и в настоящем SSE,
+и в буферизованном режиме.
 
 ### Локальный upstream
 
@@ -231,8 +243,9 @@ model = "bridge/chat-only"
 model_provider = "gpt2giga_chat"
 model_context_window = 32768
 model_auto_compact_token_limit = 24576
-model_supports_reasoning_summaries = false
-model_reasoning_summary = "none"
+model_supports_reasoning_summaries = true
+model_reasoning_summary = "auto"
+model_reasoning_effort = "xhigh"
 web_search = "disabled"
 ```
 
@@ -268,9 +281,9 @@ codex -a never exec --json \
   -c model_providers.gpt2giga_chat.supports_websockets=false \
   -c model_context_window=32768 \
   -c model_auto_compact_token_limit=24576 \
-  -c model_supports_reasoning_summaries=false \
-  -c model_reasoning_summary=none \
-  -c model_reasoning_effort=none \
+  -c model_supports_reasoning_summaries=true \
+  -c model_reasoning_summary=auto \
+  -c model_reasoning_effort=xhigh \
   -c web_search=disabled \
   'Выполни задачу бенчмарка.'
 ```
@@ -296,6 +309,20 @@ namespace tools перед вызовом upstream и восстанавлива
 вернувшихся function calls. Он принимает служебные item id, которые Codex
 повторяет в истории, и сохраняет идентификатор вызова до следующего
 `function_call_output`.
+
+Когда reasoning включён, шлюз передаёт effort из Responses как Chat
+Completions `reasoning_effort`. Вернувшийся `reasoning_content` становится
+элементом `reasoning` с одной частью `summary_text`. Если Codex повторит этот
+элемент перед function call, gpt2giga восстановит текст как assistant
+`reasoning_content` в следующем запросе Chat Completions. Обычная stateless-
+подсказка `include: ["reasoning.encrypted_content"]` принимается, но шлюз не
+утверждает, что создаёт зашифрованное reasoning-состояние OpenAI: для повторной
+передачи используется текстовый summary.
+
+Это явно обозначенная совместимая проекция текста рассуждения провайдера, а не
+summary, созданный OpenAI. Upstream из проверенного примера не возвращает
+пригодное число reasoning-токенов, поэтому gpt2giga оставляет эту детализацию
+недоступной и не пытается вычислить её из текста.
 
 Codex запрашивает `/v1/models?client_version=...` в собственном формате
 каталога, который включает принадлежащие Codex базовые инструкции и метаданные
@@ -423,7 +450,8 @@ Gemini передаёт `GEMINI_API_KEY` в Google-совместимой фор
 Мост поддерживает текстовые роли, общие параметры генерации, function tools и
 их результаты, tool choice там, где целевой протокол умеет его выразить,
 потоковые ответы, terminal stop reasons, usage при наличии в upstream,
-отмену и заявленные лимиты контекста.
+отмену, заявленные лимиты контекста и включаемые через профиль Responses
+reasoning controls с повторной передачей summary.
 
 Поддержан полный stateless-цикл инструмента: клиент передаёт определения
 функций, получает потоковый или обычный вызов, выполняет его локально и в
@@ -435,7 +463,8 @@ Responses, Anthropic Messages и Gemini GenerateContent.
 
 - состояние Responses: `previous_response_id`, conversations, background jobs
   и долговременный `store`;
-- reasoning/thinking и reasoning summaries;
+- нативное зашифрованное reasoning-состояние, независимые от провайдера
+  thinking controls и точный учёт reasoning-токенов;
 - семантику prompt cache и точный cached-token accounting;
 - hosted web search, computer use, code execution и provider-native tools;
 - Responses custom/freeform tools, например `apply_patch`;
@@ -458,6 +487,7 @@ Responses, Anthropic Messages и Gemini GenerateContent.
 | В запросе Gemini есть `topK` или `thinkingConfig` | Задайте минимальный пользовательский алиас под точным публичным id `bridge/chat-only`: алиас с другим именем действует только на первый запрос tool-loop. |
 | Claude вызывает `count_tokens` | Для upstream только с Chat Completions эта операция намеренно не поддерживается. |
 | Codex предупреждает о метаданных модели | Оставьте явные context/compaction значения в профиле Codex; обычные запросы продолжат работу. |
+| Upstream отклоняет `reasoning_effort=max` | Набор effort зависит от модели. Используйте максимальное проверенное значение, например `xhigh`, и привязывайте capability profile к этой модели. |
 | `provider_protocol_error` в потоке | Проверьте корректный Chat Completions SSE, terminal choice, порядок optional usage и завершающий `[DONE]`. |
 
 Полная схема находится в разделе

@@ -465,6 +465,47 @@ def test_responses_adapter_flattens_namespaced_function_call_history() -> None:
     assert normalized.messages[1].tool_call_id == "call-1"
 
 
+def test_responses_adapter_replays_reasoning_summary_with_function_call() -> None:
+    normalized = OpenAIProtocolAdapter().responses_to_normalized(
+        {
+            "model": "bridge/chat-only",
+            "input": [
+                {
+                    "type": "reasoning",
+                    "id": "rs_fixture",
+                    "summary": [
+                        {
+                            "type": "summary_text",
+                            "text": "Need to inspect the workspace.",
+                        }
+                    ],
+                },
+                {
+                    "type": "function_call",
+                    "name": "read_file",
+                    "call_id": "call-1",
+                    "arguments": '{"path":"README.md"}',
+                },
+                {
+                    "type": "function_call_output",
+                    "call_id": "call-1",
+                    "output": "contents",
+                },
+            ],
+            "reasoning": {"effort": "xhigh", "summary": "auto"},
+            "include": ["reasoning.encrypted_content"],
+            "store": False,
+        }
+    )
+
+    assert normalized.messages[0].reasoning_content == (
+        "Need to inspect the workspace."
+    )
+    assert normalized.messages[0].tool_calls[0].name == "read_file"
+    assert normalized.messages[1].tool_call_id == "call-1"
+    assert normalized.response_state is None
+
+
 def test_responses_adapter_preserves_previous_response_state() -> None:
     normalized = OpenAIProtocolAdapter().responses_to_normalized(
         {

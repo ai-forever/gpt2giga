@@ -73,10 +73,25 @@ def normalized_chat_response_to_responses(
 
     status, incomplete_details = _responses_status(response)
     output: list[dict[str, Any]] = []
+    reasoning_config = _responses_reasoning_config(request_payload)
     for choice_index, choice in enumerate(response.choices):
         message = choice.message
         if message is None:
             continue
+        reasoning_text = _message_reasoning(message)
+        if reasoning_text and any(reasoning_config.values()):
+            output.append(
+                {
+                    "id": f"rs_{response_id}_{choice_index}",
+                    "type": "reasoning",
+                    "summary": [
+                        {
+                            "type": "summary_text",
+                            "text": reasoning_text,
+                        }
+                    ],
+                }
+            )
         hosted_items = ResponseProcessor.create_hosted_tool_response_items(
             message.raw_extensions,
             response_id,
@@ -127,7 +142,7 @@ def normalized_chat_response_to_responses(
         "output": output,
         "parallel_tool_calls": True,
         "previous_response_id": None,
-        "reasoning": {"effort": None, "summary": None},
+        "reasoning": reasoning_config,
         "store": True,
         "temperature": request_payload.get("temperature", 1),
         "text": response_text,
@@ -161,6 +176,9 @@ def _message_to_openai(message: NormalizedMessage | None) -> dict[str, Any]:
     }
     if message.name is not None:
         payload["name"] = message.name
+    reasoning_content = _message_reasoning(message)
+    if reasoning_content:
+        payload["reasoning_content"] = reasoning_content
     if message.tool_call_id is not None:
         payload["tool_call_id"] = message.tool_call_id
     if message.tool_calls:
@@ -238,6 +256,21 @@ def _responses_message_text(message: NormalizedMessage) -> str | None:
         if part.type == "text" and part.text is not None
     ]
     return "".join(parts) if parts else None
+
+
+def _message_reasoning(message: NormalizedMessage) -> str | None:
+    if message.reasoning_content is not None:
+        return message.reasoning_content
+    value = message.raw_extensions.get("reasoning_content")
+    return value if isinstance(value, str) else None
+
+
+def _responses_reasoning_config(request_payload: dict[str, Any]) -> dict[str, Any]:
+    reasoning = request_payload.get("reasoning")
+    values = reasoning if isinstance(reasoning, dict) else {}
+    effort = values.get("effort", request_payload.get("reasoning_effort"))
+    summary = values.get("summary", values.get("generate_summary"))
+    return {"effort": effort, "summary": summary}
 
 
 def _responses_status(

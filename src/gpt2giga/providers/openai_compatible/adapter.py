@@ -726,6 +726,8 @@ def normalized_chat_to_openai_compatible_payload(
             "type": request.response_format.type,
             "json_schema": request.response_format.json_schema,
         }
+    if request.reasoning is not None and request.reasoning.effort is not None:
+        payload["reasoning_effort"] = request.reasoning.effort
     generation = request.generation_config
     for source, target in (
         ("temperature", "temperature"),
@@ -829,6 +831,15 @@ def _buffered_response_to_stream_events(
         "model": response.model,
         "choice_index": choice.index,
     }
+    if message.reasoning_content:
+        events.append(
+            NormalizedStreamEvent(
+                type="reasoning_delta",
+                sequence=sequence + len(events),
+                reasoning_delta=message.reasoning_content,
+                **common,
+            )
+        )
     if message.content:
         events.append(
             NormalizedStreamEvent(
@@ -920,6 +931,8 @@ def _message_to_openai(message: NormalizedMessage) -> dict[str, Any]:
         payload["content"] = message.content
     if message.name is not None:
         payload["name"] = message.name
+    if message.reasoning_content is not None:
+        payload["reasoning_content"] = message.reasoning_content
     if message.tool_call_id is not None:
         payload["tool_call_id"] = message.tool_call_id
     if message.tool_calls:
@@ -962,9 +975,16 @@ def _response_message(payload: Mapping[str, Any]) -> NormalizedMessage:
             "invalid_message_content",
             "Upstream response message content must be text or null.",
         )
+    reasoning_content = payload.get("reasoning_content")
+    if reasoning_content is not None and not isinstance(reasoning_content, str):
+        raise _protocol_error(
+            "invalid_reasoning_content",
+            "Upstream response reasoning content must be text or null.",
+        )
     return NormalizedMessage(
         role=_optional_string(payload.get("role")) or "assistant",
         content=content,
+        reasoning_content=reasoning_content,
         tool_calls=tool_calls,
     )
 
@@ -1035,6 +1055,22 @@ def _chunk_to_events(
             raise _protocol_error(
                 "invalid_stream_delta",
                 "Upstream stream delta must be an object.",
+            )
+        reasoning_content = delta.get("reasoning_content")
+        if reasoning_content is not None:
+            if not isinstance(reasoning_content, str):
+                raise _protocol_error(
+                    "invalid_stream_reasoning_content",
+                    "Upstream stream reasoning delta must be text.",
+                )
+            events.append(
+                NormalizedStreamEvent(
+                    type="reasoning_delta",
+                    sequence=sequence + len(events),
+                    choice_index=choice_index,
+                    model=model,
+                    reasoning_delta=reasoning_content,
+                )
             )
         content = delta.get("content")
         if content is not None:

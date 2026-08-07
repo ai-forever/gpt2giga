@@ -81,7 +81,10 @@ def _normalized_text_and_reasoning(
     text = _content_text(message.content)
     parsed = extract_reasoning_from_content(text)
     reasoning = merge_reasoning_text(
-        _string_or_none(message.raw_extensions.get("reasoning_content")),
+        merge_reasoning_text(
+            message.reasoning_content,
+            _string_or_none(message.raw_extensions.get("reasoning_content")),
+        ),
         parsed.reasoning_content,
     )
     inline_data = message.raw_extensions.get("inline_data")

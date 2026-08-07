@@ -119,7 +119,7 @@ def responses_request_to_normalized(
         response_format=_normalize_text_format(data.get("text")),
         generation_config=_normalize_generation_config(data),
         reasoning=reasoning,
-        response_state=_normalize_state_intent(data, reasoning=reasoning),
+        response_state=_normalize_state_intent(data),
         metadata=dict(metadata) if isinstance(metadata, Mapping) else {},
     )
 
@@ -143,26 +143,72 @@ def _normalize_input(
         _invalid("input")
 
     messages: list[NormalizedMessage] = []
+    pending_reasoning: str | None = None
     for index, item in enumerate(value):
         path = f"input[{index}]"
         if not isinstance(item, Mapping):
             _invalid(path)
         item_type = item.get("type", "message")
+        if item_type == "reasoning":
+            if pending_reasoning is not None:
+                _unsupported(f"{path}.type")
+            pending_reasoning = _normalize_reasoning_item(item, path=path)
+            continue
+        if pending_reasoning is not None and item_type != "function_call":
+            _unsupported(f"{path}.type")
         if item_type == "message":
             messages.append(_normalize_input_message(item, path=path))
         elif item_type == "function_call":
-            messages.append(
-                _normalize_function_call(
-                    item,
-                    path=path,
-                    request_tools=request_tools,
-                )
+            message = _normalize_function_call(
+                item,
+                path=path,
+                request_tools=request_tools,
             )
+            if pending_reasoning is not None:
+                message = message.model_copy(
+                    update={"reasoning_content": pending_reasoning}
+                )
+                pending_reasoning = None
+            messages.append(message)
         elif item_type == "function_call_output":
             messages.append(_normalize_function_output(item, path=path))
         else:
             _unsupported(f"{path}.type")
+    if pending_reasoning is not None:
+        _unsupported(f"input[{len(value) - 1}].type")
     return messages
+
+
+def _normalize_reasoning_item(
+    item: Mapping[str, Any],
+    *,
+    path: str,
+) -> str:
+    """Recover an emitted Responses reasoning summary for a tool-call replay."""
+    _reject_unknown_fields(
+        item,
+        {"encrypted_content", "id", "status", "summary", "type"},
+        path=path,
+    )
+    _validate_replayed_output_item(item, path=path)
+    encrypted_content = item.get("encrypted_content")
+    if encrypted_content is not None:
+        _unsupported(f"{path}.encrypted_content")
+    summary = item.get("summary")
+    if not isinstance(summary, list) or not summary:
+        _invalid(f"{path}.summary")
+    texts: list[str] = []
+    for index, part in enumerate(summary):
+        part_path = f"{path}.summary[{index}]"
+        if not isinstance(part, Mapping):
+            _invalid(part_path)
+        _reject_unknown_fields(part, {"text", "type"}, path=part_path)
+        if part.get("type") != "summary_text":
+            if isinstance(part.get("type"), str):
+                _unsupported(f"{part_path}.type")
+            _invalid(f"{part_path}.type")
+        texts.append(_required_string(part.get("text"), f"{part_path}.text"))
+    return "".join(texts)
 
 
 def _normalize_input_message(
@@ -396,8 +442,6 @@ def _normalize_reasoning_intent(
 
 def _normalize_state_intent(
     data: Mapping[str, Any],
-    *,
-    reasoning: NormalizedReasoningIntent | None,
 ) -> NormalizedStateIntent | None:
     state_fields = {
         "background",
@@ -451,7 +495,6 @@ def _normalize_state_intent(
         and store in {None, False}
         and background in {None, False}
         and set(include_values) <= {"reasoning.encrypted_content"}
-        and reasoning is None
     ):
         return None
     return NormalizedStateIntent(

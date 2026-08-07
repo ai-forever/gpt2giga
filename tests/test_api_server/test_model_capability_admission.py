@@ -116,9 +116,13 @@ def test_runtime_rejects_hosted_web_tool_for_v1_before_dispatch() -> None:
 
 
 @pytest.mark.parametrize(
-    ("request_kwargs", "field"),
+    ("request_kwargs", "field", "reason_id"),
     [
-        ({"reasoning": NormalizedReasoningIntent(effort="high")}, "reasoning"),
+        (
+            {"reasoning": NormalizedReasoningIntent(effort="high")},
+            "reasoning",
+            "requires_reviewed_capability",
+        ),
         (
             {
                 "response_state": NormalizedStateIntent(
@@ -126,16 +130,19 @@ def test_runtime_rejects_hosted_web_tool_for_v1_before_dispatch() -> None:
                 )
             },
             "previous_response_id",
+            "semantic_not_proven",
         ),
         (
             {"response_state": NormalizedStateIntent(conversation_id="conv_previous")},
             "conversation",
+            "semantic_not_proven",
         ),
     ],
 )
 def test_runtime_rejects_preserved_unproven_intent_after_route_resolution(
     request_kwargs: dict,
     field: str,
+    reason_id: str,
 ) -> None:
     app = _app()
     request = NormalizedChatRequest(
@@ -147,4 +154,4 @@ def test_runtime_rejects_preserved_unproven_intent_after_route_resolution(
         app.state.bridge_provider_runtime.adapter_for(request, api_mode="v2")
 
     assert captured.value.public_field_path == field
-    assert captured.value.reason_id == "semantic_not_proven"
+    assert captured.value.reason_id == reason_id

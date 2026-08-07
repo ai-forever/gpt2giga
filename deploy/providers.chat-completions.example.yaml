@@ -17,6 +17,7 @@ profiles:
             - ordered_content_parts
             - text
             - generation_controls
+            - reasoning_controls_and_summaries
             - function_tools
             - tool_choice
             - tool_results

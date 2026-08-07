@@ -875,16 +875,29 @@ def test_codex_runtime_envelope_reaches_chat_and_restores_namespace(
     def handler(request: httpx.Request) -> httpx.Response:
         payload = json.loads(request.content)
         observed.append(payload)
-        assert [message["role"] for message in payload["messages"]] == [
-            "system",
-            "user",
-        ]
+        expected_roles = ["system", "user"]
+        if len(observed) == 2:
+            expected_roles.extend(["assistant", "tool"])
+        assert [message["role"] for message in payload["messages"]] == expected_roles
         assert [tool["function"]["name"] for tool in payload["tools"]] == [
             "exec_command",
             "multi_agent_v1__spawn_agent",
         ]
         assert all("strict" not in tool["function"] for tool in payload["tools"])
         assert payload["parallel_tool_calls"] is False
+        assert payload["reasoning_effort"] == "xhigh"
+        if len(observed) == 2:
+            assistant = payload["messages"][2]
+            assert assistant["reasoning_content"] == "Need another agent."
+            assert assistant["tool_calls"][0]["function"]["name"] == (
+                "multi_agent_v1__spawn_agent"
+            )
+            assert payload["messages"][3] == {
+                "role": "tool",
+                "content": "agent started",
+                "tool_call_id": "call_namespace",
+            }
+            return httpx.Response(200, json=_chat_response())
         return httpx.Response(
             200,
             json={
@@ -895,6 +908,7 @@ def test_codex_runtime_envelope_reaches_chat_and_restores_namespace(
                         "message": {
                             "role": "assistant",
                             "content": None,
+                            "reasoning_content": "Need another agent.",
                             "tool_calls": [
                                 {
                                     "id": "call_namespace",
@@ -913,66 +927,93 @@ def test_codex_runtime_envelope_reaches_chat_and_restores_namespace(
         )
 
     app = _app(tmp_path, handler)
+    input_items = [
+        {
+            "type": "message",
+            "id": "msg_developer",
+            "role": "developer",
+            "content": [{"type": "input_text", "text": "Use tools carefully."}],
+        },
+        {
+            "type": "message",
+            "id": "msg_user",
+            "role": "user",
+            "content": [{"type": "input_text", "text": "Inspect."}],
+        },
+    ]
+    tools = [
+        {
+            "type": "function",
+            "name": "exec_command",
+            "description": "Run a command.",
+            "parameters": {"type": "object"},
+            "strict": False,
+        },
+        {
+            "type": "namespace",
+            "name": "multi_agent_v1",
+            "description": "Agent tools.",
+            "tools": [
+                {
+                    "type": "function",
+                    "name": "spawn_agent",
+                    "description": "Spawn one agent.",
+                    "parameters": {"type": "object"},
+                    "strict": False,
+                }
+            ],
+        },
+    ]
     with TestClient(app) as client:
         response = client.post(
             "/v1/responses",
             json={
                 "model": MODEL_ALIAS,
-                "input": [
-                    {
-                        "type": "message",
-                        "id": "msg_developer",
-                        "role": "developer",
-                        "content": [
-                            {"type": "input_text", "text": "Use tools carefully."}
-                        ],
-                    },
-                    {
-                        "type": "message",
-                        "id": "msg_user",
-                        "role": "user",
-                        "content": [{"type": "input_text", "text": "Inspect."}],
-                    },
-                ],
-                "tools": [
-                    {
-                        "type": "function",
-                        "name": "exec_command",
-                        "description": "Run a command.",
-                        "parameters": {"type": "object"},
-                        "strict": False,
-                    },
-                    {
-                        "type": "namespace",
-                        "name": "multi_agent_v1",
-                        "description": "Agent tools.",
-                        "tools": [
-                            {
-                                "type": "function",
-                                "name": "spawn_agent",
-                                "description": "Spawn one agent.",
-                                "parameters": {"type": "object"},
-                                "strict": False,
-                            }
-                        ],
-                    },
-                ],
+                "input": input_items,
+                "tools": tools,
                 "tool_choice": "auto",
                 "parallel_tool_calls": False,
-                "reasoning": {},
+                "reasoning": {"effort": "xhigh", "summary": "auto"},
                 "store": False,
                 "include": ["reasoning.encrypted_content"],
                 "prompt_cache_key": "session-1",
                 "client_metadata": {"session_id": "session-1"},
             },
         )
+        assert response.status_code == 200, response.text
+        first_output = response.json()["output"]
+        follow_up = client.post(
+            "/v1/responses",
+            json={
+                "model": MODEL_ALIAS,
+                "input": [
+                    *input_items,
+                    *first_output,
+                    {
+                        "type": "function_call_output",
+                        "call_id": "call_namespace",
+                        "output": "agent started",
+                    },
+                ],
+                "tools": tools,
+                "tool_choice": "auto",
+                "parallel_tool_calls": False,
+                "reasoning": {"effort": "xhigh", "summary": "auto"},
+                "store": False,
+                "include": ["reasoning.encrypted_content"],
+            },
+        )
 
     assert response.status_code == 200, response.text
-    function_call = response.json()["output"][0]
+    reasoning, function_call = response.json()["output"]
+    assert reasoning["type"] == "reasoning"
+    assert reasoning["summary"][0]["text"] == "Need another agent."
     assert function_call["type"] == "function_call"
     assert function_call["name"] == "spawn_agent"
     assert function_call["namespace"] == "multi_agent_v1"
-    assert len(observed) == 1
+    assert follow_up.status_code == 200, follow_up.text
+    assert follow_up.json()["output"][0]["content"][0]["text"] == "facade-ok"
+    assert len(observed) == 2
 
 
 def test_claude_code_runtime_envelope_reaches_chat(tmp_path: Path) -> None:

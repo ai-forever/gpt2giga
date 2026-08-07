@@ -26,6 +26,8 @@ You need:
 - either Chat Completions SSE with a terminal `data: [DONE]` frame or the
   explicit buffered mode described below;
 - function tools and tool calls if the coding clients should use local tools.
+- `reasoning_effort` plus textual `reasoning_content` if Codex reasoning should
+  survive Responses translation and tool-call replay.
 
 In the default SSE mode, the gateway requests stream usage with
 `stream_options: {"include_usage": true}`. Buffered mode instead sends
@@ -55,6 +57,7 @@ profiles:
             - ordered_content_parts
             - text
             - generation_controls
+            - reasoning_controls_and_summaries
             - function_tools
             - tool_choice
             - parallel_tool_calls
@@ -88,6 +91,12 @@ The `features` list is an allowlist, not a wish list. Add
 has been verified to support them. Do not add `count_tokens`: a Chat
 Completions endpoint has no exact token-count operation.
 
+Declare `reasoning_controls_and_summaries` only when the model accepts the
+standard top-level `reasoning_effort`, returns textual `reasoning_content`, and
+accepts that field again on an assistant tool-call message. Supported effort
+values are model-specific. For example, a model may accept `xhigh` while
+rejecting `max`; use the highest value verified against that exact endpoint.
+
 The endpoint may also be written as `https://inference.example/v1`; gpt2giga
 then appends `chat/completions`. A full endpoint ending in
 `/chat/completions` is used unchanged.
@@ -112,8 +121,10 @@ function-call event arrives only after the model has finished the complete
 response, so model TTFT and incremental cancellation cannot be measured through
 this mode. The default is strict `sse`; gpt2giga never enables buffering merely
 because an upstream violated its declared streaming contract. Provider-specific
-fields such as `reasoning_content` are outside the reviewed bridge subset and
-are ignored.
+fields remain outside the bridge unless an explicit capability admits them.
+With `reasoning_controls_and_summaries`, `reasoning_content` is emitted before
+the answer or function call as a Responses reasoning summary in both true SSE
+and buffered mode.
 
 ### Local upstream
 
@@ -230,8 +241,9 @@ model = "bridge/chat-only"
 model_provider = "gpt2giga_chat"
 model_context_window = 32768
 model_auto_compact_token_limit = 24576
-model_supports_reasoning_summaries = false
-model_reasoning_summary = "none"
+model_supports_reasoning_summaries = true
+model_reasoning_summary = "auto"
+model_reasoning_effort = "xhigh"
 web_search = "disabled"
 ```
 
@@ -267,9 +279,9 @@ codex -a never exec --json \
   -c model_providers.gpt2giga_chat.supports_websockets=false \
   -c model_context_window=32768 \
   -c model_auto_compact_token_limit=24576 \
-  -c model_supports_reasoning_summaries=false \
-  -c model_reasoning_summary=none \
-  -c model_reasoning_effort=none \
+  -c model_supports_reasoning_summaries=true \
+  -c model_reasoning_summary=auto \
+  -c model_reasoning_effort=xhigh \
   -c web_search=disabled \
   'Complete the benchmark task.'
 ```
@@ -295,6 +307,20 @@ flattens namespace tools before the upstream call, and restores their namespace
 in returned function calls. It accepts the server-generated item ids replayed
 by Codex and preserves function call ids through the following
 `function_call_output` turn.
+
+When reasoning is enabled, the bridge sends the requested Responses effort as
+Chat Completions `reasoning_effort`. Returned `reasoning_content` becomes a
+`reasoning` output item with one `summary_text` part. If Codex replays that item
+before a function call, gpt2giga restores the text as assistant
+`reasoning_content` on the next Chat Completions request. The common stateless
+hint `include: ["reasoning.encrypted_content"]` is accepted, but the bridge does
+not claim to produce OpenAI-encrypted reasoning state: the textual summary is
+the replay mechanism.
+
+This is an explicit compatibility projection of provider reasoning text, not
+an OpenAI-generated reasoning summary. The upstream in the verified example
+does not report a usable reasoning-token count, so gpt2giga leaves that detail
+unavailable instead of deriving it from text.
 
 Codex requests `/v1/models?client_version=...` using a private catalog shape
 that includes Codex-owned base instructions and tool metadata. For that exact
@@ -419,7 +445,8 @@ The model configuration format is described in the
 The bridge supports text roles, common generation controls, function tools and
 results, tool choice where the target protocol can express it, streaming,
 terminal stop reasons, usage when returned by the upstream, cancellation, and
-declared context limits.
+declared context limits, and profile-gated Responses reasoning controls and
+summary replay.
 
 A complete stateless tool loop is supported: the client sends function
 definitions, receives a streamed or non-streamed call, executes it locally,
@@ -431,7 +458,8 @@ It does not emulate:
 
 - Responses state such as `previous_response_id`, conversations, background
   jobs, or durable `store` behavior;
-- reasoning/thinking or reasoning summaries;
+- native encrypted reasoning state, provider-independent thinking controls, or
+  exact reasoning-token accounting;
 - prompt-cache semantics and exact cached-token accounting;
 - hosted web search, computer use, code execution, or provider-native tools;
 - Responses custom/freeform tools such as `apply_patch`;
@@ -454,6 +482,7 @@ subset returns `unsupported_semantic` before upstream I/O.
 | Gemini request mentions `topK` or `thinkingConfig` | Define the minimal custom alias under the exact public id `bridge/chat-only`; a differently named alias applies only to the first tool-loop request. |
 | Claude asks for `count_tokens` | That operation is deliberately unsupported for a Chat Completions-only upstream. |
 | Codex model-metadata warning | Keep the explicit context and compaction values in the Codex profile; standard requests still proceed. |
+| Upstream rejects `reasoning_effort=max` | Effort values are model-specific. Use the highest value verified for that model, such as `xhigh`, and keep the capability profile tied to it. |
 | `provider_protocol_error` during streaming | Verify that the upstream emits valid Chat Completions SSE, a terminal choice, optional usage in the correct order, and `[DONE]`. |
 
 For the profile schema and routing security contract, see

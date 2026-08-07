@@ -14,6 +14,7 @@ from gpt2giga.protocols.normalized import (
     NormalizedGenerationConfig,
     NormalizedImageReference,
     NormalizedMessage,
+    NormalizedReasoningIntent,
     NormalizedProtocolCapabilities,
     NormalizedResponseFormat,
     NormalizedTokenCountRequest,
@@ -192,6 +193,49 @@ def test_bridge_admission_enforces_declared_token_limits():
             upstream=_capabilities(),
             downstream_capabilities=frozenset(BridgeFeature),
             input_token_count=8000,
+        )
+
+
+def test_reasoning_bridge_requires_capability_and_rejects_unmapped_controls():
+    request = NormalizedChatRequest(
+        messages=[NormalizedMessage(role="user", content="Think carefully.")],
+        reasoning=NormalizedReasoningIntent(effort="xhigh", summary="auto"),
+    )
+
+    admission = admit_protocol_bridge_request(
+        request,
+        downstream=DownstreamProtocol.OPENAI,
+        upstream=_capabilities(),
+        downstream_capabilities=frozenset(BridgeFeature),
+    )
+    assert BridgeFeature.REASONING_CONTROLS_AND_SUMMARIES in admission.required_features
+
+    without_reasoning = frozenset(BridgeFeature) - {
+        BridgeFeature.REASONING_CONTROLS_AND_SUMMARIES
+    }
+    with pytest.raises(
+        UnsupportedSemanticLossError,
+        match="reasoning_controls_and_summaries",
+    ):
+        admit_protocol_bridge_request(
+            request,
+            downstream=DownstreamProtocol.OPENAI,
+            upstream=_capabilities(features=without_reasoning),
+            downstream_capabilities=frozenset(BridgeFeature),
+        )
+
+    with pytest.raises(UnsupportedSemanticLossError, match="reasoning.context"):
+        admit_protocol_bridge_request(
+            request.model_copy(
+                update={
+                    "reasoning": NormalizedReasoningIntent(
+                        effort="xhigh", context="all_turns"
+                    )
+                }
+            ),
+            downstream=DownstreamProtocol.OPENAI,
+            upstream=_capabilities(),
+            downstream_capabilities=frozenset(BridgeFeature),
         )
 
 
