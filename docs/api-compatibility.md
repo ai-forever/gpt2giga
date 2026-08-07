@@ -41,7 +41,7 @@ Examples:
 
 | Route / group | Status | Comment |
 |---|---|---|
-| `GET /models` | Supported | Dynamic GigaChat inventory or static provider-profile aliases in OpenAI form. |
+| `GET /models` | Supported | Dynamic GigaChat inventory or static provider-profile aliases in OpenAI form. A Codex request with `client_version` receives an empty native Codex catalog so an explicitly configured custom model retains client-owned instructions and tool metadata. |
 | `GET /models/{model}` | Supported | One dynamic model or exact static alias in OpenAI form. |
 | `POST /chat/completions` | Supported | Non-streaming and streaming chat, tools/function calling, structured output, attachments where supported. |
 | `POST /responses` | Stable native / normalized preview | Native GigaChat execution preserves the compatibility surface, including hosted tools and attachment handoff. Route-selected normalized execution is technical preview and rejects semantics that its selected route/model/API mode cannot preserve. |

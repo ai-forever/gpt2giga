@@ -315,6 +315,10 @@ def test_static_profile_inventory_is_exposed_without_provider_io(
     app = _app(tmp_path, handler)
     with TestClient(app) as client:
         openai_models = client.get("/v1/models")
+        codex_models = client.get(
+            "/v1/models",
+            params={"client_version": "0.146.0"},
+        )
         anthropic_models = client.get(
             "/v1/models",
             headers={"anthropic-version": "2023-06-01"},
@@ -325,6 +329,8 @@ def test_static_profile_inventory_is_exposed_without_provider_io(
 
     assert openai_models.status_code == 200, openai_models.text
     assert [item["id"] for item in openai_models.json()["data"]] == [MODEL_ALIAS]
+    assert codex_models.status_code == 200, codex_models.text
+    assert codex_models.json() == {"models": []}
     assert anthropic_models.status_code == 200, anthropic_models.text
     assert [item["id"] for item in anthropic_models.json()["data"]] == [MODEL_ALIAS]
     assert gemini_models.status_code == 200, gemini_models.text

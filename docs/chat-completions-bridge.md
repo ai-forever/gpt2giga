@@ -221,6 +221,10 @@ codex -a never exec --json \
   -c model_providers.gpt2giga_chat.env_key=GPT2GIGA_API_KEY \
   -c model_providers.gpt2giga_chat.wire_api=responses \
   -c model_providers.gpt2giga_chat.supports_websockets=false \
+  -c model_context_window=32768 \
+  -c model_auto_compact_token_limit=24576 \
+  -c model_supports_reasoning_summaries=false \
+  -c model_reasoning_summary=none \
   -c model_reasoning_effort=none \
   -c web_search=disabled \
   'Complete the benchmark task.'
@@ -248,10 +252,15 @@ in returned function calls. It accepts the server-generated item ids replayed
 by Codex and preserves function call ids through the following
 `function_call_output` turn.
 
-The current Codex CLI may warn that `/v1/models` does not contain its richer
-Codex-specific model metadata. gpt2giga intentionally returns the standard
-OpenAI model-list shape and Codex falls back to the explicit profile values
-above. This warning does not prevent a request.
+Codex requests `/v1/models?client_version=...` using a private catalog shape
+that includes Codex-owned base instructions and tool metadata. For that exact
+request, gpt2giga returns a valid empty Codex catalog without contacting the
+inference server. An explicitly selected custom model then keeps Codex's own
+fallback instructions and tool metadata, while the explicit context and
+compaction values above replace the fallback token limits. Ordinary OpenAI
+clients still receive the static aliases in the standard `data` list. Always
+pass `-m` or set `model` when using this bridge; the empty Codex catalog cannot
+select a default model for the client.
 
 Codex configuration fields and profile-file precedence are documented in the
 [official Codex configuration reference](https://learn.chatgpt.com/docs/config-file/config-basic).

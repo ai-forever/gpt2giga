@@ -42,7 +42,7 @@ OpenAI-compatible Chat Completions server.
 
 | Маршрут / группа | Статус | Комментарий |
 |---|---|---|
-| `GET /models` | Поддерживается | Динамический каталог GigaChat или статические алиасы профилей в форме OpenAI. |
+| `GET /models` | Поддерживается | Динамический каталог GigaChat или статические алиасы профилей в форме OpenAI. Запрос Codex с `client_version` получает пустой нативный каталог Codex, чтобы явно настроенная пользовательская модель сохранила принадлежащие клиенту инструкции и метаданные инструментов. |
 | `GET /models/{model}` | Поддерживается | Одна динамическая модель или точный статический алиас в форме OpenAI. |
 | `POST /chat/completions` | Поддерживается | Чат без потоковой передачи и потоковый, инструменты/вызов функций, структурированный вывод, вложения там, где поддерживаются. |
 | `POST /responses` | Stable native / normalized preview | Native GigaChat execution сохраняет compatibility surface, включая hosted tools и attachment handoff. Route-selected normalized execution остаётся technical preview и отклоняет semantics, которые выбранные route/model/API mode не сохраняют. |

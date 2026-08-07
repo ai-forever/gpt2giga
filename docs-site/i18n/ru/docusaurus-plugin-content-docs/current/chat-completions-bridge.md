@@ -222,6 +222,10 @@ codex -a never exec --json \
   -c model_providers.gpt2giga_chat.env_key=GPT2GIGA_API_KEY \
   -c model_providers.gpt2giga_chat.wire_api=responses \
   -c model_providers.gpt2giga_chat.supports_websockets=false \
+  -c model_context_window=32768 \
+  -c model_auto_compact_token_limit=24576 \
+  -c model_supports_reasoning_summaries=false \
+  -c model_reasoning_summary=none \
   -c model_reasoning_effort=none \
   -c web_search=disabled \
   'Выполни задачу бенчмарка.'
@@ -249,10 +253,16 @@ namespace tools перед вызовом upstream и восстанавлива
 повторяет в истории, и сохраняет идентификатор вызова до следующего
 `function_call_output`.
 
-Текущий Codex CLI может предупредить, что `/v1/models` не содержит расширенных
-метаданных собственного каталога Codex. gpt2giga намеренно возвращает
-стандартный OpenAI-формат списка моделей, а Codex использует явные значения из
-профиля выше. Предупреждение не блокирует запросы.
+Codex запрашивает `/v1/models?client_version=...` в собственном формате
+каталога, который включает принадлежащие Codex базовые инструкции и метаданные
+инструментов. На такой запрос gpt2giga возвращает корректный пустой каталог
+Codex, не обращаясь к серверу инференса. Для явно выбранной пользовательской
+модели Codex сохраняет собственные fallback-инструкции и метаданные
+инструментов, а явные значения context и compaction выше заменяют fallback-
+лимиты токенов. Обычные OpenAI-клиенты по-прежнему получают статические алиасы
+в стандартном списке `data`. При работе через этот мост всегда передавайте
+`-m` или задавайте `model`: пустой каталог Codex не может выбрать клиенту
+модель по умолчанию.
 
 Поля конфигурации и приоритет файлов профилей описаны в
 [официальной справке Codex](https://learn.chatgpt.com/docs/config-file/config-basic).

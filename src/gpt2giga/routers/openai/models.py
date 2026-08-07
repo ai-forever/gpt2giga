@@ -32,6 +32,7 @@ router = APIRouter(tags=[OPENAPI_TAG_OPENAI_MODELS])
 _MODEL_PROJECTION_QUERY_PARAMS = (
     "after_id",
     "before_id",
+    "client_version",
     "limit",
     "page_size",
     "pageSize",
@@ -39,6 +40,11 @@ _MODEL_PROJECTION_QUERY_PARAMS = (
     "pageToken",
     "refresh",
 )
+
+
+def _is_codex_models_request(request: Request) -> bool:
+    """Detect the Codex-specific model-catalog request shape."""
+    return request.query_params.get("client_version") is not None
 
 
 def _is_anthropic_models_request(request: Request) -> bool:
@@ -174,6 +180,14 @@ def _build_anthropic_model_list(
 @exceptions_handler
 async def show_available_models(request: Request):
     """List available GigaChat models in OpenAI-compatible form."""
+    if _is_codex_models_request(request):
+        # Codex owns model instructions and tool metadata. Returning an empty,
+        # valid Codex catalog preserves its bundled/fallback metadata for an
+        # explicitly selected custom model instead of replacing that metadata
+        # with the unrelated OpenAI ``data`` projection. This branch also
+        # keeps model discovery independent of the configured upstream.
+        return {"models": []}
+
     registry = getattr(request.app.state, "provider_registry", None)
     models = static_registry_model_payloads(registry) if registry is not None else None
     object_name = "list"
@@ -197,7 +211,6 @@ async def show_available_models(request: Request):
         return _build_anthropic_model_list(models, request)
     if _is_gemini_models_request(request):
         return build_gemini_model_list(models)
-
     current_timestamp = int(time.time())
     for model in models:
         _add_model_type_metadata(model)
