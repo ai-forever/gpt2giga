@@ -10,6 +10,8 @@ The Docker Compose manifests live in [deploy/](https://github.com/ai-forever/gpt
 | [deploy/traefik.yaml](https://github.com/ai-forever/gpt2giga/blob/main/deploy/traefik.yaml) | Traefik and several gpt2giga instances as an example of model-based routing. |
 | [deploy/nginx.yaml](https://github.com/ai-forever/gpt2giga/blob/main/deploy/nginx.yaml) | Minimal Compose stack with nginx as a reverse proxy. |
 | [deploy/observability.yaml](https://github.com/ai-forever/gpt2giga/blob/main/deploy/observability.yaml) | gpt2giga with mitmproxy for traffic debugging. |
+| [deploy/chat-completions-observability.yaml](https://github.com/ai-forever/gpt2giga/blob/main/deploy/chat-completions-observability.yaml) | Local Chat Completions bridge with reverse-mode mitmproxy interception. |
+| [deploy/providers.chat-completions.example.yaml](https://github.com/ai-forever/gpt2giga/blob/main/deploy/providers.chat-completions.example.yaml) | One-model provider profile for that reverse-mode bridge. |
 | [deploy/observe-multiple.yaml](https://github.com/ai-forever/gpt2giga/blob/main/deploy/observe-multiple.yaml) | Several gpt2giga instances behind mitmproxy. |
 | [deploy/mitmproxy.yaml](https://github.com/ai-forever/gpt2giga/blob/main/deploy/mitmproxy.yaml) | Optional mitmproxy overlay for `base.yaml`, Phoenix, and other Compose overlays. |
 | [deploy/postgres.yaml](https://github.com/ai-forever/gpt2giga/blob/main/deploy/postgres.yaml) | Optional durable Postgres traffic-log backend. |
@@ -134,6 +136,36 @@ make phoenix-mitm-dev-d
 ```
 
 The mitmproxy UI is available at `http://localhost:${MITMPROXY_WEB_PORT:-8081}`. The proxy port is bound to `127.0.0.1:${MITMPROXY_PORT:-8080}` by default.
+
+## Chat Completions bridge + reverse-mode mitmproxy
+
+The OpenAI-compatible adapter does not read `HTTP_PROXY` or `HTTPS_PROXY`.
+To inspect a Chat Completions-only upstream, use the dedicated reverse-mode
+stack instead of the regular forward-proxy overlay:
+
+```sh
+docker compose --env-file .env \
+  -f deploy/chat-completions-observability.yaml up -d --build
+```
+
+The bundled profile exposes `my_model`, uses delayed buffered streaming, and
+connects to mitmproxy at the permitted loopback URL
+`http://127.0.0.1:8080/v1/chat/completions`. Both containers share one network
+namespace. mitmproxy then forwards to
+`${MITMPROXY_UPSTREAM_URL:-http://host.docker.internal:29999}` on the host.
+This topology is necessary because a container's own `127.0.0.1` cannot reach a
+host tunnel directly.
+
+Set a different absolute provider-profile path when needed:
+
+```dotenv
+MITMPROXY_UPSTREAM_URL=http://host.docker.internal:29999
+GPT2GIGA_PROVIDER_CONFIG_FILE=/absolute/path/to/providers.yaml
+```
+
+The host tunnel must be healthy before the first model request. The gateway,
+reverse listener, and web UI are bound only to host loopback on ports 8090,
+8080, and 8081 by default.
 
 ## Version pinning
 

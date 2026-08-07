@@ -130,6 +130,50 @@ Direct private, link-local, and metadata-network destinations are rejected. For
 a server reachable only through a VPN or private subnet, create an SSH or
 equivalent tunnel to loopback and use the loopback profile.
 
+### Docker with reverse-mode mitmproxy
+
+The regular `deploy/observability.yaml` stack configures a forward proxy through
+`HTTP_PROXY` and `HTTPS_PROXY`. The OpenAI-compatible adapter deliberately does
+not consume those environment variables. To run this bridge in Docker and
+inspect every upstream request, use the dedicated reverse-mode stack:
+
+```sh
+cp .env.example .env
+# Set GPT2GIGA_API_KEY in .env before starting the stack.
+
+docker compose --env-file .env \
+  -f deploy/chat-completions-observability.yaml up -d --build
+```
+
+The stack mounts `deploy/providers.chat-completions.example.yaml`, where the
+gateway sends requests to `http://127.0.0.1:8080/v1/chat/completions`.
+gpt2giga and mitmproxy share one network namespace, so this loopback address
+reaches mitmproxy. mitmproxy forwards to the Docker host at
+`http://host.docker.internal:29999` by default. Override either input in `.env`
+when needed:
+
+```dotenv
+MITMPROXY_UPSTREAM_URL=http://host.docker.internal:29999
+GPT2GIGA_PROVIDER_CONFIG_FILE=/absolute/path/to/providers.yaml
+```
+
+The example does not advertise `parallel_tool_calls`; add that capability only
+after the upstream completes two independent function calls in one assistant
+turn and accepts both tool results on the next turn.
+
+The host tunnel must already accept requests on port 29999. Docker cannot
+repair or replace that tunnel. After startup:
+
+```sh
+curl -fsS http://127.0.0.1:8090/ready
+curl -fsS \
+  -H "Authorization: Bearer $GPT2GIGA_API_KEY" \
+  http://127.0.0.1:8090/v1/models
+```
+
+Open `http://127.0.0.1:8081` for the mitmproxy UI. Stop the stack with the same
+Compose file and `down`.
+
 ## 2. Start gpt2giga
 
 From a source checkout:

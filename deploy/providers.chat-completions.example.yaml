@@ -1,0 +1,35 @@
+schema_version: gpt2giga.provider-profiles.v3
+profiles:
+  - profile_id: local-buffered-chat
+    provider_kind: openai_compatible
+    base_url: http://127.0.0.1:8080/v1/chat/completions
+    allow_loopback: true
+    network_policy_ref: loopback-development
+    tls_policy_ref: system-default
+    upstream_stream_mode: buffered
+    models:
+      - public_alias: my_model
+        upstream_model: my_model
+        capability_profile: my-model-coding-v1
+        capabilities:
+          features:
+            - roles
+            - ordered_content_parts
+            - text
+            - generation_controls
+            - function_tools
+            - tool_choice
+            - tool_results
+            - stream_deltas
+            - stream_terminal_events
+            - stop_reason
+            - usage
+            - model_identity
+            - request_error_classes
+            - cancellation
+            - context_token_limits
+          limits:
+            context_window: 261000
+            max_input_tokens: 244616
+            max_output_tokens: 16384
+        support_status: technical_preview

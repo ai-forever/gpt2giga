@@ -131,6 +131,50 @@ Completions endpoint нет точной операции подсчёта то�
 доступен только через VPN или частную подсеть, поднимите SSH-туннель или его
 аналог на loopback и укажите локальный адрес в профиле.
 
+### Docker с mitmproxy в reverse mode
+
+Обычный стек `deploy/observability.yaml` настраивает forward proxy через
+`HTTP_PROXY` и `HTTPS_PROXY`. OpenAI-compatible adapter намеренно не читает эти
+переменные окружения. Чтобы запустить мост в Docker и видеть каждый upstream-
+запрос, используйте отдельный reverse-mode стек:
+
+```sh
+cp .env.example .env
+# Перед запуском задайте GPT2GIGA_API_KEY в .env.
+
+docker compose --env-file .env \
+  -f deploy/chat-completions-observability.yaml up -d --build
+```
+
+Стек монтирует `deploy/providers.chat-completions.example.yaml`, где gateway
+отправляет запросы на `http://127.0.0.1:8080/v1/chat/completions`. gpt2giga и
+mitmproxy делят один network namespace, поэтому этот loopback ведёт в
+mitmproxy. По умолчанию mitmproxy пересылает запрос на Docker host по адресу
+`http://host.docker.internal:29999`. При необходимости переопределите оба
+значения в `.env`:
+
+```dotenv
+MITMPROXY_UPSTREAM_URL=http://host.docker.internal:29999
+GPT2GIGA_PROVIDER_CONFIG_FILE=/absolute/path/to/providers.yaml
+```
+
+Пример не заявляет `parallel_tool_calls`. Добавляйте эту capability только
+после того, как upstream вернёт два независимых function call в одном ходе
+assistant и примет результаты обоих инструментов на следующем ходе.
+
+Туннель на host-машине должен уже принимать запросы на порту 29999. Docker не
+может починить или заменить этот туннель. После запуска:
+
+```sh
+curl -fsS http://127.0.0.1:8090/ready
+curl -fsS \
+  -H "Authorization: Bearer $GPT2GIGA_API_KEY" \
+  http://127.0.0.1:8090/v1/models
+```
+
+Интерфейс mitmproxy доступен на `http://127.0.0.1:8081`. Для остановки
+используйте `down` с тем же Compose-файлом.
+
 ## 2. Запустите gpt2giga
 
 Из рабочей копии репозитория:
