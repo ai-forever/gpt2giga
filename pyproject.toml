@@ -43,7 +43,7 @@ postgres = [
     "alembic>=1.18.5,<2",
 ]
 opensearch = [
-    "opensearch-py>=2.8.0,<3",
+    "opensearch-py>=2.8.0,<4",
 ]
 phoenix = [
     "arize-phoenix-otel>=0.16.1,<1",
