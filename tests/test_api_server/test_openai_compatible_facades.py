@@ -430,11 +430,20 @@ def test_three_facades_complete_function_result_round_trip(tmp_path: Path) -> No
     def handler(request: httpx.Request) -> httpx.Response:
         payload = json.loads(request.content)
         observed.append(payload)
-        if payload["messages"][-1]["role"] != "tool":
-            return httpx.Response(200, json=_chat_response(tool_call=True))
-        assert payload["messages"][-2]["tool_calls"][0]["id"] == "call_fixture"
-        assert payload["messages"][-1]["tool_call_id"] == "call_fixture"
-        return httpx.Response(200, json=_chat_response())
+        if payload["messages"][-1]["role"] == "tool":
+            assert payload["messages"][-2]["tool_calls"][0]["id"] == "call_fixture"
+            assert payload["messages"][-1]["tool_call_id"] == "call_fixture"
+            return httpx.Response(
+                500,
+                json={"detail": "Failed to apply chat template: missing field"},
+            )
+        if any(
+            isinstance(message.get("content"), str)
+            and "[gpt2giga compatibility replay:" in message["content"]
+            for message in payload["messages"]
+        ):
+            return httpx.Response(200, json=_chat_response())
+        return httpx.Response(200, json=_chat_response(tool_call=True))
 
     tool_schema = {
         "type": "object",
@@ -600,6 +609,21 @@ def test_three_facades_complete_function_result_round_trip(tmp_path: Path) -> No
     assert json.loads(second_turns[2]["messages"][-1]["content"]) == {
         "value": "lookup-ok"
     }
+    replayed_turns = [
+        payload
+        for payload in observed
+        if any(
+            isinstance(message.get("content"), str)
+            and "[gpt2giga compatibility replay:" in message["content"]
+            for message in payload["messages"]
+        )
+    ]
+    assert len(replayed_turns) == 3
+    assert all(
+        [message["role"] for message in payload["messages"]]
+        == ["user", "assistant", "user"]
+        for payload in replayed_turns
+    )
 
 
 @pytest.mark.parametrize("upstream_stream_mode", [None, "buffered"])
@@ -1013,6 +1037,124 @@ def test_codex_runtime_envelope_reaches_chat_and_restores_namespace(
     assert function_call["namespace"] == "multi_agent_v1"
     assert follow_up.status_code == 200, follow_up.text
     assert follow_up.json()["output"][0]["content"][0]["text"] == "facade-ok"
+    assert len(observed) == 2
+
+
+def test_codex_stream_recovers_from_upstream_tool_history_template_error(
+    tmp_path: Path,
+) -> None:
+    observed: list[dict[str, Any]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        observed.append(payload)
+        assert payload["stream"] is False
+        assert payload["tools"][0]["function"]["name"] == "exec_command"
+        if len(observed) == 1:
+            assert [message["role"] for message in payload["messages"]] == [
+                "user",
+                "assistant",
+                "tool",
+            ]
+            assert payload["messages"][1]["reasoning_content"] == (
+                "Need to inspect the workspace."
+            )
+            assert (
+                payload["messages"][1]["tool_calls"][0]["function"]["name"]
+                == "exec_command"
+            )
+            return httpx.Response(
+                500,
+                json={
+                    "detail": (
+                        "Failed to apply chat template: Object of type Undefined "
+                        "is not JSON serializable"
+                    )
+                },
+            )
+
+        assert [message["role"] for message in payload["messages"]] == [
+            "user",
+            "assistant",
+            "user",
+        ]
+        assistant = payload["messages"][1]
+        assert "tool_calls" not in assistant
+        assert "reasoning_content" not in assistant
+        assert "Need to inspect the workspace." in assistant["content"]
+        assert "exec_command" in assistant["content"]
+        assert "call_exec" in payload["messages"][2]["content"]
+        assert "/workspace" in payload["messages"][2]["content"]
+        return httpx.Response(200, json=_chat_response())
+
+    app = _app(tmp_path, handler, upstream_stream_mode="buffered")
+    with TestClient(app) as client:
+        response = client.post(
+            "/v1/responses",
+            json={
+                "model": MODEL_ALIAS,
+                "stream": True,
+                "input": [
+                    {
+                        "type": "message",
+                        "role": "user",
+                        "content": [
+                            {"type": "input_text", "text": "Inspect the workspace."}
+                        ],
+                    },
+                    {
+                        "type": "reasoning",
+                        "id": "rs_fixture",
+                        "summary": [
+                            {
+                                "type": "summary_text",
+                                "text": "Need to inspect the workspace.",
+                            }
+                        ],
+                    },
+                    {
+                        "type": "function_call",
+                        "id": "fc_fixture",
+                        "call_id": "call_exec",
+                        "name": "exec_command",
+                        "arguments": '{"cmd":"pwd"}',
+                        "status": "completed",
+                    },
+                    {
+                        "type": "function_call_output",
+                        "call_id": "call_exec",
+                        "output": "/workspace",
+                    },
+                ],
+                "tools": [
+                    {
+                        "type": "function",
+                        "name": "exec_command",
+                        "description": "Run a command.",
+                        "parameters": {"type": "object"},
+                    }
+                ],
+                "reasoning": {"effort": "xhigh", "summary": "auto"},
+            },
+        )
+
+    assert response.status_code == 200, response.text
+    data = [
+        json.loads(line.removeprefix("data: "))
+        for line in response.text.splitlines()
+        if line.startswith("data: ")
+    ]
+    created = next(item for item in data if item["type"] == "response.created")
+    completed = next(item for item in data if item["type"] == "response.completed")
+    assert (
+        created["response"]["metadata"]["gpt2giga_chat_template_fallback"]
+        == "tool_history_text_replay"
+    )
+    assert completed["response"]["output"][0]["content"][0]["text"] == ("facade-ok")
+    assert (
+        completed["response"]["metadata"]["gpt2giga_chat_template_fallback"]
+        == "tool_history_text_replay"
+    )
     assert len(observed) == 2
 
 

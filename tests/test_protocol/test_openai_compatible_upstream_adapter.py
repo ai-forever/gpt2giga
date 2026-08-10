@@ -174,6 +174,43 @@ def _request(*, stream=False):
     )
 
 
+def _tool_history_request(*, stream: bool = False) -> NormalizedChatRequest:
+    return NormalizedChatRequest(
+        model="fixture-model",
+        stream=stream,
+        messages=[
+            NormalizedMessage(role="system", content="Use tools carefully."),
+            NormalizedMessage(role="user", content="Inspect the workspace."),
+            NormalizedMessage(
+                role="assistant",
+                content=None,
+                reasoning_content="Need to inspect before editing.",
+                tool_calls=[
+                    NormalizedToolCall(
+                        id="call-1",
+                        name="exec_command",
+                        arguments='{"cmd":"pwd"}',
+                    )
+                ],
+            ),
+            NormalizedMessage(
+                role="tool",
+                tool_call_id="call-1",
+                content="/workspace",
+            ),
+        ],
+        tools=[
+            NormalizedTool(
+                name="exec_command",
+                description="Run a command.",
+                parameters={"type": "object"},
+            )
+        ],
+        tool_choice="auto",
+        reasoning=NormalizedReasoningIntent(effort="xhigh", summary="auto"),
+    )
+
+
 def test_payload_preserves_tool_results_parallel_control_and_json_schema():
     request = NormalizedChatRequest(
         model="fixture-model",
@@ -223,6 +260,225 @@ def test_payload_preserves_tool_results_parallel_control_and_json_schema():
             "schema": {"type": "object"},
         },
     }
+
+
+async def test_chat_template_failure_retries_with_text_tool_history() -> None:
+    observed: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        observed.append(payload)
+        if len(observed) == 1:
+            return httpx.Response(
+                500,
+                json={
+                    "detail": (
+                        "Failed to apply chat template: Object of type Undefined "
+                        "is not JSON serializable"
+                    )
+                },
+            )
+        return httpx.Response(
+            200,
+            json={
+                "id": "chatcmpl-recovered",
+                "object": "chat.completion",
+                "created": 1_700_000_000,
+                "model": "fixture-model",
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {
+                            "role": "assistant",
+                            "content": "Recovered.",
+                        },
+                        "finish_reason": "stop",
+                    }
+                ],
+            },
+        )
+
+    network = _NetworkAuthorizer()
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    adapter = OpenAICompatibleProviderAdapter(
+        _profile(credential=False),
+        credential=None,
+        authorize_network=network,
+        http_client=client,
+    )
+
+    response = await adapter.complete(
+        _tool_history_request(),
+        downstream=DownstreamProtocol.OPENAI,
+        downstream_capabilities=_all_downstream_capabilities(),
+    )
+    await client.aclose()
+
+    assert response.choices[0].message.content == "Recovered."
+    assert response.metadata["gpt2giga_chat_template_fallback"] == (
+        "tool_history_text_replay"
+    )
+    assert len(observed) == 2
+    assert [message["role"] for message in observed[0]["messages"]] == [
+        "system",
+        "user",
+        "assistant",
+        "tool",
+    ]
+    assert [message["role"] for message in observed[1]["messages"]] == [
+        "system",
+        "user",
+        "assistant",
+        "user",
+    ]
+    replayed_assistant = observed[1]["messages"][2]
+    assert "tool_calls" not in replayed_assistant
+    assert "reasoning_content" not in replayed_assistant
+    assert "Need to inspect before editing." in replayed_assistant["content"]
+    assert "exec_command" in replayed_assistant["content"]
+    replayed_result = observed[1]["messages"][3]
+    assert replayed_result["role"] == "user"
+    assert "tool_call_id" not in replayed_result
+    assert "call-1" in replayed_result["content"]
+    assert "/workspace" in replayed_result["content"]
+    assert observed[1]["tools"] == observed[0]["tools"]
+    assert observed[1]["tool_choice"] == observed[0]["tool_choice"]
+    assert observed[1]["reasoning_effort"] == observed[0]["reasoning_effort"]
+    assert len(network.intents) == 2
+    assert network.intents[0].request_body_sha256 != (
+        network.intents[1].request_body_sha256
+    )
+
+
+async def test_non_template_upstream_failure_is_not_retried() -> None:
+    calls = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(500, json={"detail": "worker unavailable"})
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    adapter = OpenAICompatibleProviderAdapter(
+        _profile(credential=False),
+        credential=None,
+        authorize_network=_NetworkAuthorizer(),
+        http_client=client,
+    )
+
+    with pytest.raises(OpenAICompatibleUpstreamError):
+        await adapter.complete(
+            _tool_history_request(),
+            downstream=DownstreamProtocol.OPENAI,
+            downstream_capabilities=_all_downstream_capabilities(),
+        )
+    await client.aclose()
+
+    assert calls == 1
+
+
+@pytest.mark.parametrize(
+    ("has_tool_history", "expected_calls"),
+    [(False, 1), (True, 2)],
+)
+async def test_chat_template_retry_is_bounded_and_requires_tool_history(
+    has_tool_history: bool,
+    expected_calls: int,
+) -> None:
+    calls = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(
+            500,
+            json={"detail": "Failed to apply chat template: missing field"},
+        )
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    adapter = OpenAICompatibleProviderAdapter(
+        _profile(credential=False),
+        credential=None,
+        authorize_network=_NetworkAuthorizer(),
+        http_client=client,
+    )
+
+    request = _tool_history_request() if has_tool_history else _request()
+    with pytest.raises(OpenAICompatibleUpstreamError) as exc_info:
+        await adapter.complete(
+            request,
+            downstream=DownstreamProtocol.OPENAI,
+            downstream_capabilities=_all_downstream_capabilities(),
+        )
+    await client.aclose()
+
+    assert exc_info.value.error.code == "chat_template_application_failed"
+    assert calls == expected_calls
+
+
+async def test_stream_retries_template_failure_before_first_chunk() -> None:
+    observed: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        observed.append(payload)
+        if len(observed) == 1:
+            return httpx.Response(
+                500,
+                json={"detail": "Failed to apply chat template: missing field"},
+            )
+        chunk = {
+            "id": "chatcmpl-recovered",
+            "model": "fixture-model",
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": {"role": "assistant", "content": "Recovered."},
+                    "finish_reason": "stop",
+                }
+            ],
+        }
+        body = f"data: {json.dumps(chunk)}\n\ndata: [DONE]\n\n"
+        return httpx.Response(
+            200,
+            text=body,
+            headers={"content-type": "text/event-stream"},
+        )
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    adapter = OpenAICompatibleProviderAdapter(
+        _profile(credential=False),
+        credential=None,
+        authorize_network=_NetworkAuthorizer(),
+        http_client=client,
+    )
+
+    stream = adapter.stream_chat(
+        _tool_history_request(stream=True),
+        downstream=DownstreamProtocol.OPENAI,
+        downstream_capabilities=_all_downstream_capabilities(),
+    )
+    first_event = await anext(stream)
+    assert first_event.type == "message_start"
+    assert len(observed) == 2
+    events = [first_event, *[event async for event in stream]]
+    await client.aclose()
+
+    assert [event.type for event in events] == [
+        "message_start",
+        "content_delta",
+        "message_end",
+    ]
+    assert events[0].metadata["gpt2giga_chat_template_fallback"] == (
+        "tool_history_text_replay"
+    )
+    assert events[1].content_delta == "Recovered."
+    assert events[1].metadata["gpt2giga_chat_template_fallback"] == (
+        "tool_history_text_replay"
+    )
+    assert len(observed) == 2
+    assert not any(message.get("tool_calls") for message in observed[1]["messages"])
+    assert all(message.get("role") != "tool" for message in observed[1]["messages"])
 
 
 def _all_downstream_capabilities():

@@ -12,6 +12,7 @@
 - **Reasoning через Chat Completions bridge**: проверенная capability `reasoning_controls_and_summaries` передаёт Responses effort как `reasoning_effort`, проецирует `reasoning_content` в Responses reasoning summary для SSE и buffered mode и восстанавливает его в следующем assistant tool-call сообщении.
 
 ### Исправлено
+- **Tool-loop для несовместимых chat templates**: если тот же OpenAI-compatible upstream возвращает подтверждённую 5xx-ошибку `chat_template_application_failed` на истории инструментов, шлюз до первого события один раз повторяет запрос с reasoning, function calls и tool results в явном тексте. Обычные запросы, другие ошибки и текущая схема инструментов не меняются; успешный fallback отмечается в metadata.
 - **Нативные схемы function calling**: OpenAI, Responses, Anthropic и Gemini больше не пропускают JSON Schema функций через GigaChat-специфичные обходные преобразования. Схемы с `$defs`/`$ref`, композициями, union-типами, mixed `enum`, boolean subschemas и дополнительными keywords передаются без потерь в GigaChat v1 и v2 через SDK `gigachat>=0.2.4a1`.
 - **Отключение reasoning на уровне запроса**: OpenAI `reasoning.effort="none"` и `reasoning_effort="none"`, включая Codex `model_reasoning_effort=none`, теперь удаляют reasoning из upstream payload.
 

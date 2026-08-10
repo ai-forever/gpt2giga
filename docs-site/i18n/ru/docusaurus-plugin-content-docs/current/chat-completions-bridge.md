@@ -93,11 +93,13 @@ profiles:
 Completions endpoint нет точной операции подсчёта токенов.
 
 Указывайте `reasoning_controls_and_summaries`, только если модель принимает
-стандартный верхнеуровневый `reasoning_effort`, возвращает текстовый
-`reasoning_content` и снова принимает это поле в assistant-сообщении с tool
-call. Допустимые effort зависят от модели. Например, модель может принимать
-`xhigh`, но отклонять `max`; используйте максимальное значение, проверенное на
-этом конкретном endpoint.
+стандартный верхнеуровневый `reasoning_effort` и возвращает текстовый
+`reasoning_content`. Предпочтителен нативный повтор этого поля в assistant-
+сообщении с tool call. Если chat template upstream отклоняет такую историю с
+подтверждённой 5xx-ошибкой, описанной ниже, gpt2giga может продолжить через один
+встроенный текстовый повтор. Допустимые effort зависят от модели. Например,
+модель может принимать `xhigh`, но отклонять `max`; используйте максимальное
+значение, проверенное на этом конкретном endpoint.
 
 Можно указать и базу `https://inference.example/v1`: тогда gpt2giga добавит
 `chat/completions`. Полный адрес, заканчивающийся на `/chat/completions`,
@@ -243,7 +245,6 @@ model = "bridge/chat-only"
 model_provider = "gpt2giga_chat"
 model_context_window = 32768
 model_auto_compact_token_limit = 24576
-model_supports_reasoning_summaries = true
 model_reasoning_summary = "auto"
 model_reasoning_effort = "xhigh"
 web_search = "disabled"
@@ -281,7 +282,6 @@ codex -a never exec --json \
   -c model_providers.gpt2giga_chat.supports_websockets=false \
   -c model_context_window=32768 \
   -c model_auto_compact_token_limit=24576 \
-  -c model_supports_reasoning_summaries=true \
   -c model_reasoning_summary=auto \
   -c model_reasoning_effort=xhigh \
   -c web_search=disabled \
@@ -295,6 +295,13 @@ Codex CLI 0.146.0 проверен с таким минимальным набо
 двухходовой проверке Codex получил потоковый `exec_command`, выполнил его,
 вернул результат и получил финальный ответ модели через upstream Chat
 Completions.
+
+Codex CLI 0.146.0 отклоняет `model_supports_reasoning_summaries` при включённом
+`--strict-config`, поэтому в закреплённой команде выше этого ключа нет. Эта
+версия принимает `model_reasoning_summary` и `model_reasoning_effort`; для
+проверенной модели effort достаточно, чтобы получить `reasoning_content`.
+После обновления Codex перепроверяйте strict-config ключи: опубликованная
+справка может описывать более новую версию CLI.
 
 Responses custom/freeform tools намеренно не входят в поддержанное подмножество.
 В частности, не включайте `apply_patch_freeform`. Для неизвестного публичного
@@ -324,6 +331,30 @@ summary, созданный OpenAI. Upstream из проверенного пр�
 пригодное число reasoning-токенов, поэтому gpt2giga оставляет эту детализацию
 недоступной и не пытается вычислить её из текста.
 
+### Сломанный chat template для истории инструментов
+
+Некоторые inference-серверы принимают первый function call, но падают при
+отрисовке assistant tool calls и tool results в следующем запросе, например с
+`Failed to apply chat template: Object of type Undefined is not JSON
+serializable`. gpt2giga обрабатывает это внутри OpenAI-compatible адаптера;
+скрипт mitmproxy и отдельная compatibility-переменная окружения не нужны.
+
+Сначала всегда отправляется исходный запрос в стандартной форме. Только если
+тот же профиль и модель возвращают 5xx с `Failed to apply chat template` в
+detail, а в запросе есть история инструментов, gpt2giga делает один повтор.
+В нём сохраняются текущие определения инструментов, tool choice, reasoning
+effort и параметры генерации, а предыдущие assistant reasoning, function calls
+и tool results переводятся в явный текст. Результаты инструментов помечаются
+как недоверенные данные. После этого модель может вызвать следующий обычный
+инструмент или завершить задачу.
+
+Остальные ошибки не повторяются. Не повторяется и SSE-ошибка после первого
+content chunk от upstream. gpt2giga не выполняет, не переименовывает и не
+придумывает инструменты, а вторую ошибку возвращает клиенту. Успешное
+восстановление отмечается как
+`metadata.gpt2giga_chat_template_fallback="tool_history_text_replay"`; маркер
+также есть в начальном и завершённом объектах потока Responses.
+
 Codex запрашивает `/v1/models?client_version=...` в собственном формате
 каталога, который включает принадлежащие Codex базовые инструкции и метаданные
 инструментов. На такой запрос gpt2giga возвращает корректный пустой каталог
@@ -336,7 +367,7 @@ Codex, не обращаясь к серверу инференса. Для яв
 модель по умолчанию.
 
 Поля конфигурации и приоритет файлов профилей описаны в
-[официальной справке Codex](https://learn.chatgpt.com/docs/config-file/config-basic).
+[официальной справке Codex](https://developers.openai.com/codex/config-reference/).
 
 ## 4. Подключите Claude Code
 
@@ -459,6 +490,12 @@ reasoning controls с повторной передачей summary.
 и переводит следующий ход обратно в Chat Completions. Сценарий проверен для
 Responses, Anthropic Messages и Gemini GenerateContent.
 
+Если OpenAI-compatible upstream возвращает для этой истории подтверждённую
+5xx-ошибку chat template, адаптер выполняет описанный выше однократный текстовый
+повтор. Восстановление общее для фасадов Responses, Messages и GenerateContent,
+потому что выполняется после их перевода в один нормализованный путь Chat
+Completions.
+
 Мост не эмулирует:
 
 - состояние Responses: `previous_response_id`, conversations, background jobs
@@ -488,6 +525,8 @@ Responses, Anthropic Messages и Gemini GenerateContent.
 | Claude вызывает `count_tokens` | Для upstream только с Chat Completions эта операция намеренно не поддерживается. |
 | Codex предупреждает о метаданных модели | Оставьте явные context/compaction значения в профиле Codex; обычные запросы продолжат работу. |
 | Upstream отклоняет `reasoning_effort=max` | Набор effort зависит от модели. Используйте максимальное проверенное значение, например `xhigh`, и привязывайте capability profile к этой модели. |
+| В metadata ответа есть `gpt2giga_chat_template_fallback=tool_history_text_replay` | Upstream отклонил нативную историю инструментов, а однократный встроенный текстовый повтор сработал. Слой совместимости mitmproxy не участвовал. |
+| Клиент получил `chat_template_application_failed` | В запросе не было истории для повтора или единственная fallback-попытка тоже завершилась ошибкой. Исправьте или замените chat template upstream; повторной попытки не будет. |
 | `provider_protocol_error` в потоке | Проверьте корректный Chat Completions SSE, terminal choice, порядок optional usage и завершающий `[DONE]`. |
 
 Полная схема находится в разделе

@@ -25,7 +25,7 @@ You need:
 - non-streaming Chat Completions JSON;
 - either Chat Completions SSE with a terminal `data: [DONE]` frame or the
   explicit buffered mode described below;
-- function tools and tool calls if the coding clients should use local tools.
+- function tools and tool calls if the coding clients should use local tools;
 - `reasoning_effort` plus textual `reasoning_content` if Codex reasoning should
   survive Responses translation and tool-call replay.
 
@@ -92,10 +92,13 @@ has been verified to support them. Do not add `count_tokens`: a Chat
 Completions endpoint has no exact token-count operation.
 
 Declare `reasoning_controls_and_summaries` only when the model accepts the
-standard top-level `reasoning_effort`, returns textual `reasoning_content`, and
-accepts that field again on an assistant tool-call message. Supported effort
-values are model-specific. For example, a model may accept `xhigh` while
-rejecting `max`; use the highest value verified against that exact endpoint.
+standard top-level `reasoning_effort` and returns textual `reasoning_content`.
+Native replay of that field on an assistant tool-call message is preferred. If
+the upstream chat template rejects such history with the confirmed 5xx error
+described below, gpt2giga can continue through one built-in text replay.
+Supported effort values are model-specific. For example, a model may accept
+`xhigh` while rejecting `max`; use the highest value verified against that exact
+endpoint.
 
 The endpoint may also be written as `https://inference.example/v1`; gpt2giga
 then appends `chat/completions`. A full endpoint ending in
@@ -241,7 +244,6 @@ model = "bridge/chat-only"
 model_provider = "gpt2giga_chat"
 model_context_window = 32768
 model_auto_compact_token_limit = 24576
-model_supports_reasoning_summaries = true
 model_reasoning_summary = "auto"
 model_reasoning_effort = "xhigh"
 web_search = "disabled"
@@ -279,7 +281,6 @@ codex -a never exec --json \
   -c model_providers.gpt2giga_chat.supports_websockets=false \
   -c model_context_window=32768 \
   -c model_auto_compact_token_limit=24576 \
-  -c model_supports_reasoning_summaries=true \
   -c model_reasoning_summary=auto \
   -c model_reasoning_effort=xhigh \
   -c web_search=disabled \
@@ -293,6 +294,13 @@ minimal surface: `exec_command`, `write_stdin`, `update_plan`,
 tools. A live two-turn probe completed a streamed `exec_command`, returned its
 result, and received the final model answer through the Chat Completions
 upstream.
+
+Codex CLI 0.146.0 rejects `model_supports_reasoning_summaries` when
+`--strict-config` is enabled, so the pinned command above deliberately omits
+it. That version accepts `model_reasoning_summary` and
+`model_reasoning_effort`; the latter is sufficient for the verified model to
+return `reasoning_content`. Re-check strict configuration keys when upgrading
+Codex because the published configuration reference can describe a newer CLI.
 
 Responses custom/freeform tools are deliberately outside this bridge subset.
 In particular, do not enable `apply_patch_freeform`. With the unknown public
@@ -322,6 +330,30 @@ an OpenAI-generated reasoning summary. The upstream in the verified example
 does not report a usable reasoning-token count, so gpt2giga leaves that detail
 unavailable instead of deriving it from text.
 
+### Broken upstream tool-history templates
+
+Some inference servers accept the first function call but fail on the next
+request while rendering assistant tool calls and tool results, for example with
+`Failed to apply chat template: Object of type Undefined is not JSON
+serializable`. gpt2giga handles this inside the OpenAI-compatible adapter; no
+mitmproxy script or compatibility environment variable is required.
+
+The original standards-shaped request is always sent first. Only when that
+same profile and model returns a 5xx whose detail contains `Failed to apply
+chat template`, and the request contains tool history, gpt2giga retries once.
+The retry keeps the current tool definitions, tool choice, reasoning effort,
+and generation controls, but projects prior assistant reasoning, function
+calls, and tool results into explicit text. Tool outputs are labelled as
+untrusted data. The model can then issue the next ordinary function call or
+finish the task.
+
+Other failures are not retried. Neither is an SSE failure after the upstream
+has emitted a content chunk. gpt2giga does not execute, rename, or invent a
+tool, and a second failure is returned to the client. A successful recovery is
+reported as
+`metadata.gpt2giga_chat_template_fallback="tool_history_text_replay"`; the
+marker is also present on the created and completed Responses stream objects.
+
 Codex requests `/v1/models?client_version=...` using a private catalog shape
 that includes Codex-owned base instructions and tool metadata. For that exact
 request, gpt2giga returns a valid empty Codex catalog without contacting the
@@ -333,7 +365,7 @@ pass `-m` or set `model` when using this bridge; the empty Codex catalog cannot
 select a default model for the client.
 
 Codex configuration fields and profile-file precedence are documented in the
-[official Codex configuration reference](https://learn.chatgpt.com/docs/config-file/config-basic).
+[official Codex configuration reference](https://developers.openai.com/codex/config-reference/).
 
 ## 4. Connect Claude Code
 
@@ -454,6 +486,12 @@ and replays the call plus its result in the next request. The bridge preserves
 the call id and translates the next turn back to Chat Completions. This was
 verified for Responses, Anthropic Messages, and Gemini GenerateContent.
 
+If an OpenAI-compatible upstream returns the confirmed 5xx chat-template error
+for that tool history, the adapter performs the single text replay described
+above. The recovery is shared by the Responses, Messages, and GenerateContent
+facades because it runs after their requests have entered the same normalized
+Chat Completions path.
+
 It does not emulate:
 
 - Responses state such as `previous_response_id`, conversations, background
@@ -483,6 +521,8 @@ subset returns `unsupported_semantic` before upstream I/O.
 | Claude asks for `count_tokens` | That operation is deliberately unsupported for a Chat Completions-only upstream. |
 | Codex model-metadata warning | Keep the explicit context and compaction values in the Codex profile; standard requests still proceed. |
 | Upstream rejects `reasoning_effort=max` | Effort values are model-specific. Use the highest value verified for that model, such as `xhigh`, and keep the capability profile tied to it. |
+| Response metadata contains `gpt2giga_chat_template_fallback=tool_history_text_replay` | The upstream rejected native tool history and the single built-in text replay succeeded. No mitmproxy compatibility layer is involved. |
+| `chat_template_application_failed` reaches the client | The request had no replayable tool history or the one fallback attempt also failed. Inspect or replace the upstream chat template; gpt2giga does not retry again. |
 | `provider_protocol_error` during streaming | Verify that the upstream emits valid Chat Completions SSE, a terminal choice, optional usage in the correct order, and `[DONE]`. |
 
 For the profile schema and routing security contract, see

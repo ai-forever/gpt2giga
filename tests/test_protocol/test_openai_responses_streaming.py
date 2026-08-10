@@ -94,6 +94,38 @@ def test_responses_stream_projector_orders_text_lifecycle_and_usage() -> None:
     }
 
 
+def test_responses_stream_projector_exposes_chat_template_fallback() -> None:
+    projector = _projector()
+    frames = projector.project(NormalizedStreamEvent(type="message_start", sequence=0))
+    frames.extend(
+        projector.project(
+            NormalizedStreamEvent(
+                type="content_delta",
+                sequence=1,
+                content_delta="Recovered.",
+                metadata={
+                    "gpt2giga_chat_template_fallback": "tool_history_text_replay"
+                },
+            )
+        )
+    )
+    frames.extend(
+        projector.project(
+            NormalizedStreamEvent(
+                type="message_end",
+                sequence=2,
+                finish_reason="stop",
+            )
+        )
+    )
+    projector.finish()
+
+    completed = _event_data(frames[-1])
+    assert completed["response"]["metadata"] == {
+        "gpt2giga_chat_template_fallback": "tool_history_text_replay"
+    }
+
+
 def test_responses_stream_projector_orders_tool_lifecycle() -> None:
     projector = _projector()
     frames = projector.project(NormalizedStreamEvent(type="message_start", sequence=0))

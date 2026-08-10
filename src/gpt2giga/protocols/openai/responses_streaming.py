@@ -39,6 +39,7 @@ class ResponsesStreamProjector:
         self._last_provider_sequence: int | None = None
         self._started = False
         self._terminal = False
+        self._response_metadata = dict(request_payload.get("metadata") or {})
         self._output: list[dict[str, Any]] = []
         self._usage: NormalizedUsage | None = None
         self._reasoning = ""
@@ -66,6 +67,7 @@ class ResponsesStreamProjector:
     def project(self, event: NormalizedStreamEvent) -> list[str]:
         """Validate and project one normalized event into zero or more frames."""
         self._validate_sequence(event)
+        self._collect_response_metadata(event)
         self._collect_hosted_tool_metadata(event)
         if self._terminal:
             raise ResponsesStreamProtocolError("event received after terminal")
@@ -443,6 +445,11 @@ class ResponsesStreamProjector:
                 message.get("inline_data"),
             )
 
+    def _collect_response_metadata(self, event: NormalizedStreamEvent) -> None:
+        fallback = event.metadata.get("gpt2giga_chat_template_fallback")
+        if isinstance(fallback, str):
+            self._response_metadata["gpt2giga_chat_template_fallback"] = fallback
+
     def _complete_text(self) -> list[str]:
         part = {
             "type": "output_text",
@@ -566,7 +573,7 @@ class ResponsesStreamProjector:
             "truncation": "disabled",
             "usage": _usage(self._usage),
             "user": None,
-            "metadata": dict(self.request_payload.get("metadata") or {}),
+            "metadata": dict(self._response_metadata),
         }
 
     def _frame(self, event_type: str, data: dict[str, Any]) -> str:
