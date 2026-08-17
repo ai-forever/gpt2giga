@@ -975,7 +975,7 @@ dependencies = [
     { name = "pydantic-settings" },
 ]
 wheels = [
-    { filename = "gigachat-0.2.4a1-py3-none-any.whl", hash = "sha256:8ed570144e5dd4f11dcd5c6b085818535cd4e03f40610a97a688491bc63a96aa" },
+    { filename = "gigachat-0.2.4a1-py3-none-any.whl", hash = "sha256:321f47018581238eed9d7a34b61dd4a2287d2c27b6bc998677e29de1aefd3232" },
 ]
 
 [package.metadata]
