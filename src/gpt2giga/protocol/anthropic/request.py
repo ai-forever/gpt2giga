@@ -348,6 +348,9 @@ def _build_openai_data_from_anthropic_request(
 
     tool_choice = data.get("tool_choice")
     if tool_choice and isinstance(tool_choice, dict):
+        disable_parallel_tool_use = tool_choice.get("disable_parallel_tool_use")
+        if isinstance(disable_parallel_tool_use, bool):
+            openai_data["parallel_tool_calls"] = not disable_parallel_tool_use
         tool_choice_type = tool_choice.get("type")
         if tool_choice_type == "tool":
             tool_name = tool_choice.get("name")

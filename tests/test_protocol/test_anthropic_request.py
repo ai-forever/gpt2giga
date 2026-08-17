@@ -135,6 +135,23 @@ def test_build_openai_data_from_anthropic_request_accepts_tool_choice_auto():
     assert "tool_choice" not in openai_data
 
 
+def test_build_openai_data_from_anthropic_request_maps_parallel_tool_choice():
+    openai_data = _build_openai_data_from_anthropic_request(
+        {
+            "model": "GigaChat-2-Max",
+            "max_tokens": 128,
+            "messages": [{"role": "user", "content": "call both"}],
+            "tool_choice": {
+                "type": "auto",
+                "disable_parallel_tool_use": False,
+            },
+        },
+        logger,
+    )
+
+    assert openai_data["parallel_tool_calls"] is True
+
+
 def test_build_openai_data_from_anthropic_request_ignores_tool_choice_any():
     data = {
         "model": "claude-x",

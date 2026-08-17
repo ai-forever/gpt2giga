@@ -11,7 +11,8 @@ def adapt_chat_completion_to_chat_shape(response: Any, *, default_model: str) ->
     """Adapt a GigaChat chat completion response to the legacy chat shape."""
     response_data = _dump_model(response)
     message = _select_message(response_data)
-    function_call = extract_chat_completion_function_call(message)
+    function_calls = extract_chat_completion_tool_calls(message)
+    function_call = function_calls[0] if len(function_calls) == 1 else None
     text = extract_chat_completion_assistant_text(message)
     reasoning_text = extract_chat_completion_reasoning_text(response_data)
     metadata = extract_chat_completion_message_metadata(response_data)
@@ -26,7 +27,15 @@ def adapt_chat_completion_to_chat_shape(response: Any, *, default_model: str) ->
     if function_call:
         message_payload["function_call"] = function_call
         message_payload["functions_state_id"] = _functions_state_id(
-            response_data, message
+            response_data,
+            message,
+            function_call=function_call,
+        )
+    elif function_calls:
+        message_payload["tool_calls"] = _openai_tool_calls(
+            function_calls,
+            response_data=response_data,
+            message=message,
         )
 
     result = {
@@ -38,7 +47,7 @@ def adapt_chat_completion_to_chat_shape(response: Any, *, default_model: str) ->
                 "finish_reason": _finish_reason(
                     response_data,
                     message,
-                    has_function_call=bool(function_call),
+                    has_function_call=bool(function_calls),
                     default_stop=True,
                 ),
             }
@@ -58,7 +67,8 @@ def adapt_chat_completion_chunk_to_chat_chunk_shape(
     """Adapt a GigaChat chat completion stream chunk to the legacy chat shape."""
     chunk_data = _dump_chat_completion_stream_chunk(chunk)
     message = _select_message(chunk_data)
-    function_call = extract_chat_completion_function_call(message)
+    function_calls = extract_chat_completion_tool_calls(message)
+    function_call = function_calls[0] if len(function_calls) == 1 else None
     text = extract_chat_completion_assistant_text(message)
     reasoning_text = extract_chat_completion_reasoning_text(chunk_data)
     metadata = extract_chat_completion_message_metadata(chunk_data)
@@ -71,7 +81,17 @@ def adapt_chat_completion_chunk_to_chat_chunk_shape(
         delta["reasoning_content"] = reasoning_text
     if function_call:
         delta["function_call"] = function_call
-        delta["functions_state_id"] = _functions_state_id(chunk_data, message)
+        delta["functions_state_id"] = _functions_state_id(
+            chunk_data,
+            message,
+            function_call=function_call,
+        )
+    elif function_calls:
+        delta["tool_calls"] = _openai_tool_calls(
+            function_calls,
+            response_data=chunk_data,
+            message=message,
+        )
 
     result = {
         "model": chunk_data.get("model") or default_model,
@@ -82,7 +102,7 @@ def adapt_chat_completion_chunk_to_chat_chunk_shape(
                 "finish_reason": _finish_reason(
                     chunk_data,
                     message,
-                    has_function_call=bool(function_call),
+                    has_function_call=bool(function_calls),
                     default_stop=False,
                 ),
             }
@@ -128,23 +148,30 @@ def extract_chat_completion_reasoning_text(message_or_response: Any) -> str:
 
 def extract_chat_completion_function_call(message_or_response: Any) -> Optional[dict]:
     """Extract the first function call from a chat completion message."""
+    function_calls = extract_chat_completion_tool_calls(message_or_response)
+    return function_calls[0] if function_calls else None
+
+
+def extract_chat_completion_tool_calls(message_or_response: Any) -> list[dict]:
+    """Extract every function call from one chat completion assistant message."""
     data = _dump_model(message_or_response)
     message = _select_message(data)
+    function_calls: list[dict] = []
 
     function_call = _normalize_function_call(message.get("function_call"))
     if function_call:
-        return function_call
+        function_calls.append(function_call)
 
     content = message.get("content")
     if not isinstance(content, list):
-        return None
+        return function_calls
 
     for part in content:
         part_data = _dump_model(part)
         function_call = _normalize_function_call(part_data.get("function_call"))
         if function_call:
-            return function_call
-    return None
+            function_calls.append(function_call)
+    return function_calls
 
 
 def extract_chat_completion_message_metadata(
@@ -531,10 +558,42 @@ def _normalize_function_call(function_call: Any) -> Optional[dict]:
     if not isinstance(name, str) or not name:
         return None
 
-    return {
+    normalized = {
         "name": name,
         "arguments": function_call_data.get("arguments", {}),
     }
+    call_id = _normalize_metadata_string(
+        function_call_data.get("id") or function_call_data.get("id_")
+    )
+    if call_id:
+        normalized["id"] = call_id
+    return normalized
+
+
+def _openai_tool_calls(
+    function_calls: list[dict[str, Any]],
+    *,
+    response_data: dict[str, Any],
+    message: dict[str, Any],
+) -> list[dict[str, Any]]:
+    base_state_id = _functions_state_id(response_data, message)
+    tool_calls = []
+    for index, function_call in enumerate(function_calls):
+        call_id = _normalize_metadata_string(function_call.get("id"))
+        if not call_id:
+            call_id = base_state_id if index == 0 else f"{base_state_id}-{index}"
+        tool_calls.append(
+            {
+                "index": index,
+                "id": call_id,
+                "type": "function",
+                "function": {
+                    "name": function_call["name"],
+                    "arguments": function_call.get("arguments", {}),
+                },
+            }
+        )
+    return tool_calls
 
 
 def _finish_reason(
@@ -556,7 +615,16 @@ def _finish_reason(
     return None
 
 
-def _functions_state_id(response_or_chunk: dict, message: dict) -> str:
+def _functions_state_id(
+    response_or_chunk: dict,
+    message: dict,
+    *,
+    function_call: Optional[dict[str, Any]] = None,
+) -> str:
+    if function_call is not None:
+        call_id = _normalize_metadata_string(function_call.get("id"))
+        if call_id:
+            return call_id
     for container in (message, response_or_chunk):
         for field_name in (
             "tools_state_id",

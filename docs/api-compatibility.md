@@ -194,9 +194,13 @@ GPT2GIGA_RUN_GEMINI_SMOKE=1 GPT2GIGA_LIVE_ENV_FILE=.env.live uv run pytest tests
 
 Typical fields that are accepted and ignored:
 
-- OpenAI metadata and fine-tuning parameters: `user`, `metadata`, `service_tier`, `seed`, `prompt_cache_key`, `logprobs`, `top_logprobs`, `logit_bias`, `prediction`, `web_search_options`, `n > 1`, `parallel_tool_calls=true`;
+- OpenAI metadata and fine-tuning parameters: `user`, `metadata`, `service_tier`, `seed`, `prompt_cache_key`, `logprobs`, `top_logprobs`, `logit_bias`, `prediction`, `web_search_options`, `n > 1`;
 - Optional Anthropic fields: `metadata`, `service_tier`, `top_k`, `container`, `context_management`, `mcp_servers`, unsupported provider tools, citations, unsupported document/file content blocks. Compatible provider tools (`web_search*`, `web_fetch*`, `code_execution*`) are mapped to GigaChat v2 built-in tools.
 - Optional Gemini fields: `safetySettings`, `cachedContent`, `serviceTier`, ignored `generationConfig` controls such as `candidateCount`/`topK`/`responseModalities`, and unsupported non-function tools are accepted and kept for diagnostics, but not applied by GigaChat. Compatible Gemini provider tools are mapped to GigaChat v2 built-in tools: `googleSearch` / `googleSearchRetrieval` -> `web_search`, `urlContext` -> `url_content_extraction`, `codeExecution` -> `code_interpreter`; the full mapping is described in [Built-in tools](builtin-tools.md). Unsupported `responseMimeType` values and `responseSchema` without `application/json` are rejected.
+
+Buffered parallel local function calls are supported for `GigaChat-2-Max` on
+v2 OpenAI Chat Completions, Anthropic Messages, and Gemini `generateContent`
+routes. GigaChat v1 behavior is unchanged.
 
 If a field is intentionally ignored, it is not sent upstream as an executable GigaChat feature. A literal `extra_body` object can be passed to GigaChat `additional_fields`; in that case the GigaChat API determines support.
 

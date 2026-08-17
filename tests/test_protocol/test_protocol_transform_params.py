@@ -620,6 +620,17 @@ def test_transform_chat_parameters_ignores_metadata_params_and_n_one():
     assert "parallel_tool_calls" not in out
 
 
+def test_transform_chat_parameters_preserves_parallel_tool_calls_in_v2_mode():
+    cfg = ProxyConfig(proxy=ProxySettings(gigachat_api_mode="v2"))
+    rt = RequestTransformer(cfg, logger=logger)
+
+    out = rt.transform_chat_parameters(
+        {"model": "GigaChat-2-Max", "parallel_tool_calls": True}
+    )
+
+    assert out["parallel_tool_calls"] is True
+
+
 def test_transform_chat_parameters_ignores_store_true():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger=logger)

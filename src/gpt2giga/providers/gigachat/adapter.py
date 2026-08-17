@@ -455,6 +455,8 @@ def normalized_chat_to_openai_payload(
             payload["tools"] = tools
     if request.tool_choice is not None:
         payload["tool_choice"] = request.tool_choice
+    if request.parallel_tool_calls is not None:
+        payload["parallel_tool_calls"] = request.parallel_tool_calls
     if request.response_format is not None:
         payload["response_format"] = request.response_format.to_json_dict()
 
@@ -682,6 +684,17 @@ def _response_message_to_normalized(value: Any) -> NormalizedMessage | None:
     function_call = value.get("function_call")
     if isinstance(function_call, Mapping):
         tool_calls.append(_function_call_to_normalized(function_call, value))
+    for tool_call in value.get("tool_calls") or []:
+        if not isinstance(tool_call, Mapping):
+            continue
+        function = tool_call.get("function")
+        if isinstance(function, Mapping):
+            tool_calls.append(
+                _function_call_to_normalized(
+                    function,
+                    tool_call,
+                )
+            )
     return NormalizedMessage(
         role=str(value.get("role", "assistant")),
         content=value.get("content"),
@@ -694,6 +707,7 @@ def _response_message_to_normalized(value: Any) -> NormalizedMessage | None:
                 "role",
                 "content",
                 "function_call",
+                "tool_calls",
             }
         },
     )
@@ -705,7 +719,11 @@ def _function_call_to_normalized(
 ) -> NormalizedToolCall:
     arguments = function_call.get("arguments", {})
     return NormalizedToolCall(
-        id=_backend_state_id_from_message(message),
+        id=(
+            str(message.get("id"))
+            if isinstance(message.get("id"), str) and message.get("id")
+            else _backend_state_id_from_message(message)
+        ),
         type="function",
         name=map_tool_name_from_gigachat(str(function_call.get("name", ""))),
         arguments=arguments,

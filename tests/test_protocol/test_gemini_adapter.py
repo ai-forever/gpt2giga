@@ -286,6 +286,30 @@ def test_gemini_adapter_maps_function_calling_config(
     assert [tool.name for tool in normalized.tools] == expected
 
 
+def test_gemini_adapter_enables_parallel_calls_for_multiple_functions():
+    normalized = GeminiProtocolAdapter().generate_content_to_normalized(
+        _gemini_tool_config_payload(
+            {"mode": "AUTO"},
+            declarations=("first", "second"),
+        ),
+        model="GigaChat-2-Max",
+    )
+
+    assert normalized.parallel_tool_calls is True
+
+
+def test_gemini_adapter_does_not_request_parallel_calls_for_one_function():
+    normalized = GeminiProtocolAdapter().generate_content_to_normalized(
+        _gemini_tool_config_payload(
+            {"mode": "AUTO"},
+            declarations=("first",),
+        ),
+        model="GigaChat-2-Max",
+    )
+
+    assert normalized.parallel_tool_calls is None
+
+
 @pytest.mark.parametrize(
     ("function_calling_config", "declarations", "expected_param"),
     [

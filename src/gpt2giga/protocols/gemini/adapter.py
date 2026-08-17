@@ -131,6 +131,10 @@ class GeminiProtocolAdapter:
                 allowed_names=allowed_function_names,
                 tools=tools,
             ),
+            parallel_tool_calls=_parallel_tool_calls(
+                function_calling_config,
+                tools,
+            ),
             response_format=_normalize_response_format(generation_config),
             generation_config=_normalize_generation_config(generation_config),
             metadata=metadata,
@@ -913,6 +917,19 @@ def _normalize_tool_choice(
         "entry to force a function.",
         param="toolConfig.functionCallingConfig.allowedFunctionNames",
     )
+
+
+def _parallel_tool_calls(
+    function_calling_config: Mapping[str, Any] | None,
+    tools: list[NormalizedTool],
+) -> bool | None:
+    """Enable GigaChat v2 parallel calls when Gemini exposes multiple functions."""
+    if function_calling_config is not None:
+        mode = _function_calling_mode(function_calling_config.get("mode"))
+        if mode == "none":
+            return None
+    function_count = sum(tool.type == "function" for tool in tools)
+    return True if function_count > 1 else None
 
 
 def _function_calling_mode(value: Any) -> str:

@@ -767,7 +767,9 @@ class ResponseProcessor:
         if message_key in choice:
             message = choice[message_key]
             message["refusal"] = None
-            if message.get("function_call"):
+            if message.get("tool_calls"):
+                self._process_tool_calls(message)
+            elif message.get("function_call"):
                 self._process_function_call(message, is_tool_call)
             self._extract_reasoning_from_message(
                 message,
@@ -903,6 +905,40 @@ class ResponseProcessor:
             message.pop("functions_state_id", None)
         except Exception as e:
             self.logger.error(f"Error processing function call: {e}")
+
+    def _process_tool_calls(self, message: Dict) -> None:
+        """Normalize every GigaChat v2 function call to OpenAI tool-call shape."""
+        normalized_tool_calls = []
+        message_state_id = self._backend_state_id_from_message(message)
+        for index, tool_call in enumerate(message.get("tool_calls") or []):
+            if not isinstance(tool_call, Mapping):
+                continue
+            function = tool_call.get("function")
+            if not isinstance(function, Mapping):
+                continue
+            name = function.get("name")
+            if not isinstance(name, str) or not name:
+                continue
+            arguments = function.get("arguments", {})
+            if not isinstance(arguments, str):
+                arguments = json.dumps(arguments, ensure_ascii=False)
+            tool_call_id = self._normalize_metadata_string(tool_call.get("id"))
+            if not tool_call_id and index == 0:
+                tool_call_id = message_state_id
+            normalized_tool_calls.append(
+                {
+                    "index": tool_call.get("index", index),
+                    "id": tool_call_id or f"call_{uuid.uuid4()}",
+                    "type": "function",
+                    "function": {
+                        "name": map_tool_name_from_gigachat(name),
+                        "arguments": arguments,
+                    },
+                }
+            )
+        message["tool_calls"] = normalized_tool_calls
+        message.pop("function_call", None)
+        message.pop("functions_state_id", None)
 
     @classmethod
     def _backend_state_id_from_message(

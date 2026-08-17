@@ -38,6 +38,21 @@ async def test_prepare_chat_completion_builds_chat_completion_request():
     assert request.model_options.top_p == 0.8
 
 
+async def test_prepare_chat_completion_enables_parallel_tool_calls():
+    cfg = ProxyConfig(proxy=ProxySettings(gigachat_api_mode="v2"))
+    rt = RequestTransformer(cfg, logger=logger)
+
+    request = await rt.prepare_chat_completion(
+        {
+            "model": "GigaChat-2-Max",
+            "messages": [{"role": "user", "content": "call both tools"}],
+            "parallel_tool_calls": True,
+        }
+    )
+
+    assert request.model_options.parallel_tool_calls is True
+
+
 async def test_prepare_chat_completion_maps_tools_and_forced_function_call():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger=logger)
@@ -989,6 +1004,72 @@ async def test_prepare_chat_completion_maps_tool_call_result_history():
             }
         ]
     }
+
+
+async def test_prepare_chat_completion_replays_parallel_tool_call_history():
+    cfg = ProxyConfig(proxy=ProxySettings(gigachat_api_mode="v2"))
+    rt = RequestTransformer(cfg, logger=logger)
+
+    request = await rt.prepare_chat_completion(
+        {
+            "model": "GigaChat-2-Max",
+            "parallel_tool_calls": True,
+            "messages": [
+                {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": "weather-state",
+                            "type": "function",
+                            "function": {
+                                "name": "get_weather",
+                                "arguments": '{"city":"Москва"}',
+                            },
+                        },
+                        {
+                            "id": "rate-state",
+                            "type": "function",
+                            "function": {
+                                "name": "get_rate",
+                                "arguments": '{"currency":"USD"}',
+                            },
+                        },
+                    ],
+                },
+                {
+                    "role": "tool",
+                    "tool_call_id": "weather-state",
+                    "content": '{"temperature_c":5}',
+                },
+                {
+                    "role": "tool",
+                    "tool_call_id": "rate-state",
+                    "content": '{"rubles":90}',
+                },
+            ],
+        }
+    )
+
+    assistant = request.messages[0]
+    assert [part.function_call.id_ for part in assistant.content] == [
+        "weather-state",
+        "rate-state",
+    ]
+    assert [part.function_call.name for part in assistant.content] == [
+        "get_weather",
+        "get_rate",
+    ]
+    assert [message.tools_state_id for message in request.messages[1:]] == [
+        "weather-state",
+        "rate-state",
+    ]
+    assert [
+        message.content[0].function_result.name for message in request.messages[1:]
+    ] == [
+        "get_weather",
+        "get_rate",
+    ]
 
 
 async def test_prepare_chat_completion_repairs_legacy_empty_tool_result():

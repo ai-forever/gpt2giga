@@ -89,9 +89,17 @@
           "state": "supported",
           "reason_id": "reviewed_v2_conversation_state",
           "evidence_ids": []
+        },
+        "parallel_tool_calls": {
+          "state": "supported",
+          "reason_id": "reviewed_v2_parallel_tool_calls",
+          "evidence_ids": ["GIGACHAT-V2-PARALLEL-TOOL-CALLS-2026-08-17"]
         }
       },
-      "evidence_ids": ["GIGA-V2-HOSTED-TOOLS-2026-08-03"]
+      "evidence_ids": [
+        "GIGA-V2-HOSTED-TOOLS-2026-08-03",
+        "GIGACHAT-SDK-0.2.4A1-PARALLEL-TOOL-CALLS"
+      ]
     },
     {
       "overlay_id": "gigachat-2-reasoning-family-v1",

@@ -59,8 +59,25 @@ class RequestTransformer:
         """Maps a role to a valid GigaChat role."""
         return map_role(role, is_first, self.logger)
 
-    def _merge_consecutive_messages(self, messages: List[Dict]) -> List[Dict]:
+    def _merge_consecutive_messages(
+        self,
+        messages: List[Dict],
+        *,
+        preserve_tool_messages: bool = False,
+    ) -> List[Dict]:
         """Merges consecutive messages with the same role."""
+        if preserve_tool_messages:
+            merged: List[Dict] = []
+            pending: List[Dict] = []
+            for message in messages:
+                if message.get("role") not in {"function", "tool"}:
+                    pending.append(message)
+                    continue
+                merged.extend(merge_consecutive_messages(pending))
+                pending.clear()
+                merged.append(message)
+            merged.extend(merge_consecutive_messages(pending))
+            return merged
         return merge_consecutive_messages(messages)
 
     def _limit_attachments(self, messages: List[Dict]) -> None:
@@ -68,7 +85,11 @@ class RequestTransformer:
         limit_attachments(messages, max_total=10, logger=self.logger)
 
     async def transform_messages(
-        self, messages: List[Dict], giga_client: Optional[GigaChat] = None
+        self,
+        messages: List[Dict],
+        giga_client: Optional[GigaChat] = None,
+        *,
+        allow_parallel_tool_calls: bool = False,
     ) -> List[Dict]:
         """Transforms messages to GigaChat format."""
         transformed_messages = []
@@ -133,19 +154,38 @@ class RequestTransformer:
 
             # Process tool_calls
             if "tool_calls" in message and message["tool_calls"]:
-                tool_call = message["tool_calls"][0]
-                if isinstance(tool_call, dict):
+                normalized_tool_calls = []
+                tool_calls = message["tool_calls"]
+                if not allow_parallel_tool_calls:
+                    tool_calls = tool_calls[:1]
+                for tool_call in tool_calls:
+                    if not isinstance(tool_call, dict):
+                        continue
+                    function_call = tool_call.get("function")
+                    if not isinstance(function_call, dict):
+                        continue
                     tool_call_id = self._extract_tool_call_id(tool_call)
-                    self._set_backend_state_id(message, tool_call_id)
-                    message["function_call"] = tool_call.get("function")
-                    if isinstance(message.get("function_call"), dict):
-                        self._normalize_message_function_call(message["function_call"])
-                        self._track_pending_tool_call(
-                            message["function_call"],
-                            tool_call_id,
-                            pending_tool_calls,
-                            tool_name_by_call_id,
-                        )
+                    self._normalize_message_function_call(function_call)
+                    self._track_pending_tool_call(
+                        function_call,
+                        tool_call_id,
+                        pending_tool_calls,
+                        tool_name_by_call_id,
+                    )
+                    normalized_tool_calls.append(
+                        {
+                            "id": tool_call_id,
+                            "function": function_call,
+                        }
+                    )
+
+                if allow_parallel_tool_calls and len(normalized_tool_calls) > 1:
+                    message["_gpt2giga_function_calls"] = normalized_tool_calls
+                    message.pop("function_call", None)
+                elif normalized_tool_calls:
+                    first_tool_call = normalized_tool_calls[0]
+                    self._set_backend_state_id(message, first_tool_call["id"])
+                    message["function_call"] = first_tool_call["function"]
                 elif isinstance(message.get("function_call"), dict):
                     self._normalize_message_function_call(message["function_call"])
                     self._track_pending_tool_call(
@@ -195,7 +235,10 @@ class RequestTransformer:
             transformed_messages.append(message)
 
         # Merge consecutive messages with the same role
-        transformed_messages = self._merge_consecutive_messages(transformed_messages)
+        transformed_messages = self._merge_consecutive_messages(
+            transformed_messages,
+            preserve_tool_messages=allow_parallel_tool_calls,
+        )
 
         # Ensure system message is first
         transformed_messages = ensure_system_first(transformed_messages)
@@ -592,7 +635,11 @@ class RequestTransformer:
         return getattr(self.config.proxy_settings, "gigachat_api_mode", "v1") == "v2"
 
     def transform_chat_parameters(
-        self, data: Dict, *, allow_builtin_tools: Optional[bool] = None
+        self,
+        data: Dict,
+        *,
+        allow_builtin_tools: Optional[bool] = None,
+        allow_parallel_tool_calls: Optional[bool] = None,
     ) -> Dict:
         """Transforms chat parameters (Chat Completions API)."""
         builtin_tools_enabled = (
@@ -600,10 +647,16 @@ class RequestTransformer:
             if allow_builtin_tools is None
             else allow_builtin_tools
         )
+        parallel_tool_calls_enabled = (
+            builtin_tools_enabled
+            if allow_parallel_tool_calls is None
+            else allow_parallel_tool_calls
+        )
         data = sanitize_openai_chat_parameters(
             data,
             allow_builtin_tools=builtin_tools_enabled,
             allow_namespace_tools=builtin_tools_enabled,
+            allow_parallel_tool_calls=parallel_tool_calls_enabled,
         )
         data = self._map_chat_token_limit(data)
         transformed = self._transform_common_parameters(data)
@@ -881,7 +934,9 @@ class RequestTransformer:
                 for function in functions
             ]
         transformed_data["messages"] = await self.transform_messages(
-            transformed_data.get("messages", []), giga_client
+            transformed_data.get("messages", []),
+            giga_client,
+            allow_parallel_tool_calls=False,
         )
         self._sanitize_legacy_message_state_ids(transformed_data["messages"])
 
@@ -920,7 +975,9 @@ class RequestTransformer:
     ) -> ChatCompletionRequest:
         """Build a GigaChat chat completion request."""
         transformed_data["messages"] = await self.transform_messages(
-            transformed_data.get("messages", []), giga_client
+            transformed_data.get("messages", []),
+            giga_client,
+            allow_parallel_tool_calls=True,
         )
 
         messages = self._build_chat_completion_messages(transformed_data["messages"])
@@ -964,17 +1021,39 @@ class RequestTransformer:
         payload: Dict[str, Any] = {"role": payload_role}
         content_parts: list[dict[str, Any]] = []
 
-        function_call_part = None
+        function_call_parts: list[dict[str, Any]] = []
+        parallel_function_calls = message.get("_gpt2giga_function_calls")
+        if isinstance(parallel_function_calls, list):
+            for tool_call in parallel_function_calls:
+                if not isinstance(tool_call, dict):
+                    continue
+                function_call = tool_call.get("function")
+                if not isinstance(function_call, dict):
+                    continue
+                name = function_call.get("name")
+                if not name:
+                    continue
+                call_payload = {
+                    "name": map_tool_name_to_gigachat(name),
+                    "arguments": function_call.get("arguments", {}),
+                }
+                call_id = tool_call.get("id")
+                if isinstance(call_id, str) and call_id:
+                    call_payload["id"] = call_id
+                function_call_parts.append({"function_call": call_payload})
+
         function_call = message.get("function_call")
         if isinstance(function_call, dict):
             name = function_call.get("name")
             if name:
-                function_call_part = {
-                    "function_call": {
-                        "name": map_tool_name_to_gigachat(name),
-                        "arguments": function_call.get("arguments", {}),
+                function_call_parts.append(
+                    {
+                        "function_call": {
+                            "name": map_tool_name_to_gigachat(name),
+                            "arguments": function_call.get("arguments", {}),
+                        }
                     }
-                }
+                )
 
         if is_function_result:
             function_name = message.get("name")
@@ -993,10 +1072,9 @@ class RequestTransformer:
             content = message.get("content")
             if content is None:
                 content = ""
-            if content or function_call_part is None:
+            if content or not function_call_parts:
                 content_parts.append({"text": str(content)})
-            if function_call_part is not None:
-                content_parts.append(function_call_part)
+            content_parts.extend(function_call_parts)
 
         attachments = message.get("attachments")
         if isinstance(attachments, list) and attachments:
@@ -1042,7 +1120,13 @@ class RequestTransformer:
             if field_name in transformed_data:
                 request_payload[field_name] = transformed_data[field_name]
 
-        for field_name in ("temperature", "top_p", "max_tokens", "response_format"):
+        for field_name in (
+            "temperature",
+            "top_p",
+            "max_tokens",
+            "response_format",
+            "parallel_tool_calls",
+        ):
             if field_name in transformed_data:
                 model_options[field_name] = transformed_data[field_name]
 
@@ -1294,7 +1378,9 @@ class RequestTransformer:
     ) -> Dict[str, Any]:
         """Prepare a legacy GigaChat chat request."""
         transformed_data = self.transform_chat_parameters(
-            data, allow_builtin_tools=False
+            data,
+            allow_builtin_tools=False,
+            allow_parallel_tool_calls=False,
         )
         return await self._finalize_chat_transformation(transformed_data, giga_client)
 
@@ -1303,7 +1389,9 @@ class RequestTransformer:
     ) -> ChatCompletionRequest:
         """Prepare a GigaChat chat completion request."""
         transformed_data = self.transform_chat_parameters(
-            data, allow_builtin_tools=True
+            data,
+            allow_builtin_tools=True,
+            allow_parallel_tool_calls=True,
         )
         return await self._finalize_chat_completion_transformation(
             transformed_data,

@@ -1,5 +1,6 @@
 import asyncio
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
 import pytest
 from gigachat.models.chat_completions import ChatCompletionResponse
@@ -19,6 +20,7 @@ from gpt2giga.protocols.normalized import (
 )
 from gpt2giga.providers.gigachat.adapter import (
     GigaChatProviderAdapter,
+    gigachat_response_to_normalized,
     normalized_chat_to_openai_payload,
 )
 from gpt2giga.providers.gigachat.model_resolution import UpstreamModelRequiredError
@@ -158,6 +160,71 @@ def test_normalized_chat_to_openai_payload_maps_tools_and_generation_config():
     assert payload["temperature"] == 0.2
     assert payload["max_tokens"] == 128
     assert payload["additional_fields"] == {"profanity_check": False}
+
+
+def test_normalized_chat_to_openai_payload_preserves_parallel_tool_calls():
+    request = NormalizedChatRequest(
+        model="GigaChat-2-Max",
+        messages=[NormalizedMessage(role="user", content="Call both.")],
+        parallel_tool_calls=True,
+    )
+
+    payload = normalized_chat_to_openai_payload(request)
+
+    assert payload["parallel_tool_calls"] is True
+
+
+def test_gigachat_response_to_normalized_preserves_parallel_tool_calls():
+    request = NormalizedChatRequest(
+        protocol="gemini",
+        model="GigaChat-2-Max",
+        messages=[NormalizedMessage(role="user", content="Call both.")],
+        parallel_tool_calls=True,
+    )
+    response = SimpleNamespace(
+        model_dump=lambda: {
+            "model": "GigaChat-2-Max",
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": None,
+                        "tool_calls": [
+                            {
+                                "id": "weather-state",
+                                "type": "function",
+                                "function": {
+                                    "name": "get_weather",
+                                    "arguments": {"city": "Москва"},
+                                },
+                            },
+                            {
+                                "id": "rate-state",
+                                "type": "function",
+                                "function": {
+                                    "name": "get_rate",
+                                    "arguments": {"currency": "USD"},
+                                },
+                            },
+                        ],
+                    },
+                    "finish_reason": "function_call",
+                }
+            ],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+        }
+    )
+
+    normalized = gigachat_response_to_normalized(response, request=request)
+
+    assert [call.id for call in normalized.choices[0].message.tool_calls] == [
+        "weather-state",
+        "rate-state",
+    ]
+    assert [call.name for call in normalized.choices[0].message.tool_calls] == [
+        "get_weather",
+        "get_rate",
+    ]
 
 
 async def test_gigachat_provider_counts_normalized_text_tools_and_schema():

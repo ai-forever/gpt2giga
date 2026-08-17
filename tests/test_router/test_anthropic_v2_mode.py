@@ -320,6 +320,32 @@ def test_anthropic_messages_v2_mode_uses_chat_completion_create():
     ]
 
 
+def test_anthropic_messages_v2_forwards_parallel_tool_choice():
+    app = make_app("v2")
+    client = TestClient(app)
+
+    response = client.post(
+        "/messages",
+        json={
+            "model": "GigaChat-2-Max",
+            "max_tokens": 128,
+            "messages": [{"role": "user", "content": "call both"}],
+            "tools": [
+                {"name": "first", "input_schema": {"type": "object"}},
+                {"name": "second", "input_schema": {"type": "object"}},
+            ],
+            "tool_choice": {
+                "type": "auto",
+                "disable_parallel_tool_use": False,
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    request_data = app.state.request_transformer.chat_completion_calls[0][0]
+    assert request_data["parallel_tool_calls"] is True
+
+
 def test_anthropic_messages_normalization_on_uses_normalized_core():
     app = make_app(
         "v2",

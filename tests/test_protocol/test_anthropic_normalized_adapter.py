@@ -149,6 +149,25 @@ def test_anthropic_adapter_preserves_native_tool_schema():
     assert normalized.tools[0].parameters == schema
 
 
+def test_anthropic_adapter_enables_parallel_tool_use_explicitly():
+    normalized = AnthropicProtocolAdapter().messages_to_normalized(
+        {
+            "model": "GigaChat-2-Max",
+            "messages": [{"role": "user", "content": "Call both."}],
+            "tools": [
+                {"name": "first", "input_schema": {"type": "object"}},
+                {"name": "second", "input_schema": {"type": "object"}},
+            ],
+            "tool_choice": {
+                "type": "auto",
+                "disable_parallel_tool_use": False,
+            },
+        }
+    )
+
+    assert normalized.parallel_tool_calls is True
+
+
 def test_anthropic_adapter_maps_provider_tools():
     payload = {
         "model": "claude-x",

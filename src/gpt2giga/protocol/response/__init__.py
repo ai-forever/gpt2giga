@@ -7,6 +7,7 @@ from .gigachat_chat_completion_adapter import (
     adapt_chat_completion_usage,
     extract_chat_completion_assistant_text,
     extract_chat_completion_function_call,
+    extract_chat_completion_tool_calls,
     extract_chat_completion_thread_id,
     hydrate_chat_completion_image_files,
 )
@@ -20,6 +21,7 @@ __all__ = [
     "adapt_chat_completion_usage",
     "extract_chat_completion_assistant_text",
     "extract_chat_completion_function_call",
+    "extract_chat_completion_tool_calls",
     "extract_chat_completion_thread_id",
     "hydrate_chat_completion_image_files",
 ]

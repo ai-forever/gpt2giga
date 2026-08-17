@@ -33,7 +33,7 @@ _ADAPTER_STATES = MappingProxyType(
         CapabilityKey.HOSTED_CODE_INTERPRETER: CapabilityState.SUPPORTED,
         CapabilityKey.HOSTED_IMAGE_GENERATION: CapabilityState.SUPPORTED,
         CapabilityKey.HOSTED_3D_GENERATION: CapabilityState.SUPPORTED,
-        CapabilityKey.PARALLEL_TOOL_CALLS: CapabilityState.UNSUPPORTED,
+        CapabilityKey.PARALLEL_TOOL_CALLS: CapabilityState.SUPPORTED,
         CapabilityKey.JSON_SCHEMA_OUTPUT: CapabilityState.SUPPORTED,
         CapabilityKey.REASONING_CONTROLS: CapabilityState.UNSUPPORTED,
         CapabilityKey.REASONING_SUMMARY: CapabilityState.UNSUPPORTED,
@@ -53,6 +53,7 @@ _V1_UNSUPPORTED = frozenset(
         CapabilityKey.HOSTED_CODE_INTERPRETER,
         CapabilityKey.HOSTED_IMAGE_GENERATION,
         CapabilityKey.HOSTED_3D_GENERATION,
+        CapabilityKey.PARALLEL_TOOL_CALLS,
         CapabilityKey.PREVIOUS_RESPONSE_STATE,
         CapabilityKey.CONVERSATION_STATE,
     }

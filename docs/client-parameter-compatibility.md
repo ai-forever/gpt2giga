@@ -115,10 +115,17 @@ accepted and ignored where they are classified.
 Unsupported optional OpenAI parameters are accepted and ignored. Examples:
 `logprobs`, `top_logprobs`, `logit_bias`, audio output, `prediction`,
 `web_search_options`, built-in tools outside GigaChat v2 mode, `n > 1`,
-`parallel_tool_calls=true`, stored completions requests, `conversation`, and
-`previous_response_id` in Responses v1 mode. `/chat/completions` v1
+stored completions requests, `conversation`, and `previous_response_id` in
+Responses v1 mode. `/chat/completions` v1
 remains a supported compatibility route, but new tool/built-in-tool
 capabilities evolve for GigaChat `v2/chat/completions`.
+
+Buffered parallel local function calls are supported for `GigaChat-2-Max` on
+v2 routes. OpenAI Chat Completions sends `parallel_tool_calls=true`; Anthropic
+Messages sends `tool_choice.disable_parallel_tool_use=false`; Gemini enables
+the same upstream option when more than one function declaration remains after
+filtering. The response preserves every call ID, and the next request may send
+all matching tool results. The legacy v1 contract remains unchanged.
 
 ## Anthropic body parameters
 
