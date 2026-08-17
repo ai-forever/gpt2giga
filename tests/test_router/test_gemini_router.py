@@ -314,6 +314,31 @@ def test_gemini_generate_content_roundtrips_through_gigachat_provider():
     assert payload["max_tokens"] == 64
 
 
+def test_gemini_v2_requests_parallel_calls_for_multiple_functions():
+    app = make_app(mode="v2")
+    client = TestClient(app)
+
+    response = client.post(
+        "/models/GigaChat-2-Max:generateContent",
+        json={
+            "contents": [{"parts": [{"text": "call both"}]}],
+            "tools": [
+                {
+                    "functionDeclarations": [
+                        {"name": "first", "parameters": {"type": "object"}},
+                        {"name": "second", "parameters": {"type": "object"}},
+                    ]
+                }
+            ],
+            "toolConfig": {"functionCallingConfig": {"mode": "AUTO"}},
+        },
+    )
+
+    assert response.status_code == 200
+    request_data = app.state.request_transformer.chat_completion_calls[0][0]
+    assert request_data["parallel_tool_calls"] is True
+
+
 def test_gemini_cli_model_override_stays_pinned_across_requests():
     app = make_app(mode="v2", pass_model=False, harness_model_key="model-key")
     app.state.request_transformer = RequestTransformer(app.state.config, logger)
@@ -713,27 +738,6 @@ def test_gemini_generate_content_passes_supported_builtin_tools_to_provider_payl
     }
 
 
-def test_gemini_generate_content_ignores_builtin_tools_when_mapping_disabled():
-    app = make_app(mode="v2", disable_builtin_tool_mapping=True)
-    client = TestClient(app)
-
-    response = client.post(
-        "/models/gemini-pro:generateContent",
-        json={
-            "contents": [{"parts": [{"text": "Hello"}]}],
-            "tools": [{"googleSearch": {}}],
-        },
-    )
-
-    assert response.status_code == 200
-    payload = app.state.request_transformer.chat_completion_calls[0][0]
-    assert payload == {
-        "model": "gemini-pro",
-        "messages": [{"role": "user", "content": "Hello"}],
-        "stream": False,
-    }
-
-
 def test_gemini_generate_content_stitches_by_metadata_conversation_id_v2():
     app = make_app(mode="v2", conversation_stitching_enabled=True)
     client = TestClient(app)
@@ -1020,7 +1024,7 @@ def test_gemini_count_tokens_normalization_on_uses_normalized_contract():
                 "count these words",
                 "lookup",
                 "Lookup data",
-                '{"type": "object", "properties": {}}',
+                '{"type": "object"}',
             ],
             "model": "gemini-pro",
         }

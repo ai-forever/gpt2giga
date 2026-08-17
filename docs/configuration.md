@@ -176,7 +176,7 @@ least-recently-used eviction or shutdown; active streaming requests are never ev
 
 ## GigaChat settings
 
-The minimum supported GigaChat Python SDK version is `0.2.3`; the gateway keeps
+The minimum supported GigaChat Python SDK version is `0.2.4a1`; the gateway keeps
 the dependency within the compatible `0.2.x` series. The SDK default API base
 URL is `https://api.giga.chat/v1`.
 
@@ -211,26 +211,14 @@ treated as an upstream model, so `GIGACHAT_MODEL` must be configured.
 
 Reasoning:
 
-```dotenv
-GPT2GIGA_ENABLE_REASONING=False
-GPT2GIGA_DISABLE_REASONING=False
-```
-
-- `GPT2GIGA_ENABLE_REASONING=True` adds `reasoning_effort="high"` if the client did not pass an explicit reasoning setting.
-- `GPT2GIGA_DISABLE_REASONING=True` removes `reasoning` and `reasoning_effort`, including explicit client fields and `extra_body` passthrough.
+- Reasoning is controlled by each client request; the proxy does not inject or globally override an effort.
+- Client `reasoning.effort="none"` or `reasoning_effort="none"` disables reasoning for that request and removes reasoning fields from the GigaChat payload.
+- Other explicit reasoning efforts are forwarded to GigaChat.
 
 Structured output:
 
-```dotenv
-GPT2GIGA_STRUCTURED_OUTPUT_MODE=function_call
-```
-
-Values:
-
-- `function_call`: a compatibility fallback through function calling;
-- `native`: passes the JSON Schema through GigaChat `response_format` if the model/API supports it.
-
-Both modes are designed for schema-based structured output. OpenAI
+JSON Schema is passed natively through GigaChat `response_format`; the gateway
+does not synthesize a function call for structured output. OpenAI
 `response_format.type=json_object` and Gemini `responseMimeType=application/json`
 without `responseJsonSchema` / `responseSchema` are not proxied to GigaChat,
 because the upstream does not support a separate schema-less JSON mode.
@@ -259,21 +247,14 @@ for a supported v2 flow that carries an `assistant_id` or an existing
 `storage.thread_id`. This exception does not expose OpenAI Assistants or Threads
 routes through the gateway.
 
-Built-in tool mapping can be disabled separately:
-
-```dotenv
-GPT2GIGA_DISABLE_BUILTIN_TOOL_MAPPING=False
-```
-
-When set to `True`, OpenAI/Anthropic/Gemini provider built-in tools
-(`web_search*`, `code_execution*`, `urlContext`, and similar) are not mapped to
-GigaChat v2 built-in tools and are ignored. User function/local tools remain
-enabled.
+Recognized OpenAI/Anthropic/Gemini provider built-in tools (`web_search*`,
+`code_execution*`, `urlContext`, and similar) are mapped to GigaChat built-ins
+on v2 routes. User function/local tools are mapped independently.
 
 ## Normalized layer flags
 
-The normalized mode controls the OpenAI Chat Completions and Anthropic Messages
-normalized paths and by default keeps the legacy behavior for these routes:
+The normalized mode controls the built-in GigaChat OpenAI Chat Completions and
+Anthropic Messages paths and by default keeps their legacy behavior:
 
 ```dotenv
 GPT2GIGA_NORMALIZATION_MODE=off
@@ -291,15 +272,22 @@ the legacy path. Configure `GPT2GIGA_LEGACY_CHAT_FALLBACK` independently.
   Gemini `countTokens` to the normalized path, with a legacy fallback before the
   response starts if the fallback is enabled.
 
+These flags do not override an explicit external provider route. A model that
+resolves to an `openai_compatible` profile always uses the normalized adapter
+for Responses, Chat Completions, Anthropic Messages, and Gemini
+GenerateContent. It never falls back to an unrelated GigaChat model.
+
 Gemini GenerateContent uses its own dedicated Gemini-to-normalized adapter and
 GigaChat provider path independently of these flags. Its admitted bridge subset
 uses typed inline images and fully modeled function/JSON Schema fields; safety
 settings, cached content, files, unsupported tools, and other unmodeled
 semantics remain explicit and fail OpenAI-compatible bridge admission before
-provider I/O. OpenAI Responses stays on the legacy execution path. Anthropic
-semantics outside normalized v1, including prompt caching, computer use, files,
-and unsupported content blocks, are not claimed by the normalized path and
-remain eligible for the legacy fallback.
+provider I/O. OpenAI Responses for the built-in GigaChat route keeps its
+existing execution path; Responses for an explicit external alias uses the
+normalized bridge. Anthropic semantics outside normalized v1, including prompt
+caching, computer use, files, and unsupported content blocks, are not claimed
+by an external route and are rejected rather than redirected to another
+provider.
 
 A detailed description of the models and current execution paths: [Normalized messages architecture](./architecture/normalized-messages.md).
 

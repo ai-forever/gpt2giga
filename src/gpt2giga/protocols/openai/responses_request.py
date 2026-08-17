@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from typing import Any, NoReturn
 
 from gpt2giga.common.client_params import ClientCompatibilityError
+from gpt2giga.common.tools import map_namespaced_tool_name_to_gigachat
 from gpt2giga.core.context import RequestContext
 from gpt2giga.protocols.normalized import (
     NormalizedChatRequest,
@@ -29,13 +30,16 @@ _RESPONSES_FIELDS = frozenset(
     {
         "input",
         "background",
+        "client_metadata",
         "conversation",
         "include",
         "instructions",
         "max_output_tokens",
         "metadata",
         "model",
+        "parallel_tool_calls",
         "previous_response_id",
+        "prompt_cache_key",
         "reasoning",
         "reasoning_effort",
         "store",
@@ -85,9 +89,9 @@ def responses_request_to_normalized(
     if "input" not in data:
         _invalid("input")
 
-    messages = _normalize_instructions(data.get("instructions"))
-    messages.extend(_normalize_input(data["input"]))
     tools = normalize_responses_tools(data.get("tools"))
+    messages = _normalize_instructions(data.get("instructions"))
+    messages.extend(_normalize_input(data["input"], request_tools=data.get("tools")))
     tool_choice = normalize_responses_tool_choice(data.get("tool_choice"), tools)
 
     stream = data.get("stream", False)
@@ -96,6 +100,8 @@ def responses_request_to_normalized(
     metadata = data.get("metadata")
     if metadata is not None and not isinstance(metadata, Mapping):
         _invalid("metadata")
+    _validate_operational_hints(data)
+    reasoning = _normalize_reasoning_intent(data)
 
     return NormalizedChatRequest(
         id=context.request_id if context is not None else None,
@@ -106,9 +112,13 @@ def responses_request_to_normalized(
         messages=messages,
         tools=tools,
         tool_choice=tool_choice,
+        parallel_tool_calls=_optional_bool(
+            data.get("parallel_tool_calls"),
+            "parallel_tool_calls",
+        ),
         response_format=_normalize_text_format(data.get("text")),
         generation_config=_normalize_generation_config(data),
-        reasoning=_normalize_reasoning_intent(data),
+        reasoning=reasoning,
         response_state=_normalize_state_intent(data),
         metadata=dict(metadata) if isinstance(metadata, Mapping) else {},
     )
@@ -122,27 +132,83 @@ def _normalize_instructions(value: Any) -> list[NormalizedMessage]:
     return [NormalizedMessage(role="system", content=value)]
 
 
-def _normalize_input(value: Any) -> list[NormalizedMessage]:
+def _normalize_input(
+    value: Any,
+    *,
+    request_tools: Any,
+) -> list[NormalizedMessage]:
     if isinstance(value, str):
         return [NormalizedMessage(role="user", content=value)]
     if not isinstance(value, list) or not value:
         _invalid("input")
 
     messages: list[NormalizedMessage] = []
+    pending_reasoning: str | None = None
     for index, item in enumerate(value):
         path = f"input[{index}]"
         if not isinstance(item, Mapping):
             _invalid(path)
         item_type = item.get("type", "message")
+        if item_type == "reasoning":
+            if pending_reasoning is not None:
+                _unsupported(f"{path}.type")
+            pending_reasoning = _normalize_reasoning_item(item, path=path)
+            continue
+        if pending_reasoning is not None and item_type != "function_call":
+            _unsupported(f"{path}.type")
         if item_type == "message":
             messages.append(_normalize_input_message(item, path=path))
         elif item_type == "function_call":
-            messages.append(_normalize_function_call(item, path=path))
+            message = _normalize_function_call(
+                item,
+                path=path,
+                request_tools=request_tools,
+            )
+            if pending_reasoning is not None:
+                message = message.model_copy(
+                    update={"reasoning_content": pending_reasoning}
+                )
+                pending_reasoning = None
+            messages.append(message)
         elif item_type == "function_call_output":
             messages.append(_normalize_function_output(item, path=path))
         else:
             _unsupported(f"{path}.type")
+    if pending_reasoning is not None:
+        _unsupported(f"input[{len(value) - 1}].type")
     return messages
+
+
+def _normalize_reasoning_item(
+    item: Mapping[str, Any],
+    *,
+    path: str,
+) -> str:
+    """Recover an emitted Responses reasoning summary for a tool-call replay."""
+    _reject_unknown_fields(
+        item,
+        {"encrypted_content", "id", "status", "summary", "type"},
+        path=path,
+    )
+    _validate_replayed_output_item(item, path=path)
+    encrypted_content = item.get("encrypted_content")
+    if encrypted_content is not None:
+        _unsupported(f"{path}.encrypted_content")
+    summary = item.get("summary")
+    if not isinstance(summary, list) or not summary:
+        _invalid(f"{path}.summary")
+    texts: list[str] = []
+    for index, part in enumerate(summary):
+        part_path = f"{path}.summary[{index}]"
+        if not isinstance(part, Mapping):
+            _invalid(part_path)
+        _reject_unknown_fields(part, {"text", "type"}, path=part_path)
+        if part.get("type") != "summary_text":
+            if isinstance(part.get("type"), str):
+                _unsupported(f"{part_path}.type")
+            _invalid(f"{part_path}.type")
+        texts.append(_required_string(part.get("text"), f"{part_path}.text"))
+    return "".join(texts)
 
 
 def _normalize_input_message(
@@ -150,9 +216,10 @@ def _normalize_input_message(
     *,
     path: str,
 ) -> NormalizedMessage:
-    _reject_unknown_fields(item, {"content", "role", "type"}, path=path)
+    _reject_unknown_fields(item, {"content", "id", "role", "status", "type"}, path=path)
+    _validate_replayed_output_item(item, path=path)
     role = item.get("role")
-    if role not in {"system", "user", "assistant"}:
+    if role not in {"developer", "system", "user", "assistant"}:
         if isinstance(role, str):
             _unsupported(f"{path}.role")
         _invalid(f"{path}.role")
@@ -177,7 +244,9 @@ def _normalize_text_part(
 ) -> NormalizedContentPart:
     if not isinstance(value, Mapping):
         _invalid(path)
-    _reject_unknown_fields(value, {"text", "type"}, path=path)
+    _reject_unknown_fields(
+        value, {"annotations", "logprobs", "text", "type"}, path=path
+    )
     part_type = value.get("type")
     expected_type = "output_text" if role == "assistant" else "input_text"
     if part_type != expected_type:
@@ -187,6 +256,10 @@ def _normalize_text_part(
     text = value.get("text")
     if not isinstance(text, str):
         _invalid(f"{path}.text")
+    for field in ("annotations", "logprobs"):
+        metadata = value.get(field)
+        if metadata is not None and metadata != []:
+            _unsupported(f"{path}.{field}")
     return NormalizedContentPart(type="text", text=text)
 
 
@@ -194,17 +267,25 @@ def _normalize_function_call(
     item: Mapping[str, Any],
     *,
     path: str,
+    request_tools: Any,
 ) -> NormalizedMessage:
     _reject_unknown_fields(
         item,
-        {"arguments", "call_id", "name", "type"},
+        {"arguments", "call_id", "id", "name", "namespace", "status", "type"},
         path=path,
     )
+    _validate_replayed_output_item(item, path=path)
     call_id = _required_string(item.get("call_id"), f"{path}.call_id")
     name = _required_string(item.get("name"), f"{path}.name")
     arguments = item.get("arguments")
     if not isinstance(arguments, str):
         _invalid(f"{path}.arguments")
+    namespace = item.get("namespace")
+    if namespace is not None:
+        namespace = _required_string(namespace, f"{path}.namespace")
+        if not _namespace_function_exists(request_tools, namespace, name):
+            _invalid(f"{path}.namespace")
+        name = map_namespaced_tool_name_to_gigachat(namespace, name)
     return NormalizedMessage(
         role="assistant",
         content=None,
@@ -224,7 +305,12 @@ def _normalize_function_output(
     *,
     path: str,
 ) -> NormalizedMessage:
-    _reject_unknown_fields(item, {"call_id", "output", "type"}, path=path)
+    _reject_unknown_fields(
+        item,
+        {"call_id", "id", "output", "status", "type"},
+        path=path,
+    )
+    _validate_replayed_output_item(item, path=path)
     call_id = _required_string(item.get("call_id"), f"{path}.call_id")
     output = item.get("output")
     if not isinstance(output, str):
@@ -234,6 +320,21 @@ def _normalize_function_output(
         content=output,
         tool_call_id=call_id,
     )
+
+
+def _validate_replayed_output_item(
+    item: Mapping[str, Any],
+    *,
+    path: str,
+) -> None:
+    item_id = item.get("id")
+    if item_id is not None:
+        _required_string(item_id, f"{path}.id")
+    status = item.get("status")
+    if status is not None and status != "completed":
+        if isinstance(status, str):
+            _unsupported(f"{path}.status")
+        _invalid(f"{path}.status")
 
 
 def _normalize_text_format(value: Any) -> NormalizedResponseFormat | None:
@@ -323,6 +424,13 @@ def _normalize_reasoning_intent(
     mode = reasoning_data.get("mode")
     if mode is not None:
         _required_string(mode, "reasoning.mode")
+    if effort == "none":
+        return None
+    if not any(
+        value is not None
+        for value in (effort, summary, generate_summary, context, mode)
+    ):
+        return None
     return NormalizedReasoningIntent(
         effort=effort,
         summary=summary,
@@ -332,7 +440,9 @@ def _normalize_reasoning_intent(
     )
 
 
-def _normalize_state_intent(data: Mapping[str, Any]) -> NormalizedStateIntent | None:
+def _normalize_state_intent(
+    data: Mapping[str, Any],
+) -> NormalizedStateIntent | None:
     state_fields = {
         "background",
         "conversation",
@@ -379,6 +489,14 @@ def _normalize_state_intent(data: Mapping[str, Any]) -> NormalizedStateIntent | 
     background = data.get("background")
     if background is not None and not isinstance(background, bool):
         _invalid("background")
+    if (
+        previous_response_id is None
+        and conversation_id is None
+        and store in {None, False}
+        and background in {None, False}
+        and set(include_values) <= {"reasoning.encrypted_content"}
+    ):
+        return None
     return NormalizedStateIntent(
         previous_response_id=previous_response_id,
         conversation_id=conversation_id,
@@ -386,6 +504,44 @@ def _normalize_state_intent(data: Mapping[str, Any]) -> NormalizedStateIntent | 
         store=store,
         background=background,
     )
+
+
+def _validate_operational_hints(data: Mapping[str, Any]) -> None:
+    prompt_cache_key = data.get("prompt_cache_key")
+    if prompt_cache_key is not None:
+        _required_string(prompt_cache_key, "prompt_cache_key")
+    client_metadata = data.get("client_metadata")
+    if client_metadata is not None and not isinstance(client_metadata, Mapping):
+        _invalid("client_metadata")
+
+
+def _namespace_function_exists(
+    tools: Any,
+    namespace: str,
+    name: str,
+) -> bool:
+    if not isinstance(tools, list):
+        return False
+    for tool in tools:
+        if (
+            not isinstance(tool, Mapping)
+            or tool.get("type") != "namespace"
+            or tool.get("name") != namespace
+        ):
+            continue
+        nested = tool.get("tools")
+        return isinstance(nested, list) and any(
+            isinstance(item, Mapping) and item.get("name") == name for item in nested
+        )
+    return False
+
+
+def _optional_bool(value: Any, param: str) -> bool | None:
+    if value is None:
+        return None
+    if not isinstance(value, bool):
+        _invalid(param)
+    return value
 
 
 def _optional_number(value: Any, param: str) -> float | None:

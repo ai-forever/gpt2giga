@@ -75,6 +75,34 @@ def test_responses_adapter_decodes_pinned_codex_request() -> None:
     assert normalized.provider_metadata == {}
 
 
+def test_responses_adapter_preserves_native_function_schema() -> None:
+    schema = {
+        "$defs": {"value": {"type": ["string", "null"]}},
+        "type": "object",
+        "properties": {
+            "value": {"$ref": "#/$defs/value"},
+            "choice": {"oneOf": [{"const": "a"}, {"const": 1}, {"type": "null"}]},
+        },
+        "unevaluatedProperties": False,
+    }
+
+    normalized = OpenAIProtocolAdapter().responses_to_normalized(
+        {
+            "model": "GigaChat",
+            "input": "Choose.",
+            "tools": [
+                {
+                    "type": "function",
+                    "name": "choose",
+                    "parameters": schema,
+                }
+            ],
+        }
+    )
+
+    assert normalized.tools[0].parameters == schema
+
+
 def test_responses_adapter_preserves_ordered_messages_calls_and_results() -> None:
     normalized = OpenAIProtocolAdapter().responses_to_normalized(
         {
@@ -343,6 +371,141 @@ def test_responses_adapter_preserves_reasoning_and_state_intent() -> None:
     }
 
 
+@pytest.mark.parametrize(
+    "reasoning_fields",
+    [
+        {"reasoning": {"effort": "none", "summary": "auto"}},
+        {"reasoning_effort": "none"},
+    ],
+)
+def test_responses_adapter_treats_reasoning_none_as_disabled(
+    reasoning_fields: dict,
+) -> None:
+    normalized = OpenAIProtocolAdapter().responses_to_normalized(
+        {
+            "model": "bridge/codex-test",
+            "input": "Answer directly.",
+            **reasoning_fields,
+        }
+    )
+
+    assert normalized.reasoning is None
+
+
+def test_responses_adapter_accepts_codex_noop_metadata_and_developer_role() -> None:
+    normalized = OpenAIProtocolAdapter().responses_to_normalized(
+        {
+            "model": "bridge/chat-only",
+            "input": [
+                {
+                    "type": "message",
+                    "role": "developer",
+                    "content": [{"type": "input_text", "text": "Use tools."}],
+                },
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "Inspect."}],
+                },
+            ],
+            "reasoning": {},
+            "store": False,
+            "include": ["reasoning.encrypted_content"],
+            "prompt_cache_key": "session-1",
+            "client_metadata": {"session_id": "session-1"},
+            "parallel_tool_calls": False,
+        }
+    )
+
+    assert [message.role for message in normalized.messages] == [
+        "developer",
+        "user",
+    ]
+    assert normalized.reasoning is None
+    assert normalized.response_state is None
+    assert normalized.parallel_tool_calls is False
+
+
+def test_responses_adapter_flattens_namespaced_function_call_history() -> None:
+    normalized = OpenAIProtocolAdapter().responses_to_normalized(
+        {
+            "model": "bridge/chat-only",
+            "input": [
+                {
+                    "type": "function_call",
+                    "namespace": "multi_agent_v1",
+                    "name": "spawn_agent",
+                    "call_id": "call-1",
+                    "arguments": '{"task":"inspect"}',
+                },
+                {
+                    "type": "function_call_output",
+                    "call_id": "call-1",
+                    "output": "done",
+                },
+            ],
+            "tools": [
+                {
+                    "type": "namespace",
+                    "name": "multi_agent_v1",
+                    "tools": [
+                        {
+                            "type": "function",
+                            "name": "spawn_agent",
+                            "parameters": {"type": "object"},
+                            "strict": False,
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+
+    assert normalized.messages[0].tool_calls[0].name == ("multi_agent_v1__spawn_agent")
+    assert normalized.messages[1].tool_call_id == "call-1"
+
+
+def test_responses_adapter_replays_reasoning_summary_with_function_call() -> None:
+    normalized = OpenAIProtocolAdapter().responses_to_normalized(
+        {
+            "model": "bridge/chat-only",
+            "input": [
+                {
+                    "type": "reasoning",
+                    "id": "rs_fixture",
+                    "summary": [
+                        {
+                            "type": "summary_text",
+                            "text": "Need to inspect the workspace.",
+                        }
+                    ],
+                },
+                {
+                    "type": "function_call",
+                    "name": "read_file",
+                    "call_id": "call-1",
+                    "arguments": '{"path":"README.md"}',
+                },
+                {
+                    "type": "function_call_output",
+                    "call_id": "call-1",
+                    "output": "contents",
+                },
+            ],
+            "reasoning": {"effort": "xhigh", "summary": "auto"},
+            "include": ["reasoning.encrypted_content"],
+            "store": False,
+        }
+    )
+
+    assert normalized.messages[0].reasoning_content == (
+        "Need to inspect the workspace."
+    )
+    assert normalized.messages[0].tool_calls[0].name == "read_file"
+    assert normalized.messages[1].tool_call_id == "call-1"
+    assert normalized.response_state is None
+
+
 def test_responses_adapter_preserves_previous_response_state() -> None:
     normalized = OpenAIProtocolAdapter().responses_to_normalized(
         {
@@ -364,7 +527,6 @@ def test_responses_adapter_preserves_previous_response_state() -> None:
     [
         "api_key",
         "base_url",
-        "parallel_tool_calls",
         "provider",
         "web_search_options",
     ],

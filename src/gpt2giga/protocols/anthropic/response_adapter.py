@@ -28,7 +28,6 @@ def normalized_chat_response_to_anthropic(
     *,
     requested_model: str,
     context: RequestContext | None = None,
-    structured_output: bool = False,
 ) -> dict[str, Any]:
     """Convert one normalized response to Anthropic Messages shape."""
     if response.error is not None:
@@ -48,10 +47,8 @@ def normalized_chat_response_to_anthropic(
 
     choice = response.choices[0] if response.choices else NormalizedChoice()
     message = choice.message or NormalizedMessage(role="assistant", content="")
-    content = _message_content(message, structured_output=structured_output)
+    content = _message_content(message)
     stop_reason = _stop_reason(choice, has_tool_calls=bool(message.tool_calls))
-    if structured_output and message.tool_calls:
-        stop_reason = "end_turn"
     response_id = _response_id(response, context)
     return {
         "id": response_id if response_id.startswith("msg_") else f"msg_{response_id}",
@@ -67,17 +64,7 @@ def normalized_chat_response_to_anthropic(
 
 def _message_content(
     message: NormalizedMessage,
-    *,
-    structured_output: bool,
 ) -> list[dict[str, Any]]:
-    if structured_output and message.tool_calls:
-        return [
-            {
-                "type": "text",
-                "text": _tool_arguments_to_text(message.tool_calls[0].arguments),
-            }
-        ]
-
     content: list[dict[str, Any]] = []
     text, reasoning = _normalized_text_and_reasoning(message)
     if reasoning:
@@ -94,7 +81,10 @@ def _normalized_text_and_reasoning(
     text = _content_text(message.content)
     parsed = extract_reasoning_from_content(text)
     reasoning = merge_reasoning_text(
-        _string_or_none(message.raw_extensions.get("reasoning_content")),
+        merge_reasoning_text(
+            message.reasoning_content,
+            _string_or_none(message.raw_extensions.get("reasoning_content")),
+        ),
         parsed.reasoning_content,
     )
     inline_data = message.raw_extensions.get("inline_data")
@@ -132,12 +122,6 @@ def _tool_arguments(value: Any) -> dict[str, Any]:
             return {}
         return parsed if isinstance(parsed, dict) else {}
     return {}
-
-
-def _tool_arguments_to_text(value: Any) -> str:
-    if isinstance(value, str):
-        return value
-    return json.dumps(value or {}, ensure_ascii=False)
 
 
 def _stop_reason(

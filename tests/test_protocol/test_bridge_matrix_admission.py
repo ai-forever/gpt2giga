@@ -76,7 +76,7 @@ async def test_blocked_route_rejects_before_provider_dispatch() -> None:
     assert dispatch_calls == []
 
 
-async def test_unsupported_semantic_rejects_before_provider_dispatch() -> None:
+async def test_unproven_reasoning_capability_rejects_before_provider_dispatch() -> None:
     dispatch_calls = 0
 
     async def dispatch(_decision: BridgeAdmissionDecision) -> str:
@@ -95,7 +95,7 @@ async def test_unsupported_semantic_rejects_before_provider_dispatch() -> None:
         )
 
     assert captured.value.public_field_path == "reasoning"
-    assert captured.value.reason_id == "semantic_not_proven"
+    assert captured.value.reason_id == "requires_reviewed_capability"
     assert dispatch_calls == 0
 
 

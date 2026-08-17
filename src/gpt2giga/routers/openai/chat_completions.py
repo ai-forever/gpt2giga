@@ -47,7 +47,6 @@ from gpt2giga.protocols.openai import (
 )
 from gpt2giga.providers.gigachat import GigaChatProviderAdapter
 from gpt2giga.providers.gigachat.model_resolution import resolve_upstream_model
-from gpt2giga.routers.openai.helpers import populate_giga_functions
 from gpt2giga.sinks.base import is_sink_active
 from gpt2giga.sinks.observability.factory import emit_observability_event
 from gpt2giga.sinks.observability.llm import (
@@ -98,7 +97,6 @@ async def chat_completions(request: Request):
         return normalized_stream_response
 
     await run_openai_chat_shadow_normalization(request, request_data)
-    populate_giga_functions(data, getattr(state, "logger", None))
     if mode == "v2":
         async with gigachat_request_options(giga_client, request_options):
             chat_request = await state.request_transformer.prepare_chat_completion(

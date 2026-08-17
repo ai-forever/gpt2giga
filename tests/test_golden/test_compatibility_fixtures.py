@@ -145,13 +145,9 @@ def test_openai_chat_structured_output_matches_golden_fixture():
                     {
                         "message": {
                             "role": "assistant",
-                            "content": "",
-                            "function_call": {
-                                "name": "final_answer",
-                                "arguments": {"answer": "ok", "score": 1},
-                            },
+                            "content": '{"answer": "ok", "score": 1}',
                         },
-                        "finish_reason": "function_call",
+                        "finish_reason": "stop",
                     }
                 ],
                 "usage": {
@@ -242,9 +238,7 @@ def test_anthropic_messages_basic_matches_golden_fixture():
 def test_anthropic_messages_streaming_matches_golden_fixture():
     app = FastAPI()
     app.include_router(anthropic_router)
-    app.state.config = ProxyConfig(
-        proxy=ProxySettings(structured_output_mode="function_call")
-    )
+    app.state.config = ProxyConfig(proxy=ProxySettings())
     app.state.gigachat_client = FakeAnthropicGigachat()
     app.state.request_transformer = FakeRequestTransformer()
     app.state.response_processor = ResponseProcessor(logger=logger, mode="PROD")

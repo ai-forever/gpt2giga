@@ -1,431 +1,131 @@
-from gpt2giga.common.json_schema import (
-    normalize_json_schema,
-    normalize_tool_parameters_schema,
-)
+from gigachat.models import Function
+
 from gpt2giga.common.tools import (
     build_gigachat_builtin_tool_payload,
-    convert_tool_to_giga_functions,
+    iter_function_tool_payloads,
     normalize_gigachat_builtin_tool_type,
+    split_gigachat_tool_name,
 )
 
 
-def test_normalize_json_schema_adds_properties_to_object():
-    """Тест: добавляет properties к объекту без properties"""
-    schema = {"type": "object"}
-    result = normalize_json_schema(schema)
-    assert result == {"type": "object", "properties": {}}
-
-
-def test_normalize_tool_parameters_schema_defaults_root_to_object():
-    result = normalize_tool_parameters_schema({"required": ["query"]})
-    assert result == {"required": ["query"], "type": "object", "properties": {}}
-
-
-def test_normalize_json_schema_nested_object():
-    """Тест: рекурсивно добавляет properties к вложенным объектам"""
+def test_iter_function_tool_payloads_preserves_native_schema():
     schema = {
+        "$defs": {"value": {"type": ["string", "null"]}},
         "type": "object",
         "properties": {
-            "glob": {"type": "object"},  # нет properties
-            "name": {"type": "string"},
-        },
-    }
-    result = normalize_json_schema(schema)
-    assert result["properties"]["glob"] == {"type": "object", "properties": {}}
-    assert result["properties"]["name"] == {"type": "string"}
-
-
-def test_normalize_json_schema_array_items():
-    """Тест: обрабатывает items в массивах"""
-    schema = {
-        "type": "array",
-        "items": {"type": "object"},
-    }
-    result = normalize_json_schema(schema)
-    assert result["items"] == {"type": "object", "properties": {}}
-
-
-def test_normalize_json_schema_array_items_without_type():
-    """Test: defaults any[] item schemas to a concrete GigaChat type."""
-    schema = {
-        "type": "object",
-        "properties": {
-            "excludedBodyParts": {
+            "value": {"$ref": "#/$defs/value"},
+            "choice": {
+                "anyOf": [{"type": "integer"}, {"type": "number"}],
+                "enum": [1, 2.5, None],
+            },
+            "tuple": {
                 "type": "array",
-                "items": {},
+                "prefixItems": [{"type": "string"}],
+                "items": False,
             },
         },
+        "unevaluatedProperties": False,
     }
-
-    result = normalize_json_schema(schema)
-
-    assert result["properties"]["excludedBodyParts"]["items"]["type"] == "string"
-
-
-def test_normalize_json_schema_property_without_type():
-    """Test: defaults untyped property schemas to valid GigaChat objects."""
-    schema = {
-        "type": "object",
-        "properties": {
-            "args": {
-                "description": "Optional input value exposed verbatim.",
-            },
-        },
-    }
-
-    result = normalize_json_schema(schema)
-
-    assert result["properties"]["args"] == {
-        "description": "Optional input value exposed verbatim.",
-        "type": "object",
-        "properties": {},
-    }
-
-
-def test_normalize_json_schema_anyof():
-    """Тест: anyOf разворачивается в первый тип (GigaChat SDK не поддерживает anyOf)"""
-    schema = {
-        "anyOf": [
-            {"type": "object"},
-            {"type": "string"},
-        ]
-    }
-    result = normalize_json_schema(schema)
-    # anyOf удаляется, берётся первый тип (object с properties)
-    assert "anyOf" not in result
-    assert result["type"] == "object"
-    assert result["properties"] == {}
-
-
-def test_normalize_json_schema_preserves_existing_properties():
-    """Тест: не перезаписывает существующие properties"""
-    schema = {
-        "type": "object",
-        "properties": {"foo": {"type": "string"}},
-    }
-    result = normalize_json_schema(schema)
-    assert result["properties"]["foo"] == {"type": "string"}
-
-
-def test_normalize_json_schema_removes_unsupported_format():
-    schema = {
-        "type": "object",
-        "properties": {
-            "url": {"type": "string", "format": "uri"},
-            "created": {"type": "string", "format": "date-time"},
-        },
-    }
-
-    result = normalize_json_schema(schema)
-
-    assert "format" not in result["properties"]["url"]
-    assert result["properties"]["created"]["format"] == "date-time"
-
-
-def test_normalize_json_schema_removes_sdk_incompatible_enum_values():
-    schema = {
-        "type": "object",
-        "properties": {
-            "manifest": {
-                "type": "object",
-                "properties": {
-                    "surface": {
-                        "type": "string",
-                        "enum": ["dashboard", "report", None],
-                    },
-                    "version": {"type": "integer", "enum": [1]},
-                },
-            },
-            "snapshot": {
-                "type": "object",
-                "properties": {
-                    "status": {
-                        "type": "string",
-                        "enum": ["ready", "partial", "blocked", "fixture", None],
-                    },
-                    "version": {"enum": [1]},
-                },
-            },
-        },
-    }
-
-    result = normalize_tool_parameters_schema(schema)
-
-    manifest = result["properties"]["manifest"]["properties"]
-    snapshot = result["properties"]["snapshot"]["properties"]
-    assert manifest["surface"]["enum"] == ["dashboard", "report"]
-    assert "enum" not in manifest["version"]
-    assert manifest["version"]["type"] == "integer"
-    assert snapshot["status"]["enum"] == ["ready", "partial", "blocked", "fixture"]
-    assert "enum" not in snapshot["version"]
-    assert snapshot["version"]["type"] == "integer"
-
-
-def test_normalize_json_schema_deduplicates_string_enums_in_order():
-    schema = {
-        "type": "string",
-        "enum": ["beta", "alpha", "beta", None, "alpha", "stable"],
-    }
-
-    result = normalize_tool_parameters_schema(schema)
-
-    assert result["enum"] == ["beta", "alpha", "stable"]
-
-
-def test_normalize_json_schema_removes_null_from_anyof():
-    """Тест: удаляет type: null из anyOf и разворачивает единственный оставшийся тип"""
-    schema = {
-        "anyOf": [
-            {"type": "string"},
-            {"type": "NULL"},
-        ],
-        "default": None,
-        "description": "Optional string parameter",
-    }
-    result = normalize_json_schema(schema)
-    # anyOf должен быть удален, тип должен быть развернут
-    assert "anyOf" not in result
-    assert result["type"] == "string"
-    # description и default должны сохраниться
-    assert result["description"] == "Optional string parameter"
-    assert result["default"] is None
-
-
-def test_normalize_json_schema_removes_null_from_oneof():
-    """Тест: удаляет type: null из oneOf"""
-    schema = {
-        "oneOf": [
-            {"type": "integer"},
-            {"type": ["NULL"]},
-        ],
-    }
-    result = normalize_json_schema(schema)
-    assert "oneOf" not in result
-    assert result["type"] == "integer"
-
-
-def test_normalize_json_schema_anyof_multiple_non_null():
-    """Тест: если после удаления null остается несколько типов, берём первый
-    (GigaChat SDK не поддерживает anyOf)"""
-    schema = {
-        "anyOf": [
-            {"type": "string"},
-            {"type": "integer"},
-            {"type": "null"},
-        ],
-    }
-    result = normalize_json_schema(schema)
-    # anyOf удаляется, берётся первый не-null тип
-    assert "anyOf" not in result
-    assert result["type"] == "string"
-
-
-def test_normalize_json_schema_nested_anyof_with_null():
-    """Тест: обрабатывает вложенные anyOf с null в properties"""
-    schema = {
-        "type": "object",
-        "properties": {
-            "glob": {
-                "anyOf": [
-                    {"type": "string"},
-                    {"type": "null"},
-                ],
-                "default": None,
-                "description": "Glob pattern",
-            }
-        },
-    }
-    result = normalize_json_schema(schema)
-    glob_param = result["properties"]["glob"]
-    assert "anyOf" not in glob_param
-    assert glob_param["type"] == "string"
-    assert glob_param["description"] == "Glob pattern"
-    assert glob_param["default"] is None
-
-
-def test_normalize_json_schema_anyof_with_object_adds_properties():
-    """Тест: когда anyOf содержит object, он получает properties"""
-    schema = {
-        "anyOf": [
-            {"additionalProperties": True, "type": "object"},
-            {"type": "null"},
-        ],
-        "default": None,
-        "description": "Data object",
-    }
-    result = normalize_json_schema(schema)
-    assert "anyOf" not in result
-    assert result["type"] == "object"
-    assert result["properties"] == {}
-    assert result["description"] == "Data object"
-
-
-def test_normalize_json_schema_anyof_string_or_object():
-    """Тест: anyOf с string и object берёт первый тип (string)"""
-    schema = {
-        "anyOf": [
-            {"type": "string"},
-            {"additionalProperties": True, "type": "object"},
-            {"type": "null"},
-        ],
-        "default": None,
-    }
-    result = normalize_json_schema(schema)
-    assert "anyOf" not in result
-    assert result["type"] == "string"
-    # string не требует properties
-    assert "properties" not in result
-
-
-def test_normalize_json_schema_flattens_allof_refs():
-    """Test: allOf is merged away after $ref resolution."""
-    schema = {
-        "$defs": {
-            "Answer": {
-                "type": "object",
-                "properties": {
-                    "text": {"type": "string"},
-                    "metadata": {"type": "object"},
-                },
-            }
-        },
-        "type": "object",
-        "properties": {
-            "answers": {
-                "allOf": [{"$ref": "#/$defs/Answer"}],
-                "description": "Structured answer.",
-            }
-        },
-    }
-
-    result = normalize_tool_parameters_schema(schema)
-    answers = result["properties"]["answers"]
-
-    assert "allOf" not in answers
-    assert answers["type"] == "object"
-    assert answers["description"] == "Structured answer."
-    assert answers["properties"]["text"]["type"] == "string"
-    assert answers["properties"]["metadata"] == {
-        "type": "object",
-        "properties": {},
-    }
-
-
-def test_convert_tool_with_nested_object_without_properties():
-    """Тест: convert_tool_to_giga_functions нормализует схемы с вложенными объектами без properties"""
     data = {
         "tools": [
             {
+                "type": "function",
                 "function": {
-                    "name": "glob_search",
-                    "description": "Search files with glob pattern",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "glob": {
-                                "type": "object",  # Нет properties - должно быть нормализовано
-                                "description": "Glob options",
-                            }
-                        },
-                    },
-                }
+                    "name": "native_schema",
+                    "description": "Preserve the schema.",
+                    "parameters": schema,
+                },
             }
         ]
     }
-    out = convert_tool_to_giga_functions(data)
-    assert len(out) == 1
-    # Проверяем что properties добавлены к glob
-    params = (
-        out[0].parameters.model_dump()
-        if hasattr(out[0].parameters, "model_dump")
-        else dict(out[0].parameters)
+
+    [payload] = list(iter_function_tool_payloads(data))
+
+    assert payload["parameters"] == schema
+
+
+def test_gigachat_function_model_preserves_native_schema():
+    schema = {
+        "anyOf": [
+            {"type": "object", "properties": {"city": {"type": "string"}}},
+            {"type": "object", "properties": {"lat": {"type": "number"}}},
+        ],
+        "x-provider-keyword": {"enabled": True},
+    }
+
+    function = Function.model_validate(
+        {"name": "lookup", "description": None, "parameters": schema}
     )
-    assert "properties" in params["properties"]["glob"]
-    assert params["properties"]["glob"]["properties"] == {}
+
+    assert function.parameters.model_dump(by_alias=True, exclude_none=True) == schema
 
 
-def test_convert_from_tools_function_objects():
-    data = {
-        "tools": [
-            {
-                "function": {
-                    "name": "fn1",
-                    "description": "desc1",
-                    "parameters": {"type": "object", "properties": {}},
-                }
-            }
-        ]
-    }
-    out = convert_tool_to_giga_functions(data)
-    assert len(out) == 1
-    assert out[0].name == "fn1"
-
-
-def test_convert_from_functions_list():
+def test_iter_function_tool_payloads_keeps_empty_schema_empty():
     data = {
         "functions": [
             {
-                "name": "fn2",
-                "description": "desc2",
-                "parameters": {
-                    "type": "object",
-                    "properties": {"a": {"type": "string"}},
-                },
+                "name": "no_args",
+                "description": "No arguments.",
+                "parameters": {},
             }
         ]
     }
-    out = convert_tool_to_giga_functions(data)
-    assert len(out) == 1
-    assert out[0].name == "fn2"
+
+    [payload] = list(iter_function_tool_payloads(data))
+
+    assert payload["parameters"] == {}
 
 
-def test_convert_skips_tools_without_parameters():
-    """Test that tools without parameters (e.g., custom/freeform tools) are skipped."""
+def test_iter_function_tool_payloads_flattens_namespace_tools():
     data = {
         "tools": [
+            {
+                "type": "namespace",
+                "name": "mcp__playwright",
+                "tools": [
+                    {
+                        "type": "function",
+                        "name": "browser_navigate",
+                        "description": "Navigate",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {"url": {"type": "string"}},
+                        },
+                    }
+                ],
+            }
+        ]
+    }
+
+    [payload] = list(iter_function_tool_payloads(data))
+
+    assert payload["name"] == "mcp__playwright__browser_navigate"
+    assert split_gigachat_tool_name(
+        payload["name"],
+        request_tools=data["tools"],
+    ) == ("browser_navigate", "mcp__playwright")
+
+
+def test_iter_function_tool_payloads_skips_non_functions():
+    data = {
+        "tools": [
+            {"type": "web_search_preview", "parameters": {"type": "object"}},
             {
                 "type": "custom",
                 "name": "apply_patch",
-                "description": "Freeform tool without parameters",
                 "format": {"type": "grammar", "syntax": "lark"},
             },
+            {"type": "function", "function": {"name": "missing_parameters"}},
             {
                 "type": "function",
-                "name": "valid_tool",
-                "description": "Tool with parameters",
-                "parameters": {
-                    "type": "object",
-                    "properties": {"arg": {"type": "string"}},
-                },
+                "function": {"name": "valid", "parameters": {}},
             },
         ]
     }
-    out = convert_tool_to_giga_functions(data)
-    assert len(out) == 1
-    assert out[0].name == "valid_tool"
 
-
-def test_convert_skips_gigachat_builtin_tools_with_parameters():
-    data = {
-        "tools": [
-            {
-                "type": "web_search_preview",
-                "parameters": {"type": "object"},
-                "indexes": ["web"],
-            },
-            {
-                "type": "function",
-                "name": "valid_tool",
-                "parameters": {
-                    "type": "object",
-                    "properties": {"arg": {"type": "string"}},
-                },
-            },
-        ]
-    }
-    out = convert_tool_to_giga_functions(data)
-    assert len(out) == 1
-    assert out[0].name == "valid_tool"
+    assert [payload["name"] for payload in iter_function_tool_payloads(data)] == [
+        "valid"
+    ]
 
 
 def test_normalize_gigachat_builtin_tool_type_maps_provider_aliases():
@@ -457,260 +157,3 @@ def test_build_gigachat_builtin_tool_payload_maps_gemini_alias_config():
     )
 
     assert payload == {"url_content_extraction": {"max_uses": 2}}
-
-
-def test_convert_skips_function_wrapper_without_parameters():
-    """Test that function wrappers without parameters are skipped."""
-    data = {
-        "tools": [
-            {
-                "function": {
-                    "name": "no_params_fn",
-                    "description": "Function without parameters",
-                }
-            },
-            {
-                "function": {
-                    "name": "valid_fn",
-                    "description": "Function with parameters",
-                    "parameters": {"type": "object", "properties": {}},
-                }
-            },
-        ]
-    }
-    out = convert_tool_to_giga_functions(data)
-    assert len(out) == 1
-    assert out[0].name == "valid_fn"
-
-
-def test_normalize_json_schema_array_type_with_null():
-    """Test: handles type: ['string', 'null'] (JSON Schema nullable syntax)"""
-    schema = {
-        "type": ["string", "null"],
-        "description": "Optional string parameter",
-    }
-    result = normalize_json_schema(schema)
-    # type should be converted to single string
-    assert result["type"] == "string"
-    assert result["description"] == "Optional string parameter"
-
-
-def test_normalize_json_schema_uppercase_gemini_types():
-    """Test: converts Gemini Schema Type enum values to JSON Schema types."""
-    schema = {
-        "type": "OBJECT",
-        "properties": {
-            "city": {"type": "STRING"},
-            "coordinates": {
-                "type": "ARRAY",
-                "items": {"type": "NUMBER"},
-            },
-            "metadata": {"type": "OBJECT"},
-            "optional": {"type": ["STRING", "NULL"]},
-        },
-    }
-
-    result = normalize_json_schema(schema)
-
-    assert result["type"] == "object"
-    assert result["properties"]["city"]["type"] == "string"
-    assert result["properties"]["coordinates"]["type"] == "array"
-    assert result["properties"]["coordinates"]["items"]["type"] == "number"
-    assert result["properties"]["metadata"] == {"type": "object", "properties": {}}
-    assert result["properties"]["optional"]["type"] == "string"
-
-
-def test_normalize_json_schema_array_type_multiple():
-    """Test: handles type: ['string', 'integer', 'null'] - takes first non-null"""
-    schema = {
-        "type": ["string", "integer", "null"],
-    }
-    result = normalize_json_schema(schema)
-    assert result["type"] == "string"
-
-
-def test_normalize_json_schema_nested_array_type():
-    """Test: handles nested properties with array-style type"""
-    schema = {
-        "type": "object",
-        "properties": {
-            "url": {"type": ["string", "null"], "description": "URL parameter"},
-            "coordinate": {"type": ["string", "null"]},
-            "size": {"type": ["string", "null"]},
-            "text": {"type": ["string", "null"]},
-            "path": {"type": ["string", "null"]},
-        },
-    }
-    result = normalize_json_schema(schema)
-    assert result["properties"]["url"]["type"] == "string"
-    assert result["properties"]["coordinate"]["type"] == "string"
-    assert result["properties"]["size"]["type"] == "string"
-    assert result["properties"]["text"]["type"] == "string"
-    assert result["properties"]["path"]["type"] == "string"
-
-
-def test_convert_tool_with_array_type_nullable():
-    """Test: convert_tool_to_giga_functions handles type: ['string', 'null']"""
-    data = {
-        "tools": [
-            {
-                "function": {
-                    "name": "browser_action",
-                    "description": "Browser action tool",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "action": {"type": "string", "enum": ["launch", "click"]},
-                            "url": {"type": ["string", "null"], "description": "URL"},
-                            "coordinate": {"type": ["string", "null"]},
-                        },
-                        "required": ["action", "url", "coordinate"],
-                    },
-                }
-            }
-        ]
-    }
-    out = convert_tool_to_giga_functions(data)
-    assert len(out) == 1
-    assert out[0].name == "browser_action"
-    params = (
-        out[0].parameters.model_dump()
-        if hasattr(out[0].parameters, "model_dump")
-        else dict(out[0].parameters)
-    )
-    # Verify types are converted to single strings
-    # Note: FunctionParameters uses 'type_' instead of 'type' (Python reserved word)
-    assert params["properties"]["url"]["type_"] == "string"
-    assert params["properties"]["coordinate"]["type_"] == "string"
-
-
-def test_convert_tool_with_ref_and_defs():
-    """Test: convert_tool_to_giga_functions resolves $ref/$defs references.
-
-    GigaChat doesn't support $ref/$defs, so they must be resolved/inlined.
-    This test reproduces the issue from:
-    https://github.com/..../issues/... (422 error: "Type properties.response.items.type is wrong")
-    """
-    data = {
-        "tools": [
-            {
-                "type": "function",
-                "function": {
-                    "name": "final_result",
-                    "description": "The final response which ends this conversation",
-                    "parameters": {
-                        "properties": {
-                            "response": {
-                                "items": {"$ref": "#/$defs/FlightDetails"},
-                                "type": "array",
-                            }
-                        },
-                        "required": ["response"],
-                        "type": "object",
-                        "additionalProperties": False,
-                        "$defs": {
-                            "FlightDetails": {
-                                "description": "Details of the most suitable flight.",
-                                "properties": {
-                                    "flight_number": {"type": "string"},
-                                    "price": {"type": "integer"},
-                                    "origin": {
-                                        "description": "Three-letter airport code",
-                                        "type": "string",
-                                    },
-                                    "destination": {
-                                        "description": "Three-letter airport code",
-                                        "type": "string",
-                                    },
-                                    "date": {"format": "date", "type": "string"},
-                                },
-                                "required": [
-                                    "flight_number",
-                                    "price",
-                                    "origin",
-                                    "destination",
-                                    "date",
-                                ],
-                                "type": "object",
-                                "additionalProperties": False,
-                            }
-                        },
-                    },
-                    "strict": True,
-                },
-            }
-        ]
-    }
-    out = convert_tool_to_giga_functions(data)
-    assert len(out) == 1
-    assert out[0].name == "final_result"
-    params = (
-        out[0].parameters.model_dump()
-        if hasattr(out[0].parameters, "model_dump")
-        else dict(out[0].parameters)
-    )
-
-    # Verify $defs is removed
-    assert "$defs" not in params
-
-    # Verify $ref is resolved and inlined
-    response_items = params["properties"]["response"]["items"]
-    assert "$ref" not in response_items
-    # Inner items is a raw dict (not a Pydantic model), so 'type' not 'type_'
-    assert response_items["type"] == "object"
-    assert "flight_number" in response_items["properties"]
-    assert response_items["properties"]["flight_number"]["type"] == "string"
-    assert response_items["properties"]["price"]["type"] == "integer"
-
-
-def test_convert_tool_with_mcp_literal_enums():
-    data = {
-        "tools": [
-            {
-                "type": "function",
-                "name": "render_artifact",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "manifest": {
-                            "type": "object",
-                            "properties": {
-                                "surface": {
-                                    "type": "string",
-                                    "enum": ["dashboard", "report", None],
-                                },
-                                "version": {"type": "integer", "enum": [1]},
-                            },
-                        },
-                        "snapshot": {
-                            "type": "object",
-                            "properties": {
-                                "status": {
-                                    "type": "string",
-                                    "enum": [
-                                        "ready",
-                                        "partial",
-                                        "blocked",
-                                        "fixture",
-                                        None,
-                                    ],
-                                },
-                                "version": {"type": "integer", "enum": [1]},
-                            },
-                        },
-                    },
-                },
-            }
-        ]
-    }
-
-    out = convert_tool_to_giga_functions(data)
-    params = out[0].parameters.model_dump(by_alias=True, exclude_none=True)
-    manifest = params["properties"]["manifest"]["properties"]
-    snapshot = params["properties"]["snapshot"]["properties"]
-
-    assert out[0].name == "render_artifact"
-    assert manifest["surface"]["enum"] == ["dashboard", "report"]
-    assert "enum" not in manifest["version"]
-    assert snapshot["status"]["enum"] == ["ready", "partial", "blocked", "fixture"]
-    assert "enum" not in snapshot["version"]

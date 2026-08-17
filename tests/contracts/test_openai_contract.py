@@ -36,7 +36,6 @@ async def test_chat_tools_schema_and_usage_cross_stable_sdk(contract_stack) -> N
     stack = contract_stack(
         provider="openai",
         api_mode="v2",
-        structured_output_mode="native",
     )
     public_payload = {
         "model": "request-model",

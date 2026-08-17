@@ -20,6 +20,7 @@ from gpt2giga.common.gigachat_options import (
 from gpt2giga.models.catalog import ModelDescriptor, ModelNotFoundError
 from gpt2giga.openapi_specs.gemini import gemini_models_openapi_extra
 from gpt2giga.openapi_tags import OPENAPI_TAG_GEMINI_MODELS
+from gpt2giga.providers.profiles.static_catalog import static_registry_model_payloads
 
 router = APIRouter(tags=[OPENAPI_TAG_GEMINI_MODELS])
 
@@ -46,22 +47,24 @@ _MODEL_PROJECTION_QUERY_PARAMS = (
 @exceptions_handler
 async def list_models(request: Request):
     """List models in Gemini-compatible form."""
-    giga_client = get_gigachat_client(request)
-    catalog = get_gigachat_model_catalog(request)
-    request_options = extract_gigachat_request_options(
-        request,
-        exclude_query_params=_MODEL_PROJECTION_QUERY_PARAMS,
-    )
-    async with gigachat_request_options(giga_client, request_options):
-        snapshot = await catalog.list_models(
-            giga_client,
-            provider_profile_id=get_gigachat_model_catalog_profile_id(request),
-            refresh=_catalog_refresh_requested(request),
+    registry = getattr(request.app.state, "provider_registry", None)
+    models = static_registry_model_payloads(registry) if registry is not None else None
+    if models is None:
+        giga_client = get_gigachat_client(request)
+        catalog = get_gigachat_model_catalog(request)
+        request_options = extract_gigachat_request_options(
+            request,
+            exclude_query_params=_MODEL_PROJECTION_QUERY_PARAMS,
         )
-    record_gigachat_model_catalog_snapshot(request, snapshot)
-    return build_gemini_model_list(
-        [catalog_model_payload(item) for item in snapshot.models]
-    )
+        async with gigachat_request_options(giga_client, request_options):
+            snapshot = await catalog.list_models(
+                giga_client,
+                provider_profile_id=get_gigachat_model_catalog_profile_id(request),
+                refresh=_catalog_refresh_requested(request),
+            )
+        record_gigachat_model_catalog_snapshot(request, snapshot)
+        models = [catalog_model_payload(item) for item in snapshot.models]
+    return build_gemini_model_list(models)
 
 
 @router.get(
@@ -72,23 +75,36 @@ async def list_models(request: Request):
 async def get_model(model: str, request: Request):
     """Return one model in Gemini-compatible form."""
     requested_model = model.removeprefix("models/")
-    giga_client = get_gigachat_client(request)
-    catalog = get_gigachat_model_catalog(request)
-    request_options = extract_gigachat_request_options(
-        request,
-        exclude_query_params=_MODEL_PROJECTION_QUERY_PARAMS,
+    registry = getattr(request.app.state, "provider_registry", None)
+    static_models = (
+        static_registry_model_payloads(registry) if registry is not None else None
     )
-    async with gigachat_request_options(giga_client, request_options):
+    if static_models is not None:
         try:
-            descriptor = await catalog.get_model(
-                requested_model,
-                giga_client,
-                provider_profile_id=get_gigachat_model_catalog_profile_id(request),
-                refresh=_catalog_refresh_requested(request),
+            model_payload = next(
+                item for item in static_models if item["id"] == requested_model
             )
-        except ModelNotFoundError as exc:
+        except StopIteration as exc:
             raise HTTPException(status_code=404, detail="Model not found") from exc
-    return build_gemini_model(catalog_model_payload(descriptor))
+    else:
+        giga_client = get_gigachat_client(request)
+        catalog = get_gigachat_model_catalog(request)
+        request_options = extract_gigachat_request_options(
+            request,
+            exclude_query_params=_MODEL_PROJECTION_QUERY_PARAMS,
+        )
+        async with gigachat_request_options(giga_client, request_options):
+            try:
+                descriptor = await catalog.get_model(
+                    requested_model,
+                    giga_client,
+                    provider_profile_id=get_gigachat_model_catalog_profile_id(request),
+                    refresh=_catalog_refresh_requested(request),
+                )
+            except ModelNotFoundError as exc:
+                raise HTTPException(status_code=404, detail="Model not found") from exc
+        model_payload = catalog_model_payload(descriptor)
+    return build_gemini_model(model_payload)
 
 
 def dump_model_payload(model: Any) -> dict[str, Any]:

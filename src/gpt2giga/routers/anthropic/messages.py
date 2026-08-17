@@ -8,6 +8,7 @@ from fastapi.responses import StreamingResponse
 
 from gpt2giga.app_state import get_gigachat_client, get_model_concurrency_limiter
 from gpt2giga.common.api_mode import resolve_gigachat_api_mode
+from gpt2giga.common.client_params import ClientCompatibilityError
 from gpt2giga.common.conversation import (
     commit_anthropic_response,
     stitch_anthropic_stream,
@@ -37,7 +38,6 @@ from gpt2giga.protocol.anthropic.request import (
     _extract_text_from_openai_messages,
     _extract_structured_output_text,
     _extract_tool_definitions_text,
-    _is_anthropic_structured_output_request,
 )
 from gpt2giga.protocol.anthropic.response import _build_anthropic_response
 from gpt2giga.protocol.anthropic.streaming import (
@@ -50,8 +50,14 @@ from gpt2giga.protocols.anthropic import (
     AnthropicStreamProjector,
     normalized_chat_response_to_anthropic,
 )
+from gpt2giga.protocols.normalized import BridgeMatrixAdmissionError, PublicProtocol
 from gpt2giga.providers.gigachat import GigaChatProviderAdapter
 from gpt2giga.providers.gigachat.model_resolution import resolve_upstream_model
+from gpt2giga.providers.profiles import (
+    ProviderAliasError,
+    ProviderKind,
+    ProviderModelInventory,
+)
 from gpt2giga.sinks.observability.anthropic import (
     emit_anthropic_message_observability,
     observe_anthropic_message_stream,
@@ -138,7 +144,6 @@ async def messages(request: Request):
     openai_data: Dict = _build_openai_data_from_anthropic_request(
         data,
         state.logger,
-        builtin_tool_mapping_enabled=not state.config.proxy_settings.disable_builtin_tool_mapping,
     )
     if "conversation" in data:
         openai_data["conversation"] = data["conversation"]
@@ -149,10 +154,6 @@ async def messages(request: Request):
         openai_data,
         protocol="anthropic",
     )
-    structured_output_fallback = (
-        _is_anthropic_structured_output_request(data)
-        and state.config.proxy_settings.structured_output_mode == "function_call"
-    )
     mode = resolve_gigachat_api_mode(request)
 
     normalized_response = await _try_normalized_non_stream_message(
@@ -162,7 +163,6 @@ async def messages(request: Request):
         request_options=request_options,
         conversation_turn=conversation_turn,
         pinned_model=pinned_model,
-        structured_output=structured_output_fallback,
     )
     if normalized_response is not None:
         return normalized_response
@@ -174,7 +174,6 @@ async def messages(request: Request):
         request_options=request_options,
         conversation_turn=conversation_turn,
         pinned_model=pinned_model,
-        structured_output=structured_output_fallback,
     )
     if normalized_stream is not None:
         return normalized_stream
@@ -212,7 +211,6 @@ async def messages(request: Request):
                 giga_dict,
                 model,
                 current_rquid,
-                is_structured_output=structured_output_fallback,
                 logger=state.logger,
                 mode=state.config.proxy_settings.mode,
                 log_level=state.config.proxy_settings.log_level,
@@ -238,7 +236,6 @@ async def messages(request: Request):
                         chat_request,
                         current_rquid,
                         giga_client,
-                        is_structured_output=structured_output_fallback,
                         request_options=request_options,
                         model_limiter=model_limiter,
                         effective_model=effective_model,
@@ -280,7 +277,6 @@ async def messages(request: Request):
             giga_dict,
             model,
             current_rquid,
-            is_structured_output=structured_output_fallback,
             logger=state.logger,
             mode=state.config.proxy_settings.mode,
             log_level=state.config.proxy_settings.log_level,
@@ -306,7 +302,6 @@ async def messages(request: Request):
                     chat_messages,
                     current_rquid,
                     giga_client,
-                    is_structured_output=structured_output_fallback,
                     request_options=request_options,
                     model_limiter=model_limiter,
                     effective_model=effective_model,
@@ -326,23 +321,30 @@ async def _try_normalized_count_tokens(
     request_options: Any,
 ) -> dict[str, int] | None:
     settings = _normalization_settings(request)
-    if settings is None or settings.normalization_mode != "on":
+    external_route = _external_provider_route(request, payload.get("model"))
+    if external_route is None and (
+        settings is None or settings.normalization_mode != "on"
+    ):
         return None
     try:
         context = get_request_context()
         normalized_request = _anthropic_adapter(request).count_tokens_to_normalized(
             payload,
             context=context,
-            builtin_tool_mapping_enabled=_builtin_tool_mapping_enabled(request),
         )
         response = await _provider_adapter(
             request,
+            normalized_request=normalized_request.input,
             request_options=request_options,
             pinned_model=_claude_cli_model_override(request),
         ).count_tokens(normalized_request, context=context)
         return {"input_tokens": response.input_tokens}
     except Exception as exc:
-        if not settings.legacy_chat_fallback:
+        if (
+            external_route is not None
+            or settings is None
+            or not settings.legacy_chat_fallback
+        ):
             raise
         _log_normalized_fallback(request, exc, event="anthropic_count_tokens_fallback")
         return None
@@ -356,24 +358,23 @@ async def _try_normalized_non_stream_message(
     request_options: Any,
     conversation_turn: Any,
     pinned_model: str | None,
-    structured_output: bool,
 ) -> dict[str, Any] | None:
     settings = _normalization_settings(request)
+    external_route = _external_provider_route(request, payload.get("model"))
     if (
-        settings is None
-        or settings.normalization_mode != "on"
-        or payload.get("stream", False)
-    ):
+        external_route is None
+        and (settings is None or settings.normalization_mode != "on")
+    ) or payload.get("stream", False):
         return None
     try:
         context = get_request_context()
         normalized_request = _anthropic_adapter(request).messages_to_normalized(
             payload,
             context=context,
-            builtin_tool_mapping_enabled=_builtin_tool_mapping_enabled(request),
         )
         normalized_response = await _provider_adapter(
             request,
+            normalized_request=normalized_request,
             request_options=request_options,
             pinned_model=pinned_model,
         ).chat(normalized_request, context=context)
@@ -381,7 +382,6 @@ async def _try_normalized_non_stream_message(
             normalized_response,
             requested_model=str(payload.get("model") or "unknown"),
             context=context,
-            structured_output=structured_output,
         )
         await commit_anthropic_response(request, conversation_turn, result)
         await emit_anthropic_message_observability(
@@ -392,7 +392,11 @@ async def _try_normalized_non_stream_message(
         )
         return result
     except Exception as exc:
-        if not settings.legacy_chat_fallback:
+        if (
+            external_route is not None
+            or settings is None
+            or not settings.legacy_chat_fallback
+        ):
             raise
         _log_normalized_fallback(request, exc, event="anthropic_message_fallback")
         return None
@@ -406,24 +410,23 @@ async def _try_normalized_stream_message(
     request_options: Any,
     conversation_turn: Any,
     pinned_model: str | None,
-    structured_output: bool,
 ) -> StreamingResponse | None:
     settings = _normalization_settings(request)
+    external_route = _external_provider_route(request, payload.get("model"))
     if (
-        settings is None
-        or settings.normalization_mode != "on"
-        or not payload.get("stream", False)
-    ):
+        external_route is None
+        and (settings is None or settings.normalization_mode != "on")
+    ) or not payload.get("stream", False):
         return None
     try:
         context = get_request_context()
         normalized_request = _anthropic_adapter(request).messages_to_normalized(
             payload,
             context=context,
-            builtin_tool_mapping_enabled=_builtin_tool_mapping_enabled(request),
         )
         provider = _provider_adapter(
             request,
+            normalized_request=normalized_request,
             request_options=request_options,
             pinned_model=pinned_model,
             require_streaming=True,
@@ -432,17 +435,31 @@ async def _try_normalized_stream_message(
         projector = AnthropicStreamProjector(
             requested_model=str(payload.get("model") or "unknown"),
             response_id=response_id or "-",
-            structured_output=structured_output,
         )
 
         async def emit_stream() -> AsyncIterator[str]:
+            pending_message_end = None
             async for event in provider.stream_chat(
                 normalized_request,
                 context=context,
                 is_disconnected=request.is_disconnected,
                 logger=getattr(request.app.state, "logger", None),
             ):
+                if event.type == "message_end":
+                    pending_message_end = event
+                    continue
+                if event.type == "usage" and pending_message_end is not None:
+                    pending_message_end = pending_message_end.model_copy(
+                        update={
+                            "sequence": event.sequence,
+                            "usage": event.usage,
+                        }
+                    )
+                    continue
                 for frame in projector.project(event):
+                    yield frame
+            if pending_message_end is not None:
+                for frame in projector.project(pending_message_end):
                     yield frame
 
         body_iterator = observe_anthropic_message_stream(
@@ -457,7 +474,11 @@ async def _try_normalized_stream_message(
         )
         return StreamingResponse(body_iterator, media_type="text/event-stream")
     except Exception as exc:
-        if not settings.legacy_chat_fallback:
+        if (
+            external_route is not None
+            or settings is None
+            or not settings.legacy_chat_fallback
+        ):
             raise
         _log_normalized_fallback(request, exc, event="anthropic_stream_fallback")
         return None
@@ -466,11 +487,29 @@ async def _try_normalized_stream_message(
 def _provider_adapter(
     request: Request,
     *,
+    normalized_request: Any,
     request_options: Any,
     pinned_model: str | None,
     require_streaming: bool = False,
-) -> GigaChatProviderAdapter:
+) -> Any:
     state = request.app.state
+    route = _external_provider_route(request, normalized_request.model)
+    if route is not None:
+        try:
+            return state.bridge_provider_runtime.adapter_for(
+                normalized_request,
+                api_mode=resolve_gigachat_api_mode(request),
+                public_protocol=PublicProtocol.ANTHROPIC_MESSAGES,
+            )
+        except BridgeMatrixAdmissionError as exc:
+            error = exc.as_public_error()
+            raise ClientCompatibilityError(
+                error["message"],
+                provider="anthropic",
+                param=error["param"],
+                code=error["code"],
+                error_type=error["type"],
+            ) from exc
     return GigaChatProviderAdapter(
         config=state.config,
         request_transformer=state.request_transformer,
@@ -482,6 +521,29 @@ def _provider_adapter(
         provider_label="anthropic",
         forced_model=pinned_model,
     )
+
+
+def _external_provider_route(request: Request, model: Any) -> Any | None:
+    """Resolve an external alias without changing dynamic GigaChat behavior."""
+    runtime = getattr(request.app.state, "bridge_provider_runtime", None)
+    if runtime is None:
+        return None
+    try:
+        route = runtime.registry.resolve(model)
+    except ProviderAliasError as exc:
+        if any(
+            profile.provider_kind is ProviderKind.GIGACHAT
+            and profile.model_inventory is ProviderModelInventory.DYNAMIC
+            for profile in runtime.registry.config.profiles
+        ):
+            return None
+        raise ClientCompatibilityError(
+            exc.message,
+            provider="anthropic",
+            param="model",
+            code=exc.code,
+        ) from exc
+    return route if route.provider_kind is not ProviderKind.GIGACHAT else None
 
 
 def _anthropic_adapter(request: Request) -> AnthropicProtocolAdapter:
@@ -498,11 +560,6 @@ def _normalization_settings(request: Request) -> Any:
         "proxy_settings",
         None,
     )
-
-
-def _builtin_tool_mapping_enabled(request: Request) -> bool:
-    settings = _normalization_settings(request)
-    return settings is None or not settings.disable_builtin_tool_mapping
 
 
 def _log_normalized_fallback(

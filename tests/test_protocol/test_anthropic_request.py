@@ -135,6 +135,23 @@ def test_build_openai_data_from_anthropic_request_accepts_tool_choice_auto():
     assert "tool_choice" not in openai_data
 
 
+def test_build_openai_data_from_anthropic_request_maps_parallel_tool_choice():
+    openai_data = _build_openai_data_from_anthropic_request(
+        {
+            "model": "GigaChat-2-Max",
+            "max_tokens": 128,
+            "messages": [{"role": "user", "content": "call both"}],
+            "tool_choice": {
+                "type": "auto",
+                "disable_parallel_tool_use": False,
+            },
+        },
+        logger,
+    )
+
+    assert openai_data["parallel_tool_calls"] is True
+
+
 def test_build_openai_data_from_anthropic_request_ignores_tool_choice_any():
     data = {
         "model": "claude-x",
@@ -212,44 +229,8 @@ def test_build_openai_data_from_anthropic_request_maps_server_tools_to_builtins(
     ]
     assert openai_data["tools"][3]["type"] == "function"
     assert openai_data["tools"][3]["function"]["name"] == "sum"
-    assert len(openai_data["functions"]) == 1
+    assert "functions" not in openai_data
     assert openai_data["tool_choice"] == {"type": "web_search"}
-
-
-def test_build_openai_data_from_anthropic_request_ignores_server_tools_when_mapping_disabled():
-    data = {
-        "model": "claude-x",
-        "messages": [{"role": "user", "content": "hi"}],
-        "tools": [
-            {
-                "type": "web_search_20250305",
-                "name": "web_search",
-                "max_uses": 5,
-                "allowed_domains": ["example.com"],
-            },
-            {
-                "name": "sum",
-                "description": "Add numbers",
-                "input_schema": {
-                    "type": "object",
-                    "properties": {"a": {"type": "number"}},
-                },
-            },
-        ],
-        "tool_choice": {"type": "tool", "name": "web_search"},
-    }
-
-    openai_data = _build_openai_data_from_anthropic_request(
-        data,
-        logger,
-        builtin_tool_mapping_enabled=False,
-    )
-
-    assert len(openai_data["tools"]) == 1
-    assert openai_data["tools"][0]["type"] == "function"
-    assert openai_data["tools"][0]["function"]["name"] == "sum"
-    assert len(openai_data["functions"]) == 1
-    assert "tool_choice" not in openai_data
 
 
 def test_build_openai_data_from_anthropic_request_maps_named_websearch_builtin():
@@ -276,36 +257,6 @@ def test_build_openai_data_from_anthropic_request_maps_named_websearch_builtin()
     assert "functions" not in openai_data
     assert "function_call" not in openai_data
     assert openai_data["tool_choice"] == {"type": "web_search"}
-
-
-def test_build_openai_data_from_anthropic_request_ignores_named_websearch_builtin_when_mapping_disabled():
-    data = {
-        "model": "claude-x",
-        "messages": [{"role": "user", "content": "hi"}],
-        "tools": [
-            {
-                "name": "WebSearch",
-                "description": "Allows Claude to search the web.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {"query": {"type": "string"}},
-                    "required": ["query"],
-                },
-            }
-        ],
-        "tool_choice": {"type": "tool", "name": "WebSearch"},
-    }
-
-    openai_data = _build_openai_data_from_anthropic_request(
-        data,
-        logger,
-        builtin_tool_mapping_enabled=False,
-    )
-
-    assert "tools" not in openai_data
-    assert "functions" not in openai_data
-    assert "function_call" not in openai_data
-    assert "tool_choice" not in openai_data
 
 
 def test_build_openai_data_from_anthropic_request_keeps_custom_web_search_tool():
@@ -369,7 +320,7 @@ def test_build_openai_data_from_anthropic_request_defaults_bad_tool_schema():
     }
 
 
-def test_build_openai_data_from_anthropic_request_normalizes_tool_schema():
+def test_build_openai_data_from_anthropic_request_preserves_tool_schema():
     data = {
         "model": "claude-x",
         "messages": [{"role": "user", "content": "hi"}],
@@ -396,12 +347,12 @@ def test_build_openai_data_from_anthropic_request_normalizes_tool_schema():
     openai_data = _build_openai_data_from_anthropic_request(data, logger)
 
     parameters = openai_data["tools"][0]["function"]["parameters"]
-    assert parameters["properties"]["answers"] == {
-        "type": "object",
-        "properties": {},
-    }
-    assert parameters["properties"]["score"]["type"] == "integer"
-    assert "anyOf" not in parameters["properties"]["score"]
+    assert parameters["properties"]["answers"] == {"type": "object"}
+    assert parameters["properties"]["score"]["anyOf"] == [
+        {"type": "integer"},
+        {"type": "number"},
+        {"type": "null"},
+    ]
 
 
 def test_build_openai_data_from_anthropic_request_keeps_function_tools():
@@ -424,7 +375,7 @@ def test_build_openai_data_from_anthropic_request_keeps_function_tools():
 
     assert openai_data["tools"][0]["type"] == "function"
     assert openai_data["tools"][0]["function"]["name"] == "sum"
-    assert len(openai_data["functions"]) == 1
+    assert "functions" not in openai_data
 
 
 @pytest.mark.parametrize(

@@ -6,7 +6,7 @@ installed `gigachat` SDK, not the website or external documentation.
 
 ## Source of truth
 
-In `pyproject.toml` the package is pinned to the stable range `gigachat>=0.2.3,<0.3.0`.
+In `pyproject.toml` the package requires `gigachat>=0.2.4a1,<0.3.0`.
 For this range, the canonical list of built-in tools comes from the SDK models:
 
 - `gigachat.models.chat_completions.ChatTool`;
@@ -41,11 +41,6 @@ If the same built-in tool is passed several times in one request through
 different aliases, the first canonical field reaches the GigaChat payload.
 A forced `tool_choice` for supported built-in tools turns into a
 GigaChat `ChatToolConfig(mode="tool", tool_name="<canonical tool>")`.
-
-To temporarily disable this mapping without disabling user function tools, set
-`GPT2GIGA_DISABLE_BUILTIN_TOOL_MAPPING=True`. Known provider built-in tools are
-then accepted for compatibility but are not sent upstream as executable GigaChat
-tools; the matching `tool_choice` is ignored.
 
 ## OpenAI mapping
 

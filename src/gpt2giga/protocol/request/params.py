@@ -101,10 +101,15 @@ def sanitize_openai_chat_parameters(
     *,
     allow_builtin_tools: bool = False,
     allow_namespace_tools: bool = False,
+    allow_parallel_tool_calls: bool = False,
 ) -> dict[str, Any]:
     """Return a sanitized Chat Completions payload or raise compatibility errors."""
     sanitized = dict(data)
-    _sanitize_openai_payload(sanitized, OPENAI_CHAT_SUPPORTED_PARAMS)
+    _sanitize_openai_payload(
+        sanitized,
+        OPENAI_CHAT_SUPPORTED_PARAMS,
+        allow_parallel_tool_calls=allow_parallel_tool_calls,
+    )
     _normalize_gigachat_extra_fields(sanitized)
     _sanitize_tools(
         sanitized,
@@ -178,10 +183,16 @@ def _sanitize_openai_payload(
     supported_params: frozenset[str],
     *,
     allow_stateful_responses: bool = False,
+    allow_parallel_tool_calls: bool = False,
 ) -> None:
     extra_fields: dict[str, Any] = {}
     for name in list(data):
         if name in OPENAI_ACCEPTED_IGNORED_PARAMS:
+            if name == "parallel_tool_calls" and allow_parallel_tool_calls:
+                if isinstance(data.get(name), bool):
+                    continue
+                data.pop(name, None)
+                continue
             if name == "previous_response_id" and allow_stateful_responses:
                 if data.get(name) is None:
                     data.pop(name, None)

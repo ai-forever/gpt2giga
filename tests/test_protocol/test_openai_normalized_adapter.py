@@ -136,7 +136,7 @@ def test_openai_adapter_maps_tools_tool_choice_and_response_format():
     assert payload["response_format"]["json_schema"]["name"] == "answer"
 
 
-def test_openai_adapter_normalizes_tool_parameter_schema():
+def test_openai_adapter_preserves_tool_parameter_schema():
     adapter = OpenAIProtocolAdapter()
 
     normalized = adapter.chat_to_normalized(
@@ -164,11 +164,12 @@ def test_openai_adapter_normalizes_tool_parameter_schema():
     )
 
     parameters = normalized.to_json_dict()["tools"][0]["parameters"]
-    assert parameters["properties"]["answers"] == {
-        "type": "object",
-        "properties": {},
-    }
-    assert parameters["properties"]["limit"]["type"] == "integer"
+    assert parameters["properties"]["answers"] == {"type": "object"}
+    assert parameters["properties"]["limit"]["type"] == [
+        "integer",
+        "number",
+        "null",
+    ]
 
 
 def test_openai_adapter_preserves_message_tool_calls_and_unknown_extensions():

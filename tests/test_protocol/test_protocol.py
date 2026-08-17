@@ -603,7 +603,7 @@ async def test_prepare_response_chat_function_calling_example_keeps_functions():
     Chat.model_validate(chat)
 
 
-async def test_request_transformer_normalizes_nullable_tool_schema_for_legacy_chat():
+async def test_request_transformer_preserves_nullable_tool_schema_for_legacy_chat():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger)
     data = {
@@ -625,15 +625,14 @@ async def test_request_transformer_normalizes_nullable_tool_schema_for_legacy_ch
     chat = await rt.prepare_chat(data)
 
     Chat.model_validate(chat)
-    properties = chat["functions"][0].parameters.model_dump(
+    parameters = chat["functions"][0].parameters.model_dump(
         by_alias=True,
         exclude_none=True,
-    )["properties"]
-    for field_name in ("url", "coordinate", "size", "text", "path"):
-        assert properties[field_name]["type"] == "string"
+    )
+    assert parameters == _kilocode_nullable_parameters()
 
 
-async def test_request_transformer_normalizes_uppercase_tool_schema_for_legacy_chat():
+async def test_request_transformer_preserves_openai_tool_schema_for_legacy_chat():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger)
     data = {
@@ -669,14 +668,14 @@ async def test_request_transformer_normalizes_uppercase_tool_schema_for_legacy_c
         by_alias=True,
         exclude_none=True,
     )
-    assert params["type"] == "object"
-    assert params["properties"]["city"]["type"] == "string"
-    assert params["properties"]["include_forecast"]["type"] == "boolean"
-    assert params["properties"]["daily_highs"]["type"] == "array"
-    assert params["properties"]["daily_highs"]["items"]["type"] == "number"
+    assert params["type"] == "OBJECT"
+    assert params["properties"]["city"]["type"] == "STRING"
+    assert params["properties"]["include_forecast"]["type"] == "BOOLEAN"
+    assert params["properties"]["daily_highs"]["type"] == "ARRAY"
+    assert params["properties"]["daily_highs"]["items"]["type"] == "NUMBER"
 
 
-async def test_request_transformer_normalizes_nullable_legacy_functions():
+async def test_request_transformer_preserves_nullable_legacy_functions():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger)
     data = {
@@ -694,17 +693,43 @@ async def test_request_transformer_normalizes_nullable_legacy_functions():
     chat = await rt.prepare_chat(data)
 
     Chat.model_validate(chat)
-    properties = chat["functions"][0].parameters.model_dump(
+    parameters = chat["functions"][0].parameters.model_dump(
         by_alias=True,
         exclude_none=True,
-    )["properties"]
-    for field_name in ("url", "coordinate", "size", "text", "path"):
-        assert properties[field_name]["type"] == "string"
+    )
+    assert parameters == _kilocode_nullable_parameters()
 
 
-async def test_prepare_chat_normalizes_raw_function_schemas():
+async def test_prepare_chat_preserves_native_function_schemas():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger)
+
+    schema = {
+        "$defs": {
+            "answer": {
+                "type": "object",
+                "properties": {"text": {"type": "string", "format": "uri"}},
+            }
+        },
+        "type": "object",
+        "properties": {
+            "answers": {
+                "type": "array",
+                "prefixItems": [{"$ref": "#/$defs/answer"}],
+                "items": False,
+            },
+            "score": {
+                "anyOf": [
+                    {"type": "integer"},
+                    {"type": "number"},
+                    {"type": "null"},
+                ]
+            },
+            "status": {"enum": ["ready", None, 1]},
+            "meta": {"type": ["object", "null"]},
+        },
+        "unevaluatedProperties": False,
+    }
 
     chat = await rt.prepare_chat(
         {
@@ -714,20 +739,7 @@ async def test_prepare_chat_normalizes_raw_function_schemas():
                     "type": "function",
                     "function": {
                         "name": "final_answer",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {
-                                "answers": {"type": "object"},
-                                "score": {
-                                    "anyOf": [
-                                        {"type": "integer"},
-                                        {"type": "number"},
-                                        {"type": "null"},
-                                    ]
-                                },
-                                "meta": {"type": ["object", "null"]},
-                            },
-                        },
+                        "parameters": schema,
                     },
                 }
             ],
@@ -739,12 +751,7 @@ async def test_prepare_chat_normalizes_raw_function_schemas():
         by_alias=True,
         exclude_none=True,
     )
-    assert params["properties"]["answers"]["type"] == "object"
-    assert params["properties"]["answers"]["properties"] == {}
-    assert params["properties"]["score"]["type"] == "integer"
-    assert "anyOf" not in params["properties"]["score"]
-    assert params["properties"]["meta"]["type"] == "object"
-    assert params["properties"]["meta"]["properties"] == {}
+    assert params == schema
 
 
 async def test_request_transformer_dev_debug_logging_includes_full_payload():
@@ -909,8 +916,8 @@ def test_response_processor_prod_debug_logging_omits_response():
     )
 
 
-def test_response_processor_native_so_preserves_chat_tool_call():
-    rp = ResponseProcessor(logger, structured_output_mode="native")
+def test_response_processor_preserves_chat_tool_call_with_response_format():
+    rp = ResponseProcessor(logger)
     giga_resp = MockResponse(
         {
             "choices": [
@@ -1242,8 +1249,8 @@ def test_response_processor_process_response_api_includes_reasoning_item():
     assert out["output"][1]["content"][0]["text"] == "Paris"
 
 
-def test_response_processor_native_so_preserves_responses_tool_call():
-    rp = ResponseProcessor(logger, structured_output_mode="native")
+def test_response_processor_preserves_responses_tool_call_with_response_format():
+    rp = ResponseProcessor(logger)
     giga_resp = MockResponse(
         {
             "choices": [
@@ -1298,7 +1305,7 @@ def test_response_processor_native_so_preserves_responses_tool_call():
 
 
 def test_response_processor_responses_tool_call_restores_namespace():
-    rp = ResponseProcessor(logger, structured_output_mode="native")
+    rp = ResponseProcessor(logger)
     tools = [
         {
             "type": "namespace",

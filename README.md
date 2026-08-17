@@ -11,7 +11,11 @@
 
 ![Gateway coverage](https://raw.githubusercontent.com/ai-forever/gpt2giga/main/badges/coverage.svg)
 
-`gpt2giga` — FastAPI-прокси, который принимает OpenAI-, Anthropic- и Gemini-like запросы и отправляет их в GigaChat. Он нужен, когда клиент, редактор, агентный фреймворк или SDK умеет работать с OpenAI/Anthropic/Gemini API, а реальный backend должен быть GigaChat.
+`gpt2giga` — FastAPI-прокси, который принимает OpenAI-, Anthropic- и
+Gemini-like запросы и отправляет их в GigaChat либо в проверенный
+OpenAI-compatible Chat Completions backend. Он нужен, когда клиент, редактор,
+агентный фреймворк или SDK говорит на одном API, а реальный backend предоставляет
+другой совместимый контракт.
 
 Локальный адрес по умолчанию: `http://localhost:8090`.
 ## Зачем Нужен
@@ -124,6 +128,7 @@ make docs-dev-ru
 | Тема | Документ |
 |---|---|
 | Быстрый запуск и первые запросы | [Quickstart](https://ai-forever.github.io/gpt2giga/quickstart) |
+| Codex, Claude Code и Gemini CLI через `/v1/chat/completions` | [Chat Completions bridge](https://ai-forever.github.io/gpt2giga/chat-completions-bridge) |
 | Что поддерживается, отключено или намеренно игнорируется | [API compatibility](https://ai-forever.github.io/gpt2giga/api-compatibility) |
 | Совместимость SDK `extra_*` и параметров клиентов | [Client parameter compatibility](https://ai-forever.github.io/gpt2giga/client-parameter-compatibility) |
 | Встроенные инструменты GigaChat и маппинг OpenAI/Anthropic/Gemini | [Built-in tools](https://ai-forever.github.io/gpt2giga/builtin-tools) |

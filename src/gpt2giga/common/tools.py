@@ -2,10 +2,6 @@ import re
 from collections.abc import Mapping
 from typing import Any
 
-from gigachat.models import Function, FunctionParameters
-
-from gpt2giga.common.json_schema import normalize_tool_parameters_schema
-
 _RESERVED_GIGACHAT_TOOL_NAME_MAP = {
     # У GigaChat есть встроенный tool под названием "web_search".
     # Если пользователь передает custom tool с таким же названием, это может вызвать конфликт на стороне GigaChat.
@@ -345,77 +341,3 @@ def _optional_tool_name(definition: Mapping) -> str | None:
     if not isinstance(name, str) or not name:
         return None
     return name
-
-
-def convert_tool_to_giga_functions(data: dict):
-    functions = []
-
-    for function in iter_function_tool_payloads(data):
-        normalized_params = normalize_tool_parameters_schema(function["parameters"])
-        giga_function = Function(
-            name=map_tool_name_to_gigachat(function["name"]),
-            description=function.get("description", ""),
-            parameters=FunctionParameters(**normalized_params),
-        )
-        functions.append(giga_function)
-    return functions
-
-
-def normalize_gigachat_function_definitions(functions: Any) -> list[Function]:
-    """Return GigaChat Function models with sanitized parameters schemas."""
-    if not isinstance(functions, list):
-        return []
-
-    normalized_functions: list[Function] = []
-    for function in functions:
-        function_payload = _function_definition_payload(function)
-        if function_payload is None:
-            continue
-
-        name = _optional_tool_name(function_payload)
-        if name is None:
-            continue
-
-        normalized_params = normalize_tool_parameters_schema(
-            function_payload.get("parameters") or {}
-        )
-        payload: dict[str, Any] = {
-            "name": map_tool_name_to_gigachat(name),
-            "description": function_payload.get("description", ""),
-            "parameters": FunctionParameters(**normalized_params),
-        }
-        for field_name in ("few_shot_examples", "return_parameters"):
-            field_value = function_payload.get(field_name)
-            if field_value is None:
-                continue
-            if field_name == "return_parameters" and isinstance(field_value, Mapping):
-                field_value = normalize_tool_parameters_schema(field_value)
-            payload[field_name] = field_value
-
-        normalized_functions.append(Function(**payload))
-
-    return normalized_functions
-
-
-def _function_definition_payload(function: Any) -> dict[str, Any] | None:
-    if isinstance(function, Mapping):
-        if "function" in function and isinstance(function["function"], Mapping):
-            return dict(function["function"])
-        return dict(function)
-
-    if hasattr(function, "model_dump"):
-        dumped = function.model_dump(exclude_none=True, by_alias=True)
-        return dict(dumped) if isinstance(dumped, Mapping) else None
-
-    payload: dict[str, Any] = {}
-    for field_name in (
-        "name",
-        "description",
-        "parameters",
-        "few_shot_examples",
-        "return_parameters",
-    ):
-        if hasattr(function, field_name):
-            payload[field_name] = getattr(function, field_name)
-
-    return payload or None

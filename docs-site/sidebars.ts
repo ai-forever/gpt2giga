@@ -6,7 +6,13 @@ const sidebars: SidebarsConfig = {
       type: 'category',
       label: 'Overview',
       collapsible: false,
-      items: ['index', 'quickstart', 'configuration', 'provider-profiles'],
+      items: [
+        'index',
+        'quickstart',
+        'chat-completions-bridge',
+        'configuration',
+        'provider-profiles',
+      ],
     },
     {
       type: 'category',

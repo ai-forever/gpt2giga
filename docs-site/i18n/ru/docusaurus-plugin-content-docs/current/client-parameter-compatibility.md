@@ -103,13 +103,10 @@ normalized parity.
 `responseMimeType=application/json` без `responseJsonSchema` / `responseSchema`)
 отклоняется, потому что вышестоящий GigaChat не поддерживает отдельный режим JSON.
 
-При `GPT2GIGA_DISABLE_REASONING=True` прокси принимает `reasoning` и
-`reasoning_effort`, но не передаёт их в полезную нагрузку, отправляемую в GigaChat.
-
-При `GPT2GIGA_DISABLE_BUILTIN_TOOL_MAPPING=True` прокси принимает provider
-built-in tools для совместимости, но не сопоставляет и не отправляет их в
-GigaChat как executable tools. Пользовательские function tools продолжают
-работать.
+Явные `reasoning.effort="none"` или `reasoning_effort="none"` отключают
+рассуждения для отдельного запроса, включая Codex `model_reasoning_effort=none`.
+В остальных случаях прокси передаёт явно заданный клиентом reasoning effort и
+не применяет глобальный default или override.
 
 Поля метаданных OpenAI, такие как `user`, `metadata`, `service_tier`,
 `safety_identifier`, `seed`, `prompt_cache_key` и `prompt_cache_retention`,
@@ -118,10 +115,19 @@ GigaChat как executable tools. Пользовательские function tool
 Неподдерживаемые необязательные параметры OpenAI принимаются и игнорируются. Примеры:
 `logprobs`, `top_logprobs`, `logit_bias`, аудиовывод, `prediction`,
 `web_search_options`, встроенные инструменты вне режима GigaChat v2, `n > 1`,
-`parallel_tool_calls=true`, сохранённые запросы completions, `conversation`, а
-также `previous_response_id` в режиме Responses v1. `/chat/completions` v1
+сохранённые запросы completions, `conversation`, а также `previous_response_id`
+в режиме Responses v1. `/chat/completions` v1
 остаётся поддерживаемым маршрутом совместимости, но новые возможности
 инструментов и встроенных инструментов развиваются для GigaChat `v2/chat/completions`.
+
+Буферизованные параллельные вызовы локальных функций поддерживаются для
+`GigaChat-2-Max` на маршрутах v2. OpenAI Chat Completions передаёт
+`parallel_tool_calls=true`, Anthropic Messages —
+`tool_choice.disable_parallel_tool_use=false`, а Gemini включает ту же
+upstream-опцию, когда после фильтрации остаётся больше одной function
+declaration. В ответе сохраняются ID всех вызовов, а следующий запрос может
+передать результаты всех соответствующих инструментов. Legacy v1-контракт не
+изменён.
 
 ## Параметры тела Anthropic
 

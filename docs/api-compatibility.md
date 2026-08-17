@@ -1,6 +1,9 @@
 # API compatibility
 
-`gpt2giga` is a compatibility proxy, not a full clone of OpenAI, Anthropic, or Gemini. It focuses on the parts of the API that SDKs, editors, and agent tools usually need when the backend is GigaChat.
+`gpt2giga` is a compatibility proxy, not a full clone of OpenAI, Anthropic, or
+Gemini. It focuses on the API subset commonly needed by SDKs, editors, and
+agent tools when the backend is GigaChat or a reviewed OpenAI-compatible Chat
+Completions server.
 
 ## What does not work directly with GigaChat
 
@@ -14,7 +17,7 @@ Below are the practical incompatibilities that the proxy covers.
 | Gemini GenerateContent API | Gemini `contents`/`parts`, candidates, function declarations, token counting, and SSE chunks differ from OpenAI/Anthropic and GigaChat. | Accepts Gemini-like requests at the root, under `/v1`, `/v2`, and `/v1beta`, translates them into normalized chat/embeddings requests, and maps the responses back into the Gemini shape. |
 | SDK `extra_headers`, `extra_query`, `extra_body` | SDKs may send transport fields or optional model fields that GigaChat does not accept. | Filters dangerous headers, passes only allowed metadata, forwards GigaChat-specific `extra_body`, and ignores known unsupported optional fields. |
 | Streaming SSE | OpenAI, Anthropic, and Gemini SDKs expect their own event names and delta shapes. | Generates OpenAI-, Anthropic-, and Gemini-compatible SSE from GigaChat streaming responses. |
-| Tools and structured output | Function/tool schemas and JSON-schema controls differ between providers and backend modes. | Maps local tools/functions and provides a function-call fallback for structured output. |
+| Tools and structured output | Function/tool schemas and JSON-schema controls differ between providers and backend modes. | Maps local tools/functions and forwards structured-output schemas through native GigaChat `response_format`. |
 | Authorization | OpenAI/Anthropic clients work with API keys, while GigaChat requires a different credentials/scope mechanism. | Separates proxy API-key authentication from upstream GigaChat authorization and, if needed, supports per-request pass-through. |
 | Model discovery | GigaChat model responses do not match the OpenAI/Anthropic/Gemini/LiteLLM shape. | Repackages the model list and description for the target client. |
 | OpenAI/Anthropic/Gemini batch routes | The installed GigaChat SDK/backend has no full create/list/retrieve/cancel flow for batch APIs. | Keeps the Files/Batches routers disabled until they can work end-to-end. |
@@ -22,10 +25,10 @@ Below are the practical incompatibilities that the proxy covers.
 ## Mounted routes
 
 Public API routes are available at the root and under versioned prefixes.
-The backend selection rule is the same for OpenAI-, Anthropic-, and
-Gemini-compatible routes: `/v1` forces the GigaChat v1 contract, `/v2` forces
-the GigaChat v2 contract, and root routes without a versioned prefix use
-`GPT2GIGA_GIGACHAT_API_MODE=v1|v2`.
+For built-in GigaChat models, `/v1` forces the GigaChat v1 contract, `/v2`
+forces v2, and root routes use `GPT2GIGA_GIGACHAT_API_MODE=v1|v2`. A model that
+resolves to an explicit provider-profile alias uses that profile instead; the
+versioned public prefix does not redirect it to GigaChat.
 
 Examples:
 
@@ -38,8 +41,8 @@ Examples:
 
 | Route / group | Status | Comment |
 |---|---|---|
-| `GET /models` | Supported | List of GigaChat models in the OpenAI-compatible form. |
-| `GET /models/{model}` | Supported | A single model in the OpenAI-compatible form. |
+| `GET /models` | Supported | Dynamic GigaChat inventory or static provider-profile aliases in OpenAI form. A Codex request with `client_version` receives an empty native Codex catalog so an explicitly configured custom model retains client-owned instructions and tool metadata. |
+| `GET /models/{model}` | Supported | One dynamic model or exact static alias in OpenAI form. |
 | `POST /chat/completions` | Supported | Non-streaming and streaming chat, tools/function calling, structured output, attachments where supported. |
 | `POST /responses` | Stable native / normalized preview | Native GigaChat execution preserves the compatibility surface, including hosted tools and attachment handoff. Route-selected normalized execution is technical preview and rejects semantics that its selected route/model/API mode cannot preserve. |
 | `POST /embeddings` | Supported | Uses the model from the request or the proxy default for embeddings, depending on the configuration. |
@@ -58,8 +61,8 @@ Examples:
 |---|---|---|
 | `GET /models` | Supported | Returned in the Anthropic shape when the request contains Anthropic SDK headers. |
 | `GET /models/{model_id}` | Supported | Returned in the Anthropic shape when the request contains Anthropic SDK headers. |
-| `POST /messages` | Supported | Messages API, streaming, local tools, GigaChat v2 mapping for compatible Anthropic provider tools, and structured-output fallback. With `GPT2GIGA_NORMALIZATION_MODE=on`, the accepted v1 subset uses the normalized request/response/SSE core. |
-| `POST /messages/count_tokens` | Supported | Counts message, system, tool, and structured-output text through GigaChat token counting; normalized mode uses `NormalizedTokenCountRequest`/`Response`. |
+| `POST /messages` | Supported | Messages API, streaming, local tools, GigaChat v2 mapping for compatible Anthropic provider tools, and native structured output. With `GPT2GIGA_NORMALIZATION_MODE=on`, the accepted v1 subset uses the normalized request/response/SSE core. |
+| `POST /messages/count_tokens` | Provider-dependent | GigaChat can count message, system, tool, and structured-output text. A Chat Completions-only external alias rejects the operation because it has no exact token-count API. |
 | `POST /messages/batches`, `GET /messages/batches*` | Disabled | Router code exists but is not mounted until batch methods appear in the GigaChat SDK/backend. |
 | Files API beta | Not implemented | Out of scope for now. |
 | Skills API beta | Not implemented | Out of scope for now. |
@@ -74,6 +77,10 @@ already versioned base URL, `/v1/v1beta` and `/v2/v1beta` are also available.
 `/v2/v1beta` force the GigaChat v2 backend contract. The root Gemini paths
 `/...` and `/v1beta/...` without an outer `/v1` or `/v2` use
 `GPT2GIGA_GIGACHAT_API_MODE=v1|v2`.
+
+Those Gemini version-prefix rules apply to built-in GigaChat models. An exact
+external provider-profile alias remains on its selected provider for every
+compatible public path.
 
 Gemini model discovery in the pure Gemini form is always available under
 `/v1beta`, `/v1/v1beta`, and `/v2/v1beta`.
@@ -98,7 +105,8 @@ logs.
 models advertise `generateContent`, `streamGenerateContent`, and `countTokens`;
 embedding-like models advertise only `embedContent` and `batchEmbedContents`;
 unknown/custom model ids advertise only `countTokens`, unless the backend metadata
-provides more precise information.
+provides more precise information. A static Chat Completions alias advertises
+generation and streaming, but not `countTokens`.
 
 | Route / group | Status | Comment |
 |---|---|---|
@@ -106,7 +114,7 @@ provides more precise information.
 | `GET /v1beta/models/{model}`, `/v1/v1beta/models/{model}`, `/v2/v1beta/models/{model}` | Supported | A single model in the Gemini `Model` form. |
 | `POST /models/{model}:generateContent`, `/v1/...`, `/v2/...`, `/v1beta/...`, `/v1/v1beta/...`, `/v2/v1beta/...` | Supported | Maps the admitted `contents`/`parts`, `systemInstruction`, `generationConfig`, function declarations/results, typed inline images, and JSON Schema output into a bridge-admissible normalized chat request. Unmodeled safety, cache, file, and tool semantics remain explicit and fail OpenAI-compatible bridge admission before I/O. |
 | `POST /models/{model}:streamGenerateContent`, `/v1/...`, `/v2/...`, `/v1beta/...`, `/v1/v1beta/...`, `/v2/v1beta/...` | Supported | Returns `text/event-stream` with Gemini `GenerateContentResponse` chunks. |
-| `POST /models/{model}:countTokens`, `/v1/...`, `/v2/...`, `/v1beta/...`, `/v1/v1beta/...`, `/v2/v1beta/...` | Supported | Counts `systemInstruction`, `contents`, and function declarations through GigaChat token counting; normalization mode uses `NormalizedTokenCountRequest`/`Response`. |
+| `POST /models/{model}:countTokens`, `/v1/...`, `/v2/...`, `/v1beta/...`, `/v1/v1beta/...`, `/v2/v1beta/...` | Provider-dependent | GigaChat counts `systemInstruction`, `contents`, and function declarations. A Chat Completions-only external alias rejects the operation. |
 | `POST /models/{model}:embedContent`, `/v1/...`, `/v2/...`, `/v1beta/...`, `/v1/v1beta/...`, `/v2/v1beta/...` | Supported | Returns Gemini `embedding.values` using the GigaChat embeddings backend. |
 | `POST /models/{model}:batchEmbedContents`, `/v1/...`, `/v2/...`, `/v1beta/...`, `/v1/v1beta/...`, `/v2/v1beta/...` | Supported | Returns Gemini `embeddings[]` using the GigaChat embeddings backend. |
 | `POST /v1beta/files`, `GET /v1beta/files*` | Disabled | Router code is prepared but not mounted by default. |
@@ -186,9 +194,13 @@ GPT2GIGA_RUN_GEMINI_SMOKE=1 GPT2GIGA_LIVE_ENV_FILE=.env.live uv run pytest tests
 
 Typical fields that are accepted and ignored:
 
-- OpenAI metadata and fine-tuning parameters: `user`, `metadata`, `service_tier`, `seed`, `prompt_cache_key`, `logprobs`, `top_logprobs`, `logit_bias`, `prediction`, `web_search_options`, `n > 1`, `parallel_tool_calls=true`;
-- Optional Anthropic fields: `metadata`, `service_tier`, `top_k`, `container`, `context_management`, `mcp_servers`, unsupported provider tools, citations, unsupported document/file content blocks. Compatible provider tools (`web_search*`, `web_fetch*`, `code_execution*`) are mapped to GigaChat v2 built-in tools unless `GPT2GIGA_DISABLE_BUILTIN_TOOL_MAPPING=True`.
-- Optional Gemini fields: `safetySettings`, `cachedContent`, `serviceTier`, ignored `generationConfig` controls such as `candidateCount`/`topK`/`responseModalities`, and unsupported non-function tools are accepted and kept for diagnostics, but not applied by GigaChat. Compatible Gemini provider tools are mapped to GigaChat v2 built-in tools: `googleSearch` / `googleSearchRetrieval` -> `web_search`, `urlContext` -> `url_content_extraction`, `codeExecution` -> `code_interpreter`, unless `GPT2GIGA_DISABLE_BUILTIN_TOOL_MAPPING=True`; the full mapping is described in [Built-in tools](builtin-tools.md). Unsupported `responseMimeType` values and `responseSchema` without `application/json` are rejected.
+- OpenAI metadata and fine-tuning parameters: `user`, `metadata`, `service_tier`, `seed`, `prompt_cache_key`, `logprobs`, `top_logprobs`, `logit_bias`, `prediction`, `web_search_options`, `n > 1`;
+- Optional Anthropic fields: `metadata`, `service_tier`, `top_k`, `container`, `context_management`, `mcp_servers`, unsupported provider tools, citations, unsupported document/file content blocks. Compatible provider tools (`web_search*`, `web_fetch*`, `code_execution*`) are mapped to GigaChat v2 built-in tools.
+- Optional Gemini fields: `safetySettings`, `cachedContent`, `serviceTier`, ignored `generationConfig` controls such as `candidateCount`/`topK`/`responseModalities`, and unsupported non-function tools are accepted and kept for diagnostics, but not applied by GigaChat. Compatible Gemini provider tools are mapped to GigaChat v2 built-in tools: `googleSearch` / `googleSearchRetrieval` -> `web_search`, `urlContext` -> `url_content_extraction`, `codeExecution` -> `code_interpreter`; the full mapping is described in [Built-in tools](builtin-tools.md). Unsupported `responseMimeType` values and `responseSchema` without `application/json` are rejected.
+
+Buffered parallel local function calls are supported for `GigaChat-2-Max` on
+v2 OpenAI Chat Completions, Anthropic Messages, and Gemini `generateContent`
+routes. GigaChat v1 behavior is unchanged.
 
 If a field is intentionally ignored, it is not sent upstream as an executable GigaChat feature. A literal `extra_body` object can be passed to GigaChat `additional_fields`; in that case the GigaChat API determines support.
 

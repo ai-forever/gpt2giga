@@ -121,6 +121,14 @@ def _injected_catalog_context(request: Request):
 
 
 async def _list_model_catalog(request: Request):
+    static_snapshot = getattr(
+        request.app.state,
+        "static_model_catalog_snapshot",
+        None,
+    )
+    if static_snapshot is not None:
+        return static_snapshot
+
     injected_catalog = getattr(request.app.state, "model_catalog", None)
     injected_context = _injected_catalog_context(request)
     if injected_catalog is not None and injected_context is not None:

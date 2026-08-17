@@ -10,6 +10,8 @@
 | [deploy/traefik.yaml](https://github.com/ai-forever/gpt2giga/blob/main/deploy/traefik.yaml) | Traefik и несколько экземпляров gpt2giga для примера маршрутизации по модели. |
 | [deploy/nginx.yaml](https://github.com/ai-forever/gpt2giga/blob/main/deploy/nginx.yaml) | Минимальный compose-стек с nginx в роли обратного прокси. |
 | [deploy/observability.yaml](https://github.com/ai-forever/gpt2giga/blob/main/deploy/observability.yaml) | gpt2giga с mitmproxy для отладки трафика. |
+| [deploy/chat-completions-observability.yaml](https://github.com/ai-forever/gpt2giga/blob/main/deploy/chat-completions-observability.yaml) | Локальный мост Chat Completions с перехватом через mitmproxy в reverse mode. |
+| [deploy/providers.chat-completions.example.yaml](https://github.com/ai-forever/gpt2giga/blob/main/deploy/providers.chat-completions.example.yaml) | Профиль одной модели для reverse-mode bridge. |
 | [deploy/observe-multiple.yaml](https://github.com/ai-forever/gpt2giga/blob/main/deploy/observe-multiple.yaml) | Несколько экземпляров gpt2giga за mitmproxy. |
 | [deploy/mitmproxy.yaml](https://github.com/ai-forever/gpt2giga/blob/main/deploy/mitmproxy.yaml) | Необязательное наложение mitmproxy для `base.yaml`, Phoenix и других наложений compose. |
 | [deploy/postgres.yaml](https://github.com/ai-forever/gpt2giga/blob/main/deploy/postgres.yaml) | Необязательный надёжный бэкенд журналов трафика на Postgres. |
@@ -134,6 +136,36 @@ make phoenix-mitm-dev-d
 ```
 
 Интерфейс mitmproxy доступен на `http://localhost:${MITMPROXY_WEB_PORT:-8081}`. Порт прокси по умолчанию привязан к `127.0.0.1:${MITMPROXY_PORT:-8080}`.
+
+## Мост Chat Completions + mitmproxy в reverse mode
+
+OpenAI-compatible adapter не читает `HTTP_PROXY` и `HTTPS_PROXY`. Чтобы
+просматривать трафик к upstream, который предоставляет только Chat
+Completions, используйте отдельный reverse-mode стек вместо обычного
+forward-proxy overlay:
+
+```sh
+docker compose --env-file .env \
+  -f deploy/chat-completions-observability.yaml up -d --build
+```
+
+Встроенный профиль публикует `my_model`, использует отложенный buffered stream
+и обращается к mitmproxy по разрешённому loopback URL
+`http://127.0.0.1:8080/v1/chat/completions`. Оба контейнера делят один network
+namespace. Затем mitmproxy пересылает запрос на host-машину по адресу
+`${MITMPROXY_UPSTREAM_URL:-http://host.docker.internal:29999}`. Такая топология
+нужна потому, что собственный `127.0.0.1` контейнера не ведёт к туннелю на host.
+
+При необходимости задайте другой абсолютный путь к provider profile:
+
+```dotenv
+MITMPROXY_UPSTREAM_URL=http://host.docker.internal:29999
+GPT2GIGA_PROVIDER_CONFIG_FILE=/absolute/path/to/providers.yaml
+```
+
+Туннель на host-машине должен заработать до первого модельного запроса. Gateway,
+reverse listener и web UI по умолчанию опубликованы только на host loopback и
+портах 8090, 8080 и 8081.
 
 ## Фиксация версий
 

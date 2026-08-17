@@ -320,6 +320,32 @@ def test_anthropic_messages_v2_mode_uses_chat_completion_create():
     ]
 
 
+def test_anthropic_messages_v2_forwards_parallel_tool_choice():
+    app = make_app("v2")
+    client = TestClient(app)
+
+    response = client.post(
+        "/messages",
+        json={
+            "model": "GigaChat-2-Max",
+            "max_tokens": 128,
+            "messages": [{"role": "user", "content": "call both"}],
+            "tools": [
+                {"name": "first", "input_schema": {"type": "object"}},
+                {"name": "second", "input_schema": {"type": "object"}},
+            ],
+            "tool_choice": {
+                "type": "auto",
+                "disable_parallel_tool_use": False,
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    request_data = app.state.request_transformer.chat_completion_calls[0][0]
+    assert request_data["parallel_tool_calls"] is True
+
+
 def test_anthropic_messages_normalization_on_uses_normalized_core():
     app = make_app(
         "v2",
@@ -486,35 +512,6 @@ def test_anthropic_messages_v2_mode_passes_builtin_tools_to_transformer():
     transformed_data = app.state.request_transformer.chat_completion_calls[0][0]
     assert transformed_data["tools"] == [{"type": "web_search", "max_uses": 3}]
     assert transformed_data["tool_choice"] == {"type": "web_search"}
-    assert "functions" not in transformed_data
-    assert "function_call" not in transformed_data
-
-
-def test_anthropic_messages_v2_mode_ignores_builtin_tools_when_mapping_disabled():
-    app = make_app("v2", disable_builtin_tool_mapping=True)
-    client = TestClient(app)
-
-    response = client.post(
-        "/messages",
-        json={
-            "model": "claude-x",
-            "max_tokens": 16,
-            "messages": [{"role": "user", "content": "search"}],
-            "tools": [
-                {
-                    "type": "web_search_20250305",
-                    "name": "web_search",
-                    "max_uses": 3,
-                }
-            ],
-            "tool_choice": {"type": "tool", "name": "web_search"},
-        },
-    )
-
-    assert response.status_code == 200
-    transformed_data = app.state.request_transformer.chat_completion_calls[0][0]
-    assert "tools" not in transformed_data
-    assert "tool_choice" not in transformed_data
     assert "functions" not in transformed_data
     assert "function_call" not in transformed_data
 

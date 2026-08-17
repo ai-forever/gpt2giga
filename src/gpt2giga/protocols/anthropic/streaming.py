@@ -16,17 +16,18 @@ class AnthropicStreamProjector:
         *,
         requested_model: str,
         response_id: str,
-        structured_output: bool = False,
     ) -> None:
         self.requested_model = requested_model
         self.response_id = response_id
-        self.structured_output = structured_output
         self._block_index = 0
         self._block_type: str | None = None
+        self._input_tokens = 0
         self._output_tokens = 0
 
     def project(self, event: NormalizedStreamEvent) -> list[str]:
         """Render zero or more Anthropic SSE frames for one normalized event."""
+        if event.usage is not None and event.usage.input_tokens is not None:
+            self._input_tokens = int(event.usage.input_tokens)
         if event.usage is not None and event.usage.output_tokens is not None:
             self._output_tokens = int(event.usage.output_tokens)
         if event.type == "message_start":
@@ -130,8 +131,6 @@ class AnthropicStreamProjector:
 
     def _tool_start(self, tool_call: NormalizedToolCall | None) -> list[str]:
         call = tool_call or NormalizedToolCall()
-        if self.structured_output:
-            return self._structured_tool_delta(call)
         frames = self._start_block(
             "tool_use",
             {
@@ -147,8 +146,6 @@ class AnthropicStreamProjector:
     def _tool_delta(self, tool_call: NormalizedToolCall | None) -> list[str]:
         if tool_call is None or tool_call.arguments in (None, "", {}):
             return []
-        if self.structured_output:
-            return self._structured_tool_delta(tool_call)
         arguments = tool_call.arguments
         partial = (
             arguments
@@ -169,30 +166,6 @@ class AnthropicStreamProjector:
             )
         ]
 
-    def _structured_tool_delta(
-        self,
-        tool_call: NormalizedToolCall,
-    ) -> list[str]:
-        frames = self._start_block("text", {"type": "text", "text": ""})
-        if tool_call.arguments in (None, "", {}):
-            return frames
-        text = (
-            tool_call.arguments
-            if isinstance(tool_call.arguments, str)
-            else json.dumps(tool_call.arguments, ensure_ascii=False)
-        )
-        frames.append(
-            _sse(
-                "content_block_delta",
-                {
-                    "type": "content_block_delta",
-                    "index": self._block_index,
-                    "delta": {"type": "text_delta", "text": text},
-                },
-            )
-        )
-        return frames
-
     def _message_end(self, event: NormalizedStreamEvent) -> list[str]:
         frames = self._stop_block()
         stop_reason = {
@@ -201,8 +174,6 @@ class AnthropicStreamProjector:
             "tool_calls": "tool_use",
             "content_filter": "end_turn",
         }.get(event.stop_reason or event.finish_reason or "stop", "end_turn")
-        if self.structured_output and stop_reason == "tool_use":
-            stop_reason = "end_turn"
         frames.extend(
             [
                 _sse(
@@ -213,7 +184,10 @@ class AnthropicStreamProjector:
                             "stop_reason": stop_reason,
                             "stop_sequence": None,
                         },
-                        "usage": {"output_tokens": self._output_tokens},
+                        "usage": {
+                            "input_tokens": self._input_tokens,
+                            "output_tokens": self._output_tokens,
+                        },
                     },
                 ),
                 _sse("message_stop", {"type": "message_stop"}),

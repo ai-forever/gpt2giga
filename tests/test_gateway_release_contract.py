@@ -33,25 +33,29 @@ def test_gateway_ci_has_stable_bounded_required_check_names():
     assert "uv build --wheel --sdist --no-sources" in workflow
 
 
-def test_gateway_ci_tests_minimum_stable_sdk_from_wheel():
+def test_gateway_ci_tests_minimum_sdk_from_wheel():
     workflow = (_WORKFLOW_ROOT / "ci.yaml").read_text(encoding="utf-8")
 
     assert "Gateway minimum SDK / Python ${{ matrix.python-version }}" in workflow
     assert 'python-version: ["3.10", "3.14"]' in workflow
     assert "uv venv --python ${{ matrix.python-version }} .venv-min-sdk" in workflow
-    assert '"gigachat==0.2.3"' in workflow
+    assert "gigachat-0.2.4a1-py3-none-any.whl" in workflow
     assert "dist/min-sdk/gpt2giga-*.whl" in workflow
     assert "scripts/gateway_artifact_smoke.py" in workflow
-    assert '--expected-gigachat-version "0.2.3"' in workflow
+    assert '--expected-gigachat-version "0.2.4a1"' in workflow
     assert ".venv-min-sdk/bin/gpt2giga --help" in workflow
 
 
-def test_gateway_ci_resolves_stable_artifact_dependencies_without_prerelease_flags():
+def test_gateway_ci_installs_artifact_dependencies_without_global_prerelease_flags():
     workflow = (_WORKFLOW_ROOT / "ci.yaml").read_text(encoding="utf-8")
 
     assert "uv build --wheel --no-sources --out-dir dist/smoke" in workflow
     assert (
         "uv pip install --python .venv-artifact/bin/python dist/smoke/gpt2giga-*.whl"
+    ) in workflow
+    assert (
+        "uv pip install --python .venv-artifact/bin/python "
+        "gigachat-0.2.4a1-py3-none-any.whl"
     ) in workflow
     assert "test ! -e gpt2giga" in workflow
     assert ".venv-artifact/bin/python -I scripts/gateway_artifact_smoke.py" in workflow
@@ -102,5 +106,7 @@ def test_all_workflow_filters_use_standalone_gateway_paths():
         assert path in workflows["ci.yaml"]
     for path in ("'src/gpt2giga/**'", "'Dockerfile'", "'deploy/**'"):
         assert path in workflows["docker-smoke.yaml"]
+    for workflow_name in ("docker-smoke.yaml", "docker_image.yaml", "publish-ghcr.yml"):
+        assert "'gigachat-0.2.4a1-py3-none-any.whl'" in workflows[workflow_name]
     for path in ("'docs/**'", "'docs-site/**'", "'scripts/check_docs.py'"):
         assert path in workflows["docs-pages.yaml"]

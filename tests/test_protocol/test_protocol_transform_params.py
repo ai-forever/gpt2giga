@@ -15,7 +15,6 @@ from gpt2giga.protocol.request.params import (
 def _clear_pass_model_env(monkeypatch):
     monkeypatch.delenv("GPT2GIGA_PASS_MODEL", raising=False)
     monkeypatch.delenv("GPT2GIGA_DEFAULT_MAX_TOKENS", raising=False)
-    monkeypatch.delenv("GPT2GIGA_DISABLE_REASONING", raising=False)
 
 
 def test_transform_chat_parameters_temperature_and_top_p():
@@ -67,7 +66,7 @@ def test_transform_chat_parameters_keeps_sdk_function_models():
             "name": "get_weather",
             "parameters": {
                 "type": "object",
-                "properties": {"city": {"type": "string", "description": ""}},
+                "properties": {"city": {"type": "string"}},
                 "required": ["city"],
             },
         }
@@ -176,7 +175,7 @@ def test_transform_responses_parameters_accepts_flat_forced_function_tool_choice
     assert out["function_call"] == {"name": "lookup"}
 
 
-def test_transform_responses_parameters_sanitizes_legacy_function_enums():
+def test_transform_responses_parameters_preserves_native_function_enums():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger=logger)
 
@@ -226,10 +225,16 @@ def test_transform_responses_parameters_sanitizes_legacy_function_enums():
     params = out["functions"][0]["parameters"]["properties"]
     manifest = params["manifest"]["properties"]
     snapshot = params["snapshot"]["properties"]
-    assert manifest["surface"]["enum"] == ["dashboard", "report"]
-    assert "enum" not in manifest["version"]
-    assert snapshot["status"]["enum"] == ["ready", "partial", "blocked", "fixture"]
-    assert "enum" not in snapshot["version"]
+    assert manifest["surface"]["enum"] == ["dashboard", "report", None]
+    assert manifest["version"]["enum"] == [1]
+    assert snapshot["status"]["enum"] == [
+        "ready",
+        "partial",
+        "blocked",
+        "fixture",
+        None,
+    ]
+    assert snapshot["version"]["enum"] == [1]
 
 
 def test_transform_responses_parameters_ignores_builtin_tools_in_v1_mode():
@@ -279,39 +284,6 @@ def test_transform_responses_parameters_accepts_builtin_tools_in_v2_mode():
         "mode": "tool",
         "tool_name": "web_search",
     }
-
-
-def test_transform_responses_parameters_ignores_builtin_tools_when_mapping_disabled():
-    cfg = ProxyConfig(
-        proxy=ProxySettings(
-            gigachat_api_mode="v2",
-            disable_builtin_tool_mapping=True,
-        )
-    )
-    rt = RequestTransformer(cfg, logger=logger)
-
-    out = rt.transform_responses_parameters(
-        {
-            "model": "gpt-x",
-            "input": "search",
-            "tools": [
-                {
-                    "type": "web_search_preview",
-                    "indexes": ["web"],
-                    "flags": ["trusted"],
-                },
-                {
-                    "type": "image_generation",
-                    "size": "1024x1024",
-                },
-            ],
-            "tool_choice": {"type": "web_search_preview"},
-        }
-    )
-
-    assert "_gpt2giga_builtin_tools" not in out
-    assert "_gpt2giga_tool_config" not in out
-    assert "tools" not in out
 
 
 def test_transform_common_parameters_merges_extra_body_with_additional_fields():
@@ -460,34 +432,18 @@ def test_transform_responses_parameters_uses_common():
     assert "functions" in out
 
 
-def test_enable_reasoning_adds_reasoning_effort_high_by_default():
-    cfg = ProxyConfig(proxy=ProxySettings(enable_reasoning=True))
+def test_reasoning_is_not_injected_without_an_explicit_client_setting():
+    cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger=logger)
     out = rt.transform_chat_parameters({"model": "gpt-x"})
-    assert out.get("reasoning_effort") == "high"
+    assert "reasoning_effort" not in out
 
 
-def test_enable_reasoning_does_not_override_explicit_reasoning_effort():
-    cfg = ProxyConfig(proxy=ProxySettings(enable_reasoning=True))
+def test_explicit_reasoning_effort_is_preserved():
+    cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger=logger)
     out = rt.transform_chat_parameters({"model": "gpt-x", "reasoning_effort": "low"})
     assert out.get("reasoning_effort") == "low"
-
-
-def test_disable_reasoning_removes_explicit_and_default_reasoning():
-    cfg = ProxyConfig(
-        proxy=ProxySettings(enable_reasoning=True, disable_reasoning=True)
-    )
-    rt = RequestTransformer(cfg, logger=logger)
-    out = rt.transform_chat_parameters(
-        {
-            "model": "gpt-x",
-            "reasoning": {"effort": "high"},
-            "reasoning_effort": "low",
-        }
-    )
-    assert "reasoning" not in out
-    assert "reasoning_effort" not in out
 
 
 def test_transform_responses_parameters_maps_reasoning_object_to_reasoning_effort():
@@ -500,28 +456,25 @@ def test_transform_responses_parameters_maps_reasoning_object_to_reasoning_effor
     assert "reasoning" not in out
 
 
-def test_disable_reasoning_removes_responses_reasoning_object():
-    cfg = ProxyConfig(proxy=ProxySettings(disable_reasoning=True))
+@pytest.mark.parametrize(
+    "reasoning_fields",
+    [
+        {"reasoning": {"effort": "none", "summary": "auto"}},
+        {"reasoning_effort": "none"},
+    ],
+)
+def test_explicit_reasoning_none_disables_reasoning_for_request(reasoning_fields):
+    cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger=logger)
     out = rt.transform_responses_parameters(
-        {"model": "gpt-x", "reasoning": {"effort": "high"}}
-    )
-    assert "reasoning" not in out
-    assert "reasoning_effort" not in out
-
-
-def test_disable_reasoning_strips_reasoning_from_additional_fields():
-    cfg = ProxyConfig(proxy=ProxySettings(disable_reasoning=True))
-    rt = RequestTransformer(cfg, logger=logger)
-    out = rt.transform_chat_parameters(
         {
             "model": "gpt-x",
+            **reasoning_fields,
             "extra_body": {
                 "model_options": {
                     "reasoning": {"effort": "high"},
                     "top_p": 0.2,
                 },
-                "profanity_check": False,
                 "reasoning": {"effort": "high"},
             },
             "additional_fields": {
@@ -530,51 +483,18 @@ def test_disable_reasoning_strips_reasoning_from_additional_fields():
             },
         }
     )
+
+    assert "reasoning" not in out
+    assert "reasoning_effort" not in out
     assert out.get("additional_fields") == {
         "model_options": {"top_p": 0.2},
-        "profanity_check": False,
         "storage": True,
     }
 
 
-def test_apply_json_schema_as_function():
-    """Тест метода _apply_json_schema_as_function"""
-    cfg = ProxyConfig()
-    rt = RequestTransformer(cfg, logger=logger)
-    transformed = {}
-    rt._apply_json_schema_as_function(
-        transformed,
-        schema_name="TestSchema",
-        schema={"type": "object", "properties": {"name": {"type": "string"}}},
-    )
-    assert "functions" in transformed
-    assert len(transformed["functions"]) == 1
-    assert transformed["functions"][0]["name"] == "TestSchema"
-    assert transformed["function_call"] == {"name": "TestSchema"}
-
-
 def test_transform_chat_parameters_json_schema_response_format():
-    """Тест обработки response_format с json_schema"""
-    cfg = ProxyConfig(proxy=ProxySettings(structured_output_mode="function_call"))
-    rt = RequestTransformer(cfg, logger=logger)
-    data = {
-        "response_format": {
-            "type": "json_schema",
-            "json_schema": {
-                "name": "OutputFormat",
-                "schema": {"type": "object"},
-            },
-        }
-    }
-    out = rt.transform_chat_parameters(data)
-    assert "functions" in out
-    assert out["functions"][0]["name"] == "OutputFormat"
-    assert out["function_call"] == {"name": "OutputFormat"}
-
-
-def test_transform_chat_parameters_json_schema_native_response_format():
-    """Native SO forwards response_format to GigaChat without synthetic functions."""
-    cfg = ProxyConfig(proxy=ProxySettings(structured_output_mode="native"))
+    """JSON Schema is forwarded natively without synthetic functions."""
+    cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger=logger)
     data = {
         "response_format": {
@@ -589,7 +509,7 @@ def test_transform_chat_parameters_json_schema_native_response_format():
     out = rt.transform_chat_parameters(data)
     assert out["response_format"] == {
         "type": "json_schema",
-        "schema": {"type": "object", "properties": {}},
+        "schema": {"type": "object"},
         "strict": True,
     }
     assert "functions" not in out
@@ -613,9 +533,9 @@ def test_transform_chat_parameters_rejects_json_object_response_format():
     assert exc_info.value.code == "unsupported_response_format"
 
 
-def test_transform_chat_parameters_native_keeps_user_tools_as_functions():
-    """Native SO should not disable normal OpenAI tools conversion."""
-    cfg = ProxyConfig(proxy=ProxySettings(structured_output_mode="native"))
+def test_transform_chat_parameters_json_schema_keeps_user_tools_as_functions():
+    """Structured output does not disable normal OpenAI tools conversion."""
+    cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger=logger)
     data = {
         "response_format": {
@@ -627,7 +547,7 @@ def test_transform_chat_parameters_native_keeps_user_tools_as_functions():
     out = rt.transform_chat_parameters(data)
     assert out["response_format"] == {
         "type": "json_schema",
-        "schema": {"type": "object", "properties": {}},
+        "schema": {"type": "object"},
     }
     assert out["functions"] == [{"name": "sum"}]
     assert "function_call" not in out
@@ -698,6 +618,17 @@ def test_transform_chat_parameters_ignores_metadata_params_and_n_one():
     assert "store" not in out
     assert "modalities" not in out
     assert "parallel_tool_calls" not in out
+
+
+def test_transform_chat_parameters_preserves_parallel_tool_calls_in_v2_mode():
+    cfg = ProxyConfig(proxy=ProxySettings(gigachat_api_mode="v2"))
+    rt = RequestTransformer(cfg, logger=logger)
+
+    out = rt.transform_chat_parameters(
+        {"model": "GigaChat-2-Max", "parallel_tool_calls": True}
+    )
+
+    assert out["parallel_tool_calls"] is True
 
 
 def test_transform_chat_parameters_ignores_store_true():
@@ -901,27 +832,8 @@ def test_transform_responses_parameters_ignores_include():
 
 
 def test_transform_responses_parameters_text_json_schema():
-    """Тест обработки text.format.json_schema в responses API"""
-    cfg = ProxyConfig(proxy=ProxySettings(structured_output_mode="function_call"))
-    rt = RequestTransformer(cfg, logger=logger)
-    data = {
-        "text": {
-            "format": {
-                "type": "json_schema",
-                "name": "ResponseSchema",
-                "schema": {"type": "object"},
-            }
-        }
-    }
-    out = rt.transform_responses_parameters(data)
-    assert "functions" in out
-    assert out["functions"][0]["name"] == "ResponseSchema"
-    assert out["function_call"] == {"name": "ResponseSchema"}
-
-
-def test_transform_responses_parameters_text_json_schema_native():
-    """Native SO maps Responses API text.format to GigaChat response_format."""
-    cfg = ProxyConfig(proxy=ProxySettings(structured_output_mode="native"))
+    """Responses text.format maps to native GigaChat response_format."""
+    cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger=logger)
     data = {
         "text": {
@@ -936,7 +848,7 @@ def test_transform_responses_parameters_text_json_schema_native():
     out = rt.transform_responses_parameters(data)
     assert out["response_format"] == {
         "type": "json_schema",
-        "schema": {"type": "object", "properties": {}},
+        "schema": {"type": "object"},
         "strict": True,
     }
     assert "functions" not in out
@@ -960,8 +872,8 @@ def test_transform_responses_parameters_rejects_json_object_response_format():
     assert exc_info.value.code == "unsupported_response_format"
 
 
-def test_apply_json_schema_resolves_refs():
-    """Тест что _apply_json_schema_as_function разрешает $ref"""
+def test_apply_json_schema_preserves_refs():
+    """Native response_format preserves $ref."""
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger=logger)
     transformed = {}
@@ -982,12 +894,6 @@ def test_apply_json_schema_resolves_refs():
         },
     }
 
-    rt._apply_json_schema_as_function(
-        transformed, schema_name="TestSchema", schema=schema_with_refs
-    )
+    rt._apply_json_schema(transformed, schema=schema_with_refs, strict=None)
 
-    params = transformed["functions"][0]["parameters"]
-    # Проверяем, что $defs удален и $ref разрешен
-    assert "$defs" not in params
-    assert "$ref" not in params["properties"]["items"]["items"]
-    assert params["properties"]["items"]["items"]["type"] == "object"
+    assert transformed["response_format"]["schema"] == schema_with_refs

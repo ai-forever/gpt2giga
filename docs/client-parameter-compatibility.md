@@ -103,12 +103,10 @@ Structured output is supported through `json_schema`. Schema-less JSON mode
 `responseMimeType=application/json` without `responseJsonSchema` / `responseSchema`)
 is rejected, because the GigaChat upstream does not support a separate JSON mode.
 
-With `GPT2GIGA_DISABLE_REASONING=True`, the proxy accepts `reasoning` and
-`reasoning_effort` but does not pass them to the upstream payload sent to GigaChat.
-
-With `GPT2GIGA_DISABLE_BUILTIN_TOOL_MAPPING=True`, the proxy accepts provider
-built-in tools for compatibility but does not map or send them to GigaChat as
-executable tools. User function tools continue to work.
+An explicit `reasoning.effort="none"` or `reasoning_effort="none"` disables
+reasoning for that request, including Codex `model_reasoning_effort=none`.
+Otherwise the proxy forwards the client's explicit reasoning effort and does
+not apply a global default or override.
 
 OpenAI metadata fields such as `user`, `metadata`, `service_tier`,
 `safety_identifier`, `seed`, `prompt_cache_key`, and `prompt_cache_retention` are
@@ -117,10 +115,17 @@ accepted and ignored where they are classified.
 Unsupported optional OpenAI parameters are accepted and ignored. Examples:
 `logprobs`, `top_logprobs`, `logit_bias`, audio output, `prediction`,
 `web_search_options`, built-in tools outside GigaChat v2 mode, `n > 1`,
-`parallel_tool_calls=true`, stored completions requests, `conversation`, and
-`previous_response_id` in Responses v1 mode. `/chat/completions` v1
+stored completions requests, `conversation`, and `previous_response_id` in
+Responses v1 mode. `/chat/completions` v1
 remains a supported compatibility route, but new tool/built-in-tool
 capabilities evolve for GigaChat `v2/chat/completions`.
+
+Buffered parallel local function calls are supported for `GigaChat-2-Max` on
+v2 routes. OpenAI Chat Completions sends `parallel_tool_calls=true`; Anthropic
+Messages sends `tool_choice.disable_parallel_tool_use=false`; Gemini enables
+the same upstream option when more than one function declaration remains after
+filtering. The response preserves every call ID, and the next request may send
+all matching tool results. The legacy v1 contract remains unchanged.
 
 ## Anthropic body parameters
 

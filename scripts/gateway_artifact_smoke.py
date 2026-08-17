@@ -64,9 +64,9 @@ def verify_installed_gateway(
         )
 
     gigachat_version = importlib.metadata.version("gigachat")
-    if _is_prerelease(gigachat_version):
+    if _is_prerelease(gigachat_version) and not _is_prerelease(distribution.version):
         raise ArtifactSmokeError(
-            f"artifact resolved prerelease gigachat {gigachat_version!r}"
+            f"stable gateway resolved prerelease gigachat {gigachat_version!r}"
         )
     if (
         expected_gigachat_version is not None
@@ -76,8 +76,10 @@ def verify_installed_gateway(
             f"installed gigachat version {gigachat_version!r} does not match "
             f"{expected_gigachat_version!r}"
         )
-    if _gigachat_specifiers(distribution.requires) != {">=0.2.3", "<0.3.0"}:
-        raise ArtifactSmokeError("gateway metadata must require gigachat>=0.2.3,<0.3.0")
+    if _gigachat_specifiers(distribution.requires) != {">=0.2.4a1", "<0.3.0"}:
+        raise ArtifactSmokeError(
+            "gateway metadata must require gigachat>=0.2.4a1,<0.3.0"
+        )
 
     scripts = {
         entry.name: entry.value

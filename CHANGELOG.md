@@ -5,6 +5,23 @@
 Формат основан на [Keep a Changelog](https://keepachangelog.com/ru/1.0.0/),
 и проект придерживается [Семантического версионирования](https://semver.org/lang/ru/).
 
+## [0.3.1a1] - 2026-08-06
+
+### Добавлено
+- **Буферизованный Chat Completions streaming**: OpenAI-compatible профиль v3 может явно задать `upstream_stream_mode: buffered`; шлюз отправит upstream `stream: false` и синтезирует отложенный Responses, Anthropic Messages или Gemini stream с text/tool-call событиями, terminal event и usage. Строгий SSE остаётся режимом по умолчанию.
+- **Reasoning через Chat Completions bridge**: проверенная capability `reasoning_controls_and_summaries` передаёт Responses effort как `reasoning_effort`, проецирует `reasoning_content` в Responses reasoning summary для SSE и buffered mode и восстанавливает его в следующем assistant tool-call сообщении.
+
+### Исправлено
+- **Параллельные function calls в GigaChat v2**: OpenAI Chat Completions, Anthropic Messages и Gemini `generateContent` теперь передают запрос двух локальных функций в `model_options.parallel_tool_calls`, сохраняют все `function_call` и их `id` в буферизованном ответе и возвращают оба результата на следующем ходе. Поддержка ограничена `GigaChat-2-Max` на v2; обновлённый vendored-wheel `gigachat==0.2.4a1` содержит необходимый SDK-контракт, а legacy v1 не изменён.
+- **Tool-loop для несовместимых chat templates**: если тот же OpenAI-compatible upstream возвращает подтверждённую 5xx-ошибку `chat_template_application_failed` на истории инструментов, шлюз до первого события один раз повторяет запрос с reasoning, function calls и tool results в явном тексте. Обычные запросы, другие ошибки и текущая схема инструментов не меняются; успешный fallback отмечается в metadata.
+- **Нативные схемы function calling**: OpenAI, Responses, Anthropic и Gemini больше не пропускают JSON Schema функций через GigaChat-специфичные обходные преобразования. Схемы с `$defs`/`$ref`, композициями, union-типами, mixed `enum`, boolean subschemas и дополнительными keywords передаются без потерь в GigaChat v1 и v2 через SDK `gigachat>=0.2.4a1`.
+- **Отключение reasoning на уровне запроса**: OpenAI `reasoning.effort="none"` и `reasoning_effort="none"`, включая Codex `model_reasoning_effort=none`, теперь удаляют reasoning из upstream payload.
+
+### Удалено
+- **Глобальные reasoning workarounds**: удалены `GPT2GIGA_ENABLE_REASONING` / `--proxy.enable-reasoning` и `GPT2GIGA_DISABLE_REASONING` / `--proxy.disable-reasoning`; reasoning теперь управляется только явными параметрами клиентского запроса.
+- **Structured output fallback**: удалены `GPT2GIGA_STRUCTURED_OUTPUT_MODE` / `--proxy.structured-output-mode` и преобразование JSON Schema в искусственный function call; structured output всегда использует нативный GigaChat `response_format`.
+- **Глобальный opt-out built-in tools**: удалены `GPT2GIGA_DISABLE_BUILTIN_TOOL_MAPPING` / `--proxy.disable-builtin-tool-mapping`; распознанные provider built-in tools на маршрутах GigaChat v2 теперь всегда сопоставляются по клиентскому запросу.
+
 ## [0.3.0] - 2026-08-03
 
 ### Добавлено

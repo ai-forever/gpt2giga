@@ -68,8 +68,23 @@ class LoadedProviderProfileSet:
         """Expose the process-lifetime immutability contract."""
         return True
 
-    def credential_for(self, profile_id: str) -> str:
+    def credential_for(self, profile_id: str) -> str | None:
         """Return a credential only to exact adapter composition code."""
+        profile = next(
+            (
+                profile
+                for profile in self.config.profiles
+                if profile.profile_id == profile_id
+            ),
+            None,
+        )
+        if profile is None:
+            raise ProviderProfileError(
+                "credential_unavailable",
+                "Credential reference is unavailable for the selected profile.",
+            )
+        if profile.credential_env is None:
+            return None
         try:
             return self._credentials[profile_id]
         except KeyError as exc:
@@ -125,13 +140,14 @@ def load_provider_profiles(
         if profile.model_inventory is ProviderModelInventory.DYNAMIC or any(
             model.enabled for model in profile.models
         ):
-            credential = environ.get(profile.credential_env)
-            if not credential:
-                raise ProviderProfileError(
-                    "credential_unavailable",
-                    "Credential reference is unavailable for an enabled profile.",
-                )
-            credentials[profile.profile_id] = credential
+            if profile.credential_env is not None:
+                credential = environ.get(profile.credential_env)
+                if not credential:
+                    raise ProviderProfileError(
+                        "credential_unavailable",
+                        "Credential reference is unavailable for an enabled profile.",
+                    )
+                credentials[profile.profile_id] = credential
     return LoadedProviderProfileSet(config=config, _credentials=credentials)
 
 

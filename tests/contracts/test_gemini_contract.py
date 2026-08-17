@@ -20,7 +20,6 @@ async def test_generate_tools_results_schema_and_usage_cross_stable_sdk(
     stack = contract_stack(
         provider="gemini",
         api_mode="v2",
-        structured_output_mode="native",
     )
     public_payload = {
         "systemInstruction": {"parts": [{"text": "Be concise."}]},

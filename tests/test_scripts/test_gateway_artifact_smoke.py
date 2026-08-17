@@ -30,13 +30,13 @@ def test_stable_sdk_versions_are_accepted(version: str):
 
 def test_gigachat_metadata_requirement_is_order_independent():
     assert MODULE._gigachat_specifiers(
-        ["fastapi>=0.140", "gigachat<0.3.0,>=0.2.3"]
-    ) == {">=0.2.3", "<0.3.0"}
+        ["fastapi>=0.140", "gigachat<0.3.0,>=0.2.4a1"]
+    ) == {">=0.2.4a1", "<0.3.0"}
 
 
 @pytest.mark.parametrize(
     "requirements",
-    [[], ["fastapi>=0.140"], ["gigachat>=0.2.3", "gigachat<0.3.0"]],
+    [[], ["fastapi>=0.140"], ["gigachat>=0.2.4a1", "gigachat<0.3.0"]],
 )
 def test_gigachat_metadata_requirement_must_be_unique(requirements: list[str]):
     with pytest.raises(MODULE.ArtifactSmokeError):

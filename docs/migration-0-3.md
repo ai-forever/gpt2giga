@@ -49,6 +49,11 @@ GigaChat route without enumerating aliases. Do not select v2 until
 fields. Static aliases remain authoritative for providers that cannot or must
 not be discovered dynamically.
 
+`gpt2giga.provider-profiles.v3` adds the explicit model capabilities and token
+limits required to execute an `openai_compatible` alias. It also permits a
+deliberately keyless profile. Use v3 for a Chat Completions-only upstream; v1
+and v2 remain loadable but do not opt that route into execution.
+
 No ordinary GigaChat deployment must enumerate every provider model, change an
 existing alias, or rewrite persistent state for this correction.
 

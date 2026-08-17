@@ -113,4 +113,9 @@ def test_production_image_installs_the_root_built_wheel():
     assert "COPY src/ src/" in dockerfile
     assert "RUN uv build --wheel" in dockerfile
     assert "COPY --from=builder /app/dist/*.whl /tmp/" in dockerfile
-    assert 'pip install --no-cache-dir "${wheel_path}${INSTALL_EXTRAS}"' in dockerfile
+    assert "COPY gigachat-0.2.4a1-py3-none-any.whl /tmp/" in dockerfile
+    assert "-name 'gpt2giga-*.whl'" in dockerfile
+    assert "-name 'gigachat-*.whl'" in dockerfile
+    assert (
+        'pip install --no-cache-dir "$sdk_wheel_path" "${wheel_path}${INSTALL_EXTRAS}"'
+    ) in dockerfile

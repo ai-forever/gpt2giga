@@ -8,7 +8,6 @@ from typing import Any
 
 from fastapi import HTTPException
 
-from gpt2giga.common.json_schema import normalize_tool_parameters_schema
 from gpt2giga.common.tools import normalize_gigachat_builtin_tool_type
 from gpt2giga.core.context import RequestContext
 from gpt2giga.protocols.gemini.response_adapter import (
@@ -52,6 +51,7 @@ _GEMINI_FUNCTION_PARAMETERS_KEYS = {
     "parametersJsonSchema",
     "parameters_json_schema",
 }
+_SYNTHETIC_THOUGHT_SIGNATURE = "skip_thought_signature_validator"
 
 
 class GeminiProtocolAdapter:
@@ -94,7 +94,6 @@ class GeminiProtocolAdapter:
         model: str | None,
         context: RequestContext | None = None,
         stream: bool | None = None,
-        builtin_tool_mapping_enabled: bool = True,
     ) -> NormalizedChatRequest:
         """Convert a Gemini generateContent request body to normalized form."""
         _validate_generate_payload(payload)
@@ -103,16 +102,10 @@ class GeminiProtocolAdapter:
         )
         metadata, raw_extensions = _extensions(payload)
         raw_extensions.update(_gemini_protocol_extensions(payload))
-        unsupported_tools = _unsupported_gemini_tools(
-            payload.get("tools"),
-            builtin_tool_mapping_enabled=builtin_tool_mapping_enabled,
-        )
+        unsupported_tools = _unsupported_gemini_tools(payload.get("tools"))
         if unsupported_tools:
             raw_extensions["unsupportedTools"] = unsupported_tools
-        tools = _normalize_tools(
-            payload.get("tools"),
-            builtin_tool_mapping_enabled=builtin_tool_mapping_enabled,
-        )
+        tools = _normalize_tools(payload.get("tools"))
         function_calling_config = _function_calling_config(
             _mapping_value(payload, "toolConfig", "tool_config")
         )
@@ -138,6 +131,10 @@ class GeminiProtocolAdapter:
                 allowed_names=allowed_function_names,
                 tools=tools,
             ),
+            parallel_tool_calls=_parallel_tool_calls(
+                function_calling_config,
+                tools,
+            ),
             response_format=_normalize_response_format(generation_config),
             generation_config=_normalize_generation_config(generation_config),
             metadata=metadata,
@@ -150,7 +147,6 @@ class GeminiProtocolAdapter:
         *,
         model: str | None,
         context: RequestContext | None = None,
-        builtin_tool_mapping_enabled: bool = True,
     ) -> NormalizedTokenCountRequest:
         """Convert Gemini countTokens input to a normalized operation."""
         source = payload.get("generateContentRequest")
@@ -166,7 +162,6 @@ class GeminiProtocolAdapter:
             model=model,
             context=context,
             stream=False,
-            builtin_tool_mapping_enabled=builtin_tool_mapping_enabled,
         )
         return NormalizedTokenCountRequest(
             id=context.request_id if context is not None else None,
@@ -681,11 +676,7 @@ def _gemini_role_to_normalized(role: str) -> str:
     return normalized or "user"
 
 
-def _normalize_tools(
-    value: Any,
-    *,
-    builtin_tool_mapping_enabled: bool = True,
-) -> list[NormalizedTool]:
+def _normalize_tools(value: Any) -> list[NormalizedTool]:
     if not isinstance(value, list):
         return []
 
@@ -693,8 +684,7 @@ def _normalize_tools(
     for tool in value:
         if not isinstance(tool, Mapping):
             continue
-        if builtin_tool_mapping_enabled:
-            tools.extend(_gemini_builtin_tools_to_normalized(tool))
+        tools.extend(_gemini_builtin_tools_to_normalized(tool))
         declarations = _part_value(
             tool,
             "functionDeclarations",
@@ -734,11 +724,7 @@ def _gemini_builtin_tools_to_normalized(
     return normalized_tools
 
 
-def _unsupported_gemini_tools(
-    value: Any,
-    *,
-    builtin_tool_mapping_enabled: bool = True,
-) -> list[dict[str, Any]]:
+def _unsupported_gemini_tools(value: Any) -> list[dict[str, Any]]:
     if not isinstance(value, list):
         return []
     unsupported_tools = []
@@ -749,10 +735,7 @@ def _unsupported_gemini_tools(
             key: item
             for key, item in tool.items()
             if key not in _GEMINI_FUNCTION_DECLARATION_KEYS
-            and (
-                not builtin_tool_mapping_enabled
-                or normalize_gigachat_builtin_tool_type(key) is None
-            )
+            and normalize_gigachat_builtin_tool_type(key) is None
         }
         if tool_extensions:
             unsupported_tools.append(tool_extensions)
@@ -780,7 +763,7 @@ def _function_declaration_to_normalized(
     return NormalizedTool(
         name=str(declaration.get("name") or ""),
         description=_string_or_none(declaration.get("description")),
-        parameters=normalize_tool_parameters_schema(parameters),
+        parameters=dict(parameters),
         raw_extensions=raw_extensions,
     )
 
@@ -790,15 +773,43 @@ def _function_declaration_parameters(
 ) -> Mapping[str, Any]:
     parameters = declaration.get("parameters")
     if isinstance(parameters, Mapping):
-        return parameters
+        return _gemini_schema_to_json_schema(parameters)
     parameters_json_schema = _part_value(
         declaration,
         "parametersJsonSchema",
         "parameters_json_schema",
     )
     if isinstance(parameters_json_schema, Mapping):
-        return parameters_json_schema
+        return dict(parameters_json_schema)
     return {}
+
+
+_JSON_SCHEMA_TYPES = frozenset(
+    {"array", "boolean", "integer", "null", "number", "object", "string"}
+)
+
+
+def _gemini_schema_to_json_schema(value: Any) -> Any:
+    """Convert Gemini Schema type enums without rewriting JSON Schema semantics."""
+    if isinstance(value, Mapping):
+        converted = {}
+        for key, item in value.items():
+            if key == "type":
+                converted[key] = _gemini_schema_type_to_json_schema(item)
+            else:
+                converted[key] = _gemini_schema_to_json_schema(item)
+        return converted
+    if isinstance(value, list):
+        return [_gemini_schema_to_json_schema(item) for item in value]
+    return value
+
+
+def _gemini_schema_type_to_json_schema(value: Any) -> Any:
+    if isinstance(value, str) and value.lower() in _JSON_SCHEMA_TYPES:
+        return value.lower()
+    if isinstance(value, list):
+        return [_gemini_schema_type_to_json_schema(item) for item in value]
+    return value
 
 
 def _function_calling_config(
@@ -906,6 +917,19 @@ def _normalize_tool_choice(
         "entry to force a function.",
         param="toolConfig.functionCallingConfig.allowedFunctionNames",
     )
+
+
+def _parallel_tool_calls(
+    function_calling_config: Mapping[str, Any] | None,
+    tools: list[NormalizedTool],
+) -> bool | None:
+    """Enable GigaChat v2 parallel calls when Gemini exposes multiple functions."""
+    if function_calling_config is not None:
+        mode = _function_calling_mode(function_calling_config.get("mode"))
+        if mode == "none":
+            return None
+    function_count = sum(tool.type == "function" for tool in tools)
+    return True if function_count > 1 else None
 
 
 def _function_calling_mode(value: Any) -> str:
@@ -1044,16 +1068,26 @@ def _part_to_normalized(part: Mapping[str, Any]) -> NormalizedContentPart:
 def _function_call_to_normalized(part: Mapping[str, Any]) -> NormalizedToolCall:
     function_call = _part_value(part, "functionCall", "function_call")
     function_call = function_call if isinstance(function_call, Mapping) else {}
+    raw_extensions = {
+        key: value
+        for key, value in function_call.items()
+        if key not in {"id", "name", "args"}
+    }
+    part_extensions = {
+        key: value
+        for key, value in part.items()
+        if key not in {"functionCall", "function_call"}
+    }
+    if part_extensions.get("thoughtSignature") == _SYNTHETIC_THOUGHT_SIGNATURE:
+        part_extensions.pop("thoughtSignature")
+    if part_extensions:
+        raw_extensions["part"] = part_extensions
     return NormalizedToolCall(
         id=_string_or_none(function_call.get("id")),
         type="function",
         name=_string_or_none(function_call.get("name")),
         arguments=function_call.get("args", {}),
-        raw_extensions={
-            key: value
-            for key, value in function_call.items()
-            if key not in {"id", "name", "args"}
-        },
+        raw_extensions=raw_extensions,
     )
 
 
@@ -1072,16 +1106,24 @@ def _function_response_to_normalized(
 ) -> NormalizedMessage:
     function_response = _function_response_payload(part)
     tool_call_id = _string_or_none(function_response.get("id"))
+    raw_extensions = {
+        key: value
+        for key, value in function_response.items()
+        if key not in {"id", "name", "response"}
+    }
+    part_extensions = {
+        key: value
+        for key, value in part.items()
+        if key not in {"functionResponse", "function_response"}
+    }
+    if part_extensions:
+        raw_extensions["part"] = part_extensions
     return NormalizedMessage(
         role="tool",
         content=json.dumps(function_response.get("response", {}), ensure_ascii=False),
         name=_string_or_none(function_response.get("name")),
         tool_call_id=tool_call_id or _string_or_none(function_response.get("name")),
-        raw_extensions={
-            key: value
-            for key, value in function_response.items()
-            if key not in {"id", "name", "response"}
-        },
+        raw_extensions=raw_extensions,
     )
 
 

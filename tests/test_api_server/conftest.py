@@ -3,10 +3,7 @@ import os
 import pytest
 
 
-_LOCAL_DOTENV_KEYS = (
-    "GPT2GIGA_GIGACHAT_API_MODE",
-    "GPT2GIGA_STRUCTURED_OUTPUT_MODE",
-)
+_LOCAL_DOTENV_KEYS = ("GPT2GIGA_GIGACHAT_API_MODE",)
 
 
 @pytest.fixture(autouse=True)

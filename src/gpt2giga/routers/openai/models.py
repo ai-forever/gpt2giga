@@ -21,6 +21,7 @@ from gpt2giga.common.gigachat_options import (
 )
 from gpt2giga.models.catalog import ModelDescriptor, ModelNotFoundError
 from gpt2giga.openapi_tags import OPENAPI_TAG_OPENAI_MODELS
+from gpt2giga.providers.profiles.static_catalog import static_registry_model_payloads
 from gpt2giga.routers.gemini.models import (
     build_gemini_model,
     build_gemini_model_list,
@@ -31,6 +32,7 @@ router = APIRouter(tags=[OPENAPI_TAG_OPENAI_MODELS])
 _MODEL_PROJECTION_QUERY_PARAMS = (
     "after_id",
     "before_id",
+    "client_version",
     "limit",
     "page_size",
     "pageSize",
@@ -38,6 +40,11 @@ _MODEL_PROJECTION_QUERY_PARAMS = (
     "pageToken",
     "refresh",
 )
+
+
+def _is_codex_models_request(request: Request) -> bool:
+    """Detect the Codex-specific model-catalog request shape."""
+    return request.query_params.get("client_version") is not None
 
 
 def _is_anthropic_models_request(request: Request) -> bool:
@@ -173,32 +180,44 @@ def _build_anthropic_model_list(
 @exceptions_handler
 async def show_available_models(request: Request):
     """List available GigaChat models in OpenAI-compatible form."""
-    giga_client = get_gigachat_client(request)
-    catalog = get_gigachat_model_catalog(request)
-    request_options = extract_gigachat_request_options(
-        request,
-        exclude_query_params=_MODEL_PROJECTION_QUERY_PARAMS,
-    )
-    async with gigachat_request_options(giga_client, request_options):
-        snapshot = await catalog.list_models(
-            giga_client,
-            provider_profile_id=get_gigachat_model_catalog_profile_id(request),
-            refresh=_catalog_refresh_requested(request),
+    if _is_codex_models_request(request):
+        # Codex owns model instructions and tool metadata. Returning an empty,
+        # valid Codex catalog preserves its bundled/fallback metadata for an
+        # explicitly selected custom model instead of replacing that metadata
+        # with the unrelated OpenAI ``data`` projection. This branch also
+        # keeps model discovery independent of the configured upstream.
+        return {"models": []}
+
+    registry = getattr(request.app.state, "provider_registry", None)
+    models = static_registry_model_payloads(registry) if registry is not None else None
+    object_name = "list"
+    if models is None:
+        giga_client = get_gigachat_client(request)
+        catalog = get_gigachat_model_catalog(request)
+        request_options = extract_gigachat_request_options(
+            request,
+            exclude_query_params=_MODEL_PROJECTION_QUERY_PARAMS,
         )
-    record_gigachat_model_catalog_snapshot(request, snapshot)
-    models = [_catalog_model_payload(item) for item in snapshot.models]
+        async with gigachat_request_options(giga_client, request_options):
+            snapshot = await catalog.list_models(
+                giga_client,
+                provider_profile_id=get_gigachat_model_catalog_profile_id(request),
+                refresh=_catalog_refresh_requested(request),
+            )
+        record_gigachat_model_catalog_snapshot(request, snapshot)
+        models = [_catalog_model_payload(item) for item in snapshot.models]
+        object_name = str(snapshot.provider_metadata.get("object") or "list")
     if _is_anthropic_models_request(request):
         return _build_anthropic_model_list(models, request)
     if _is_gemini_models_request(request):
         return build_gemini_model_list(models)
-
     current_timestamp = int(time.time())
     for model in models:
         _add_model_type_metadata(model)
         model["created"] = current_timestamp
     model_page = AsyncPage(
         data=[OpenAIModel(**model) for model in models],
-        object=str(snapshot.provider_metadata.get("object") or "list"),
+        object=object_name,
     )
     return model_page
 
@@ -207,23 +226,33 @@ async def show_available_models(request: Request):
 @exceptions_handler
 async def get_model(model: str, request: Request):
     """Return a single model."""
-    giga_client = get_gigachat_client(request)
-    catalog = get_gigachat_model_catalog(request)
-    request_options = extract_gigachat_request_options(
-        request,
-        exclude_query_params=_MODEL_PROJECTION_QUERY_PARAMS,
+    registry = getattr(request.app.state, "provider_registry", None)
+    static_models = (
+        static_registry_model_payloads(registry) if registry is not None else None
     )
-    async with gigachat_request_options(giga_client, request_options):
+    if static_models is not None:
         try:
-            descriptor = await catalog.get_model(
-                model,
-                giga_client,
-                provider_profile_id=get_gigachat_model_catalog_profile_id(request),
-                refresh=_catalog_refresh_requested(request),
-            )
-        except ModelNotFoundError as exc:
+            model_data = next(item for item in static_models if item["id"] == model)
+        except StopIteration as exc:
             raise HTTPException(status_code=404, detail="Model not found") from exc
-    model_data = _catalog_model_payload(descriptor)
+    else:
+        giga_client = get_gigachat_client(request)
+        catalog = get_gigachat_model_catalog(request)
+        request_options = extract_gigachat_request_options(
+            request,
+            exclude_query_params=_MODEL_PROJECTION_QUERY_PARAMS,
+        )
+        async with gigachat_request_options(giga_client, request_options):
+            try:
+                descriptor = await catalog.get_model(
+                    model,
+                    giga_client,
+                    provider_profile_id=get_gigachat_model_catalog_profile_id(request),
+                    refresh=_catalog_refresh_requested(request),
+                )
+            except ModelNotFoundError as exc:
+                raise HTTPException(status_code=404, detail="Model not found") from exc
+        model_data = _catalog_model_payload(descriptor)
     if _is_anthropic_models_request(request):
         return _build_anthropic_model(model_data)
     if _is_gemini_models_request(request):
