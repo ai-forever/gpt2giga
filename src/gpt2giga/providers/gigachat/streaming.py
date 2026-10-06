@@ -50,6 +50,32 @@ class GigaChatNormalizedStreamMapper:
         )
         return self._processed_chunk_to_event(processed)
 
+    def chunk_to_events(self, chunk: Any) -> list[NormalizedStreamEvent]:
+        """Preserve every complete parallel tool call from one SDK chunk."""
+        processed = self.response_processor.process_stream_chunk(
+            chunk,
+            self.requested_model,
+            self.response_id,
+            request_data=self.request_data,
+        )
+        choice = _first_choice(processed)
+        delta = choice.get("delta") or {}
+        calls = delta.get("tool_calls") or []
+        if len(calls) <= 1:
+            return [self._processed_chunk_to_event(processed)]
+        events = []
+        for index, call in enumerate(calls):
+            split_delta = {**delta, "tool_calls": [call]}
+            if index:
+                split_delta.pop("content", None)
+                split_delta.pop("reasoning_content", None)
+            split_choice = {**choice, "delta": split_delta}
+            if index < len(calls) - 1:
+                split_choice["finish_reason"] = None
+            split_chunk = {**processed, "choices": [split_choice]}
+            events.append(self._processed_chunk_to_event(split_chunk))
+        return events
+
     def flush_reasoning_events(self) -> list[NormalizedStreamEvent]:
         """Flush buffered reasoning parser state into normalized events."""
         flush_stream_reasoning = getattr(
@@ -80,7 +106,7 @@ class GigaChatNormalizedStreamMapper:
                 }
             ],
             "usage": None,
-            "system_fingerprint": f"fp_{self.response_id}",
+            "system_fingerprint": None,
         }
         return [self._processed_chunk_to_event(processed)]
 

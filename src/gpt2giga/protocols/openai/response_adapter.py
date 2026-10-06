@@ -8,6 +8,7 @@ from datetime import datetime
 from typing import Any
 
 from gpt2giga.core.context import RequestContext
+from gpt2giga.protocols.normalized.usage import cached_input_tokens
 from gpt2giga.common.tools import split_gigachat_tool_name
 from gpt2giga.protocol.response.processor import ResponseProcessor
 from gpt2giga.protocols.normalized import (
@@ -45,7 +46,7 @@ def normalized_chat_response_to_openai(
         "model": requested_model,
         "choices": [_choice_to_openai(choice) for choice in response.choices],
         "usage": _usage_to_openai(response.usage),
-        "system_fingerprint": f"fp_{response_id}",
+        "system_fingerprint": None,
     }
     metadata = _metadata_to_openai(response)
     if metadata:
@@ -143,12 +144,12 @@ def normalized_chat_response_to_responses(
         "parallel_tool_calls": True,
         "previous_response_id": None,
         "reasoning": reasoning_config,
-        "store": True,
-        "temperature": request_payload.get("temperature", 1),
+        "store": False,
+        "temperature": request_payload.get("temperature"),
         "text": response_text,
         "tool_choice": request_payload.get("tool_choice", "auto"),
         "tools": request_payload.get("tools", []),
-        "top_p": request_payload.get("top_p", 1),
+        "top_p": request_payload.get("top_p"),
         "truncation": "disabled",
         "usage": _responses_usage(response.usage),
         "user": None,
@@ -286,11 +287,21 @@ def _responses_status(
     return "completed", None
 
 
-def _responses_usage(usage: NormalizedUsage | None) -> dict[str, int] | None:
+def _responses_usage(usage: NormalizedUsage | None) -> dict[str, Any] | None:
     if usage is None:
         return None
     values = {
         "input_tokens": usage.input_tokens,
+        **(
+            {
+                "input_tokens_details": {
+                    "cached_tokens": cached_input_tokens(usage),
+                    "cache_write_tokens": 0,
+                }
+            }
+            if cached_input_tokens(usage)
+            else {}
+        ),
         "output_tokens": usage.output_tokens,
         "total_tokens": usage.total_tokens,
     }
@@ -304,9 +315,7 @@ def _usage_to_openai(usage: NormalizedUsage | None) -> dict[str, Any] | None:
         "prompt_tokens": usage.input_tokens,
         "completion_tokens": usage.output_tokens,
         "total_tokens": usage.total_tokens,
-        "prompt_tokens_details": {
-            "cached_tokens": usage.raw_extensions.get("precached_prompt_tokens", 0)
-        },
+        "prompt_tokens_details": {"cached_tokens": cached_input_tokens(usage)},
         "completion_tokens_details": {"reasoning_tokens": 0},
     }
 

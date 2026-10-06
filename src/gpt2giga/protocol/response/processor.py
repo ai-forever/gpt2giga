@@ -92,7 +92,7 @@ class ResponseProcessor:
             "model": gpt_model,
             "choices": giga_dict["choices"],
             "usage": self._build_usage(giga_dict["usage"]),
-            "system_fingerprint": f"fp_{response_id}",
+            "system_fingerprint": None,
         }
         if response_metadata:
             result["metadata"] = response_metadata
@@ -248,12 +248,12 @@ class ResponseProcessor:
             "parallel_tool_calls": request_data.get("parallel_tool_calls", True),
             "previous_response_id": request_data.get("previous_response_id"),
             "reasoning": cls._build_reasoning_config(request_data),
-            "store": request_data.get("store", True),
-            "temperature": request_data.get("temperature", 1),
+            "store": request_data.get("store", False),
+            "temperature": request_data.get("temperature"),
             "text": response_text,
             "tool_choice": request_data.get("tool_choice", "auto"),
             "tools": request_data.get("tools", []),
-            "top_p": request_data.get("top_p", 1),
+            "top_p": request_data.get("top_p"),
             "truncation": request_data.get("truncation", "disabled"),
             "usage": usage,
             "user": request_data.get("user"),
@@ -651,7 +651,7 @@ class ResponseProcessor:
             "model": gpt_model,
             "choices": giga_dict["choices"],
             "usage": self._build_usage(giga_dict.get("usage")),
-            "system_fingerprint": f"fp_{response_id}",
+            "system_fingerprint": None,
         }
         if response_metadata:
             result["metadata"] = response_metadata
@@ -783,6 +783,24 @@ class ResponseProcessor:
                 renderer_key=f"chat:{response_id}" if response_id else None,
                 finish_reason=choice.get("finish_reason"),
             )
+            # Project the public message explicitly after consuming provider metadata.
+            for key in list(message):
+                if key not in {
+                    "role",
+                    "content",
+                    "refusal",
+                    "reasoning_content",
+                    "tool_calls",
+                    "function_call",
+                    "audio",
+                    "annotations",
+                    "inline_data",
+                    "tool_executions",
+                    "files",
+                }:
+                    message.pop(key)
+            if message.get("function_call") is None:
+                message.pop("function_call", None)
 
     def _render_sources_in_message(
         self,
@@ -885,7 +903,10 @@ class ResponseProcessor:
                 ensure_ascii=False,
             )
             tool_name = map_tool_name_from_gigachat(message["function_call"]["name"])
-            tool_call_id = self._backend_state_id_from_message(message)
+            tool_call_id = self._normalize_metadata_string(
+                message["function_call"].get("id")
+                or message["function_call"].get("id_")
+            ) or self._backend_state_id_from_message(message)
             function_call = {
                 "name": tool_name,
                 "arguments": arguments,
@@ -963,7 +984,7 @@ class ResponseProcessor:
         state_id = value.strip()
         if not state_id:
             return None
-        for prefix in ("fc_", "call_"):
+        for prefix in ("fc_",):
             if state_id.startswith(prefix) and len(state_id) > len(prefix):
                 return state_id.removeprefix(prefix)
         return state_id
@@ -1010,7 +1031,14 @@ class ResponseProcessor:
                 message["function_call"]["arguments"],
                 ensure_ascii=False,
             )
-            state_id = self._backend_state_id_from_message(message) or response_id
+            state_id = (
+                self._normalize_metadata_string(
+                    message["function_call"].get("id")
+                    or message["function_call"].get("id_")
+                )
+                or self._backend_state_id_from_message(message)
+                or response_id
+            )
             tool_name, namespace = split_gigachat_tool_name(
                 message["function_call"]["name"],
                 request_tools=request_tools,
@@ -1037,9 +1065,11 @@ class ResponseProcessor:
             return None
 
         return {
-            "prompt_tokens": usage_data["prompt_tokens"],
+            "prompt_tokens": usage_data["prompt_tokens"]
+            + (usage_data.get("precached_prompt_tokens") or 0),
             "completion_tokens": usage_data["completion_tokens"],
-            "total_tokens": usage_data["total_tokens"],
+            "total_tokens": usage_data["total_tokens"]
+            + (usage_data.get("precached_prompt_tokens") or 0),
             "prompt_tokens_details": {
                 "cached_tokens": usage_data.get("precached_prompt_tokens", 0)
             },
@@ -1051,14 +1081,16 @@ class ResponseProcessor:
         if not usage_data:
             return None
         return {
-            "input_tokens": usage_data.get("prompt_tokens", 0),
+            "input_tokens": usage_data.get("prompt_tokens", 0)
+            + (usage_data.get("precached_prompt_tokens") or 0),
             "output_tokens": usage_data.get("completion_tokens", 0),
-            "total_tokens": usage_data["total_tokens"],
+            "total_tokens": usage_data["total_tokens"]
+            + (usage_data.get("precached_prompt_tokens") or 0),
             "prompt_tokens_details": {
                 "cached_tokens": usage_data.get("precached_prompt_tokens", 0)
             },
             "input_tokens_details": {
-                "cached_tokens": 0,
+                "cached_tokens": usage_data.get("precached_prompt_tokens") or 0,
                 "cache_write_tokens": 0,
             },
             "output_tokens_details": {"reasoning_tokens": 0},
@@ -1068,12 +1100,18 @@ class ResponseProcessor:
     def _extract_provider_response_metadata(data: Mapping[str, Any]) -> dict[str, str]:
         raw_metadata = data.get(GIGACHAT_PROVIDER_METADATA_KEY)
         if not isinstance(raw_metadata, Mapping):
-            return {}
+            raw_metadata = {}
 
         metadata: dict[str, str] = {}
         for key, value in raw_metadata.items():
             if isinstance(key, str) and isinstance(value, str):
                 metadata[key] = value
+        for key in ("additional_data", "error_details"):
+            value = data.get(key)
+            if isinstance(value, (dict, list)):
+                metadata[f"gigachat_{key}"] = json.dumps(
+                    value, ensure_ascii=False, separators=(",", ":")
+                )
         return metadata
 
     @classmethod

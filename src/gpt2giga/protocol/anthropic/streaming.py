@@ -27,6 +27,7 @@ from gpt2giga.common.sources import (
 from gpt2giga.common.tools import map_tool_name_from_gigachat
 from gpt2giga.logger import rquid_context
 from gpt2giga.protocol.response import adapt_chat_completion_chunk_to_chat_chunk_shape
+from gpt2giga.protocol.anthropic.response import _backend_tool_state_id
 from gpt2giga.providers.gigachat.model_resolution import resolve_upstream_model
 
 
@@ -91,6 +92,8 @@ async def _stream_anthropic_generator(
         source_rendering_enabled = False
         content_index = 0
         output_tokens = 0
+        input_tokens = 0
+        cached_tokens = 0
 
         async with model_limiter.limit(effective_model, provider="anthropic"):
             async with gigachat_request_options(giga_client, request_options):
@@ -106,7 +109,14 @@ async def _stream_anthropic_generator(
                     choice = giga_dict["choices"][0]
                     delta = choice.get("delta", {})
                     delta_content = _delta_text(delta.get("content"))
-                    delta_function_call = delta.get("function_call")
+                    delta_function_calls = [
+                        {**call["function"], "id": call.get("id")}
+                        for call in delta.get("tool_calls") or []
+                        if isinstance(call, dict)
+                        and isinstance(call.get("function"), dict)
+                    ]
+                    if delta.get("function_call"):
+                        delta_function_calls.append(delta["function_call"])
                     delta_reasoning = _delta_text(delta.get("reasoning_content"))
                     parsed_content = reasoning_parser.feed(delta_content)
                     delta_content = parsed_content.content
@@ -150,7 +160,7 @@ async def _stream_anthropic_generator(
                             },
                         )
 
-                    if delta_function_call:
+                    if delta_function_calls:
                         if thinking_block_started and not thinking_block_stopped:
                             yield sse(
                                 "content_block_stop",
@@ -159,53 +169,80 @@ async def _stream_anthropic_generator(
                             content_index += 1
                             thinking_block_stopped = True
 
-                        arguments = delta_function_call.get("arguments")
-                        if function_call_data is None:
-                            tool_id = f"toolu_{uuid.uuid4().hex[:24]}"
-                            function_call_data = {
-                                "name": map_tool_name_from_gigachat(
-                                    delta_function_call.get("name", "")
-                                ),
-                                "tool_id": tool_id,
-                            }
-                            yield sse(
-                                "content_block_start",
-                                {
-                                    "type": "content_block_start",
-                                    "index": content_index,
-                                    "content_block": {
-                                        "type": "tool_use",
-                                        "id": tool_id,
-                                        "name": function_call_data["name"],
-                                        "input": {},
-                                    },
-                                },
+                        for delta_function_call in delta_function_calls:
+                            arguments = delta_function_call.get("arguments")
+                            incoming_id = (
+                                delta_function_call.get("id")
+                                or delta_function_call.get("id_")
+                                or _backend_tool_state_id(delta)
                             )
-                            content_block_started = True
-
-                        if delta_function_call.get("name"):
-                            function_call_data["name"] = map_tool_name_from_gigachat(
-                                delta_function_call["name"]
-                            )
-
-                        if arguments is not None:
-                            arguments_str = (
-                                json.dumps(arguments, ensure_ascii=False)
-                                if isinstance(arguments, dict)
-                                else str(arguments)
-                            )
-                            if arguments_str:
+                            if (
+                                function_call_data
+                                and incoming_id
+                                and incoming_id != function_call_data["tool_id"]
+                            ):
                                 yield sse(
-                                    "content_block_delta",
+                                    "content_block_stop",
                                     {
-                                        "type": "content_block_delta",
+                                        "type": "content_block_stop",
                                         "index": content_index,
-                                        "delta": {
-                                            "type": "input_json_delta",
-                                            "partial_json": arguments_str,
+                                    },
+                                )
+                                content_index += 1
+                                function_call_data = None
+                            if function_call_data is None:
+                                tool_id = (
+                                    delta_function_call.get("id")
+                                    or delta_function_call.get("id_")
+                                    or _backend_tool_state_id(delta)
+                                    or f"toolu_{uuid.uuid4().hex[:24]}"
+                                )
+                                function_call_data = {
+                                    "name": map_tool_name_from_gigachat(
+                                        delta_function_call.get("name", "")
+                                    ),
+                                    "tool_id": tool_id,
+                                }
+                                yield sse(
+                                    "content_block_start",
+                                    {
+                                        "type": "content_block_start",
+                                        "index": content_index,
+                                        "content_block": {
+                                            "type": "tool_use",
+                                            "id": tool_id,
+                                            "name": function_call_data["name"],
+                                            "input": {},
                                         },
                                     },
                                 )
+                                content_block_started = True
+
+                            if delta_function_call.get("name"):
+                                function_call_data["name"] = (
+                                    map_tool_name_from_gigachat(
+                                        delta_function_call["name"]
+                                    )
+                                )
+
+                            if arguments is not None:
+                                arguments_str = (
+                                    json.dumps(arguments, ensure_ascii=False)
+                                    if isinstance(arguments, dict)
+                                    else str(arguments)
+                                )
+                                if arguments_str:
+                                    yield sse(
+                                        "content_block_delta",
+                                        {
+                                            "type": "content_block_delta",
+                                            "index": content_index,
+                                            "delta": {
+                                                "type": "input_json_delta",
+                                                "partial_json": arguments_str,
+                                            },
+                                        },
+                                    )
                     elif delta_content:
                         if thinking_block_started and not thinking_block_stopped:
                             yield sse(
@@ -239,8 +276,15 @@ async def _stream_anthropic_generator(
                         )
 
                     chunk_usage = giga_dict.get("usage")
-                    if chunk_usage and chunk_usage.get("completion_tokens"):
-                        output_tokens = chunk_usage["completion_tokens"]
+                    if chunk_usage:
+                        output_tokens = chunk_usage.get(
+                            "completion_tokens", output_tokens
+                        )
+                        input_tokens = chunk_usage.get("prompt_tokens", input_tokens)
+                        cached_tokens = (
+                            chunk_usage.get("precached_prompt_tokens", cached_tokens)
+                            or 0
+                        )
 
         flushed_reasoning = reasoning_parser.flush()
         if flushed_reasoning.reasoning_content:
@@ -322,7 +366,11 @@ async def _stream_anthropic_generator(
                     "stop_reason": stop_reason,
                     "stop_sequence": None,
                 },
-                "usage": {"output_tokens": output_tokens},
+                "usage": {
+                    "input_tokens": input_tokens,
+                    "output_tokens": output_tokens,
+                    "cache_read_input_tokens": cached_tokens,
+                },
             },
         )
         yield sse("message_stop", {"type": "message_stop"})

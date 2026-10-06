@@ -7,19 +7,11 @@
 
 ## Зависимости
 
-Anthropic SDK не входит в обязательные зависимости пакета.
+Anthropic SDK входит в зависимости проекта. Для запуска из исходников:
 
-- Если вы работаете из исходников (uv):
-
-  ```bash
-  uv sync --group integrations
-  ```
-
-- Если вы ставили `gpt2giga` через `pip`, установите отдельно:
-
-  ```bash
-  pip install anthropic
-  ```
+```bash
+uv sync --all-extras --dev
+```
 
 ## Базовая настройка
 
@@ -81,3 +73,13 @@ uv run python examples/anthropic/message_batches/structured_output.py
 - `message_batches/basic.py`: Message Batches API
 - `message_batches/structured_output.py`: structured output в Message Batches API
 - `count_tokens/basic.py`: Count Tokens API
+
+## Контракты 0.3.1a1
+
+- [Обязательный инструмент](messages/tools/required_tool.py): v2 `tool_choice:any`,
+  возврат результата по `tool_use_id` и финальный ответ с `tool_choice:none`.
+  В v1 `any` возвращает 400 в формате ошибки Anthropic.
+- [Бюджет thinking](messages/reasoning/reasoning.py): `budget_tokens` передаётся
+  upstream как бюджет рассуждений; всегда задавайте также `max_tokens`.
+- `usage.input_tokens` не включает кэш: он доступен отдельно в
+  `usage.cache_read_input_tokens`. Это отличается от полного входа OpenAI.

@@ -114,7 +114,7 @@ async def stream_chat_generator(
                             }
                         ],
                         "usage": None,
-                        "system_fingerprint": f"fp_{response_id}",
+                        "system_fingerprint": None,
                     }
                     yield f"data: {json.dumps(processed)}\n\n"
             flush_stream_sources = getattr(
@@ -137,7 +137,7 @@ async def stream_chat_generator(
                             }
                         ],
                         "usage": None,
-                        "system_fingerprint": f"fp_{response_id}",
+                        "system_fingerprint": None,
                     }
                     yield f"data: {json.dumps(processed)}\n\n"
 
@@ -278,7 +278,7 @@ async def stream_chat_completion_generator(
                             }
                         ],
                         "usage": None,
-                        "system_fingerprint": f"fp_{response_id}",
+                        "system_fingerprint": None,
                     }
                     yield f"data: {json.dumps(processed)}\n\n"
             flush_stream_sources = getattr(
@@ -301,7 +301,7 @@ async def stream_chat_completion_generator(
                             }
                         ],
                         "usage": None,
-                        "system_fingerprint": f"fp_{response_id}",
+                        "system_fingerprint": None,
                     }
                     yield f"data: {json.dumps(processed)}\n\n"
 
@@ -668,14 +668,14 @@ async def stream_responses_generator(
                 request_data.get("previous_response_id") if request_data else None
             ),
             "reasoning": build_reasoning_config(),
-            "store": request_data.get("store", True) if request_data else True,
-            "temperature": request_data.get("temperature", 1) if request_data else 1,
+            "store": request_data.get("store", False) if request_data else False,
+            "temperature": request_data.get("temperature") if request_data else None,
             "text": {"format": {"type": "text"}},
             "tool_choice": request_data.get("tool_choice", "auto")
             if request_data
             else "auto",
             "tools": request_data.get("tools", []) if request_data else [],
-            "top_p": request_data.get("top_p", 1) if request_data else 1,
+            "top_p": request_data.get("top_p") if request_data else None,
             "truncation": "disabled",
             "usage": usage,
             "user": None,
@@ -733,11 +733,10 @@ async def stream_responses_generator(
         reasoning_parser = ReasoningContentParser()
         source_renderer = SourceMarkerStreamRenderer()
         source_rendering_enabled = False
-        function_call_data = None  # {"name": ..., "arguments": ...}
-        function_call_argument_parts: list[str] = []
+        function_calls: dict[int, dict[str, Any]] = {}
+        function_call_argument_parts: dict[int, list[str]] = {}
         functions_state_id = None
         output_item_added = False
-        is_function_call = False
         final_usage = None
         builtin_message_metadata = {
             "tool_executions": [],
@@ -1077,8 +1076,8 @@ async def stream_responses_generator(
                 yield None, item
 
         async def emit_upstream_events() -> AsyncGenerator[str, None]:
-            nonlocal final_usage, full_text, function_call_data, functions_state_id
-            nonlocal is_function_call, output_item_added, raw_full_text, reasoning_text
+            nonlocal final_usage, full_text, functions_state_id
+            nonlocal output_item_added, raw_full_text, reasoning_text
             nonlocal sequence_number, source_rendering_enabled, text_output_index
             async with gigachat_request_options(giga_client, request_options):
                 async for (
@@ -1158,79 +1157,89 @@ async def stream_responses_generator(
                     for event in emit_url_annotation_events(include_unreferenced=False):
                         yield event
 
-                    if delta_function_call:
-                        is_function_call = True
+                    delta_tool_calls = delta.get("tool_calls")
+                    if not isinstance(delta_tool_calls, list) or not delta_tool_calls:
+                        delta_tool_calls = (
+                            [{"index": 0, "function": delta_function_call}]
+                            if delta_function_call
+                            else []
+                        )
+                    for position, tool_call in enumerate(delta_tool_calls):
+                        if not isinstance(tool_call, dict):
+                            continue
+                        delta_function_call = tool_call.get("function")
+                        if not isinstance(delta_function_call, dict):
+                            continue
                         if functions_state_id is None:
                             functions_state_id = delta.get("functions_state_id")
-
+                        call_index = tool_call.get("index", position)
+                        function_call_data = function_calls.get(call_index)
+                        tool_name, namespace = split_gigachat_tool_name(
+                            delta_function_call.get("name", ""),
+                            request_tools=(
+                                request_data.get("tools") if request_data else None
+                            ),
+                        )
                         if function_call_data is None:
-                            tool_name, namespace = split_gigachat_tool_name(
-                                delta_function_call.get("name", ""),
-                                request_tools=(
-                                    request_data.get("tools") if request_data else None
-                                ),
+                            output_index = len(function_calls)
+                            item_id = (
+                                fc_id
+                                if output_index == 0
+                                else f"{fc_id}_{output_index}"
                             )
                             function_call_data = {
+                                "id": item_id,
+                                "type": "function_call",
+                                "status": "in_progress",
                                 "name": tool_name,
                                 "arguments": "",
+                                "call_id": tool_call.get("id")
+                                or delta_function_call.get("id")
+                                or delta_function_call.get("id_")
+                                or (
+                                    f"call_{response_id}"
+                                    if output_index == 0
+                                    else f"call_{response_id}_{output_index}"
+                                ),
                             }
                             if namespace:
                                 function_call_data["namespace"] = namespace
-                            item = {
-                                "id": fc_id,
-                                "type": "function_call",
-                                "status": "in_progress",
-                                "call_id": f"call_{response_id}",
-                                "name": function_call_data["name"],
-                                "arguments": "",
-                            }
-                            if namespace:
-                                item["namespace"] = namespace
-                            yield sse_event(
+                            function_calls[call_index] = function_call_data
+                            function_call_argument_parts[call_index] = []
+                            yield emit_sequenced_event(
                                 "response.output_item.added",
                                 {
-                                    "type": "response.output_item.added",
-                                    "output_index": 0,
-                                    "item": item,
-                                    "sequence_number": sequence_number,
+                                    "output_index": output_index,
+                                    "item": dict(function_call_data),
                                 },
                             )
-                            sequence_number += 1
                             output_item_added = True
-
+                        output_index = list(function_calls).index(call_index)
                         if delta_function_call.get("name"):
-                            tool_name, namespace = split_gigachat_tool_name(
-                                delta_function_call["name"],
-                                request_tools=(
-                                    request_data.get("tools") if request_data else None
-                                ),
-                            )
                             function_call_data["name"] = tool_name
                             if namespace:
                                 function_call_data["namespace"] = namespace
-
                         args = delta_function_call.get("arguments")
                         if args is not None:
-                            if isinstance(args, dict):
-                                args_str = json.dumps(args, ensure_ascii=False)
-                            else:
-                                args_str = str(args)
-
+                            args_str = (
+                                json.dumps(args, ensure_ascii=False)
+                                if isinstance(args, dict)
+                                else str(args)
+                            )
                             if args_str:
-                                yield sse_event(
+                                yield emit_sequenced_event(
                                     "response.function_call_arguments.delta",
                                     {
-                                        "type": "response.function_call_arguments.delta",
-                                        "item_id": fc_id,
-                                        "output_index": 0,
+                                        "item_id": function_call_data["id"],
+                                        "output_index": output_index,
                                         "delta": args_str,
-                                        "sequence_number": sequence_number,
                                     },
                                 )
-                                sequence_number += 1
-                                function_call_argument_parts.append(args_str)
+                                function_call_argument_parts[call_index].append(
+                                    args_str
+                                )
 
-                    elif delta_content:
+                    if not delta_tool_calls and delta_content:
                         for event in emit_text_output_start_events():
                             yield event
 
@@ -1289,61 +1298,45 @@ async def stream_responses_generator(
         if flushed_reasoning.reasoning_content:
             reasoning_text += flushed_reasoning.reasoning_content
 
-        if is_function_call and function_call_data:
-            function_call_data["arguments"] = "".join(function_call_argument_parts)
+        if function_calls:
+            for call_index, call in function_calls.items():
+                call["arguments"] = "".join(function_call_argument_parts[call_index])
             response_metadata["gigachat_called_tools"] = json.dumps(
                 [
-                    _stream_called_tool_item(
-                        function_call_data,
-                        tools_state_id=functions_state_id,
-                    )
+                    {
+                        **_stream_called_tool_item(
+                            call, tools_state_id=functions_state_id
+                        ),
+                        "index": index,
+                    }
+                    for index, call in enumerate(function_calls.values())
                 ],
                 ensure_ascii=False,
                 separators=(",", ":"),
             )
-            yield sse_event(
-                "response.function_call_arguments.done",
-                {
-                    "type": "response.function_call_arguments.done",
-                    "item_id": fc_id,
-                    "output_index": 0,
-                    "name": function_call_data["name"],
-                    "arguments": function_call_data["arguments"],
-                    "sequence_number": sequence_number,
-                },
-            )
-            sequence_number += 1
-
-            done_item = {
-                "id": fc_id,
-                "type": "function_call",
-                "status": "completed",
-                "call_id": f"call_{response_id}",
-                "name": function_call_data["name"],
-                "arguments": function_call_data["arguments"],
-            }
-            if function_call_data.get("namespace"):
-                done_item["namespace"] = function_call_data["namespace"]
-            yield sse_event(
-                "response.output_item.done",
-                {
-                    "type": "response.output_item.done",
-                    "output_index": 0,
-                    "item": done_item,
-                    "sequence_number": sequence_number,
-                },
-            )
-            sequence_number += 1
-
-            final_output = [done_item]
-            yield sse_event(
+            final_output = []
+            for output_index, function_call_data in enumerate(function_calls.values()):
+                yield emit_sequenced_event(
+                    "response.function_call_arguments.done",
+                    {
+                        "item_id": function_call_data["id"],
+                        "output_index": output_index,
+                        "name": function_call_data["name"],
+                        "arguments": function_call_data["arguments"],
+                    },
+                )
+                done_item = {**function_call_data, "status": "completed"}
+                yield emit_sequenced_event(
+                    "response.output_item.done",
+                    {"output_index": output_index, "item": done_item},
+                )
+                final_output.append(done_item)
+            yield emit_sequenced_event(
                 "response.completed",
                 {
-                    "type": "response.completed",
                     "response": build_response_obj(
                         "completed", output=final_output, usage=final_usage
-                    ),
-                    "sequence_number": sequence_number,
+                    )
                 },
             )
         else:

@@ -49,7 +49,7 @@ async def test_messages_tools_stop_reason_and_usage_cross_stable_sdk(
     assert tool["name"] == "weather"
     assert tool["parameters"]["required"] == ["city"]
     assert upstream["tool_config"] == {
-        "mode": "function",
+        "mode": "forced",
         "function_name": "weather",
     }
     assert projected["type"] == "message"

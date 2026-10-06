@@ -97,6 +97,7 @@ class RequestTransformer:
         system_message = None
         pending_tool_calls: list[tuple[str, Optional[str]]] = []
         tool_name_by_call_id: dict[str, str] = {}
+        tool_state_by_call_id: dict[str, Optional[str]] = {}
 
         size_totals = {"audio_image_total": 0}
 
@@ -116,7 +117,9 @@ class RequestTransformer:
 
             # Handle tool/function role specifics
             if original_role in {"tool", "function"}:
-                tool_call_id = self._extract_tool_call_id(message)
+                tool_call_id = self._extract_function_id(
+                    message
+                ) or self._extract_tool_call_id(message)
                 function_name = self._resolve_tool_result_name(
                     message,
                     tool_call_id,
@@ -125,7 +128,14 @@ class RequestTransformer:
                 )
                 if function_name and not message.get("name"):
                     message["name"] = function_name
-                self._set_backend_state_id(message, tool_call_id)
+                state_id = (
+                    tool_state_by_call_id.get(tool_call_id) if tool_call_id else None
+                )
+                if state_id and not self._extract_backend_state_id(message):
+                    message["tools_state_id"] = state_id
+                self._set_backend_state_id(message, state_id or tool_call_id)
+                if allow_parallel_tool_calls and tool_call_id:
+                    message["_gpt2giga_call_id"] = tool_call_id
                 message["content"] = ensure_json_object_str(message.get("content"))
                 if message.get("name"):
                     message["name"] = map_tool_name_to_gigachat(message["name"])
@@ -164,7 +174,14 @@ class RequestTransformer:
                     function_call = tool_call.get("function")
                     if not isinstance(function_call, dict):
                         continue
-                    tool_call_id = self._extract_tool_call_id(tool_call)
+                    tool_call_id = self._extract_function_id(
+                        tool_call
+                    ) or self._extract_tool_call_id(tool_call)
+                    if tool_call_id:
+                        tool_state_by_call_id[tool_call_id] = (
+                            self._extract_backend_state_id(message)
+                            or self._normalize_backend_state_id(tool_call_id)
+                        )
                     self._normalize_message_function_call(function_call)
                     self._track_pending_tool_call(
                         function_call,
@@ -186,6 +203,8 @@ class RequestTransformer:
                     first_tool_call = normalized_tool_calls[0]
                     self._set_backend_state_id(message, first_tool_call["id"])
                     message["function_call"] = first_tool_call["function"]
+                    if allow_parallel_tool_calls and first_tool_call["id"]:
+                        message["function_call"]["id"] = first_tool_call["id"]
                 elif isinstance(message.get("function_call"), dict):
                     self._normalize_message_function_call(message["function_call"])
                     self._track_pending_tool_call(
@@ -199,7 +218,14 @@ class RequestTransformer:
                 and isinstance(message["function_call"], dict)
                 and message["function_call"].get("name")
             ):
-                tool_call_id = self._extract_tool_call_id(message)
+                tool_call_id = self._extract_function_id(
+                    message["function_call"]
+                ) or self._extract_tool_call_id(message)
+                if tool_call_id:
+                    tool_state_by_call_id[tool_call_id] = (
+                        self._extract_backend_state_id(message)
+                        or self._normalize_backend_state_id(tool_call_id)
+                    )
                 self._set_backend_state_id(message, tool_call_id)
                 self._normalize_message_function_call(message["function_call"])
                 self._track_pending_tool_call(
@@ -286,6 +312,28 @@ class RequestTransformer:
         return function_call, remaining
 
     @staticmethod
+    def _extract_function_id(message: Dict[str, Any]) -> Optional[str]:
+        """Read an individual call ID without changing its opaque value."""
+        for key in ("_gpt2giga_call_id", "tool_call_id", "call_id", "id", "id_"):
+            value = message.get(key)
+            if isinstance(value, str) and value:
+                return value
+        return None
+
+    @staticmethod
+    def _extract_backend_state_id(message: Dict[str, Any]) -> Optional[str]:
+        for key in (
+            "tools_state_id",
+            "tool_state_id",
+            "functions_state_id",
+            "function_state_id",
+        ):
+            value = message.get(key)
+            if isinstance(value, str) and value:
+                return value
+        return None
+
+    @staticmethod
     def _extract_tool_call_id(message: Dict[str, Any]) -> Optional[str]:
         for field_name in (
             "tool_call_id",
@@ -319,8 +367,12 @@ class RequestTransformer:
         cls,
         message: Dict[str, Any],
         state_id: Optional[str],
+        *,
+        preserve: bool = False,
     ) -> None:
-        normalized = cls._normalize_backend_state_id(state_id)
+        normalized = cls._extract_backend_state_id(message) or (
+            state_id if preserve else cls._normalize_backend_state_id(state_id)
+        )
         if not normalized:
             return
         if not cls._normalize_backend_state_id(message.get("tools_state_id")):
@@ -503,12 +555,15 @@ class RequestTransformer:
 
         reasoning = transformed.pop("reasoning", None)
         if isinstance(reasoning, dict):
+            if reasoning.get("max_tokens") is not None:
+                transformed["_gpt2giga_reasoning_max_tokens"] = reasoning["max_tokens"]
             effort = reasoning.get("effort")
             if effort is not None:
                 transformed["reasoning_effort"] = effort
 
         if transformed.get("reasoning_effort") == "none":
             transformed.pop("reasoning_effort", None)
+            transformed.pop("_gpt2giga_reasoning_max_tokens", None)
             additional_fields = transformed.get("additional_fields")
             if isinstance(additional_fields, dict):
                 additional_fields = self._strip_reasoning_payload_fields(
@@ -616,7 +671,7 @@ class RequestTransformer:
         stripped = {
             key: value
             for key, value in payload.items()
-            if key not in {"reasoning", "reasoning_effort"}
+            if key not in {"reasoning", "reasoning_effort", "reasoning_max_tokens"}
         }
         model_options = stripped.get("model_options")
         if isinstance(model_options, dict):
@@ -802,7 +857,9 @@ class RequestTransformer:
                         "name": fn_name,
                         "content": ensure_json_object_str(message.get("output")),
                     }
-                    self._set_backend_state_id(payload, tools_state_id)
+                    if isinstance(call_id, str) and call_id:
+                        payload["_gpt2giga_call_id"] = call_id
+                    self._set_backend_state_id(payload, tools_state_id, preserve=True)
                     message_payload.append(payload)
                     continue
                 if message_type == "function_call":
@@ -820,7 +877,11 @@ class RequestTransformer:
                         )
 
                     completion_payload = self.mock_completion(message)
-                    self._set_backend_state_id(completion_payload, tools_state_id)
+                    if isinstance(call_id, str) and call_id:
+                        completion_payload["function_call"]["id"] = call_id
+                    self._set_backend_state_id(
+                        completion_payload, tools_state_id, preserve=True
+                    )
                     message_payload.append(completion_payload)
                     continue
 
@@ -905,10 +966,8 @@ class RequestTransformer:
             "function_state_id",
             "tool_call_id",
         ):
-            state_id = RequestTransformer._normalize_backend_state_id(
-                message.get(field_name)
-            )
-            if state_id:
+            state_id = message.get(field_name)
+            if isinstance(state_id, str) and state_id:
                 return state_id
 
         item_id = message.get("id")
@@ -922,9 +981,31 @@ class RequestTransformer:
         self, transformed_data: dict, giga_client: Optional[GigaChat] = None
     ) -> Dict[str, Any]:
         """Common logic for message transformation and logging."""
+        reasoning_max_tokens = transformed_data.pop(
+            "_gpt2giga_reasoning_max_tokens", None
+        )
+        if reasoning_max_tokens is not None:
+            transformed_data["reasoning_max_tokens"] = reasoning_max_tokens
         transformed_data.pop("_gpt2giga_builtin_tools", None)
         transformed_data.pop("_gpt2giga_tool_config", None)
         transformed_data.pop("tools", None)
+        additional_fields = transformed_data.get("additional_fields")
+        if isinstance(additional_fields, dict):
+            additional_fields = dict(additional_fields)
+            for field_name in ("assistant_id", "storage"):
+                if field_name in additional_fields:
+                    transformed_data.setdefault(
+                        field_name, additional_fields.pop(field_name)
+                    )
+            transformed_data["additional_fields"] = additional_fields
+        storage = transformed_data.get("storage")
+        storage_selects_model = isinstance(storage, dict) and (
+            storage.get("assistant_id") or storage.get("thread_id")
+        )
+        if transformed_data.get("assistant_id") or storage_selects_model:
+            transformed_data.pop("model", None)
+            if isinstance(additional_fields, dict):
+                additional_fields.pop("model", None)
         functions = transformed_data.get("functions")
         if isinstance(functions, list):
             transformed_data["functions"] = [
@@ -1051,6 +1132,11 @@ class RequestTransformer:
                         "function_call": {
                             "name": map_tool_name_to_gigachat(name),
                             "arguments": function_call.get("arguments", {}),
+                            **(
+                                {"id": function_call["id"]}
+                                if function_call.get("id")
+                                else {}
+                            ),
                         }
                     }
                 )
@@ -1062,6 +1148,11 @@ class RequestTransformer:
                     {
                         "function_result": {
                             "name": map_tool_name_to_gigachat(function_name),
+                            **(
+                                {"id": self._extract_function_id(message)}
+                                if self._extract_function_id(message)
+                                else {}
+                            ),
                             "result": self._parse_function_result(
                                 message.get("content")
                             ),
@@ -1091,7 +1182,9 @@ class RequestTransformer:
         if content_parts:
             payload["content"] = content_parts
 
-        tool_state_id = self._extract_tool_call_id(message)
+        tool_state_id = self._extract_backend_state_id(
+            message
+        ) or self._extract_tool_call_id(message)
         if tool_state_id:
             payload["tools_state_id"] = tool_state_id
 
@@ -1131,8 +1224,13 @@ class RequestTransformer:
                 model_options[field_name] = transformed_data[field_name]
 
         reasoning_effort = transformed_data.get("reasoning_effort")
+        reasoning = {}
         if reasoning_effort is not None:
-            model_options["reasoning"] = {"effort": reasoning_effort}
+            reasoning["effort"] = reasoning_effort
+        if "_gpt2giga_reasoning_max_tokens" in transformed_data:
+            reasoning["max_tokens"] = transformed_data["_gpt2giga_reasoning_max_tokens"]
+        if reasoning:
+            model_options["reasoning"] = reasoning
 
         tools = self._build_chat_completion_tools(
             transformed_data.get("functions"),
@@ -1163,7 +1261,9 @@ class RequestTransformer:
         else:
             request_payload.pop("storage", None)
 
-        if self._chat_completion_storage_has_thread_id(storage):
+        if request_payload.get(
+            "assistant_id"
+        ) or self._chat_completion_storage_has_thread_id(storage):
             request_payload.pop("model", None)
 
         if model_options:
@@ -1228,7 +1328,16 @@ class RequestTransformer:
         explicit_disable_filter = (
             "disable_filter" in additional_fields or "disable_filter" in request_payload
         )
+        nested_options = additional_fields.get("model_options")
+        if isinstance(nested_options, dict):
+            for key, value in nested_options.items():
+                if key == "reasoning" and isinstance(value, dict):
+                    model_options[key] = {**value, **model_options.get(key, {})}
+                else:
+                    model_options.setdefault(key, value)
         for key, value in additional_fields.items():
+            if key == "model_options" and isinstance(value, dict):
+                continue
             if key == "profanity_check":
                 disable_filter = self._disable_filter_from_profanity_check(value)
                 if disable_filter is not None and not explicit_disable_filter:
@@ -1361,6 +1470,8 @@ class RequestTransformer:
     def _build_chat_completion_tool_config(
         self, function_call: Any, builtin_tool_config: Any = None
     ) -> dict[str, str]:
+        if isinstance(function_call, str) and function_call in {"auto", "none"}:
+            return {"mode": function_call}
         if not isinstance(function_call, dict):
             return builtin_tool_config if isinstance(builtin_tool_config, dict) else {}
 
@@ -1369,7 +1480,7 @@ class RequestTransformer:
             return builtin_tool_config if isinstance(builtin_tool_config, dict) else {}
 
         return {
-            "mode": "function",
+            "mode": "forced",
             "function_name": map_tool_name_to_gigachat(name),
         }
 

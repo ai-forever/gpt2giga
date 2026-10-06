@@ -74,7 +74,11 @@ def _build_anthropic_response(
     tool_calls = list(message.get("tool_calls") or [])
     if message.get("function_call"):
         function_tool_call: Dict[str, Any] = {"function": message["function_call"]}
-        state_id = _backend_tool_state_id(message)
+        state_id = (
+            message["function_call"].get("id")
+            or message["function_call"].get("id_")
+            or _backend_tool_state_id(message)
+        )
         if state_id:
             function_tool_call["id"] = state_id
         tool_calls.append(function_tool_call)
@@ -126,6 +130,11 @@ def _build_anthropic_response(
         "usage": {
             "input_tokens": usage.get("prompt_tokens", 0),
             "output_tokens": usage.get("completion_tokens", 0),
+            **(
+                {"cache_read_input_tokens": usage["precached_prompt_tokens"]}
+                if usage.get("precached_prompt_tokens")
+                else {}
+            ),
         },
     }
     log_debug_payload(

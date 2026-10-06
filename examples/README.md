@@ -135,3 +135,21 @@ Stateful Anthropic/Gemini examples require the proxy process to be started with
 - `examples/gemini/embeddings/embeddings.py`: Gemini-like `embedContent` и batch-style embeddings
 - `examples/gemini/files/files.py`: Gemini Files API (router подготовлен, но временно не смонтирован)
 - `examples/gemini/batches/batches.py`: Gemini Batch API (router подготовлен, но временно не смонтирован)
+
+## Изменения контрактов в 0.3.1a1
+
+| Пример | Что проверить |
+|---|---|
+| [Сессия и usage](openai/chat_completions/basic/session_cache_usage.py) | Один `X-Session-ID` на диалог; OpenAI включает кэш в полный вход. Нулевой кэш допустим. |
+| [Обязательные вызовы и SSE](openai/responses/tools/required_parallel_stream.py) | `required`, все вызовы одинаковой функции, отдельные `call_id`, обратный порядок результатов; v2. Число вызовов выбирает модель. |
+| [Anthropic any](anthropic/messages/tools/required_tool.py) | `tool_choice:any` на первом ходе и `none` на финальном; `tool_use_id`, usage с отдельным кэшем; v2. |
+| [Бюджет reasoning](openai/chat_completions/reasoning/chat_reasoning.py) | Бюджет рассуждений вместе с общим лимитом генерации; v1/v2. |
+| [Anthropic thinking](anthropic/messages/reasoning/reasoning.py) | `budget_tokens` доходит до upstream, а не только определяет effort. |
+| [Продолжение Responses](openai/responses/basic/stateful.py) | `store`, `previous_response_id`, общий session ID и только новый input; v2. |
+
+Запускайте файлы командой `uv run python <путь>` из корня репозитория.
+Примеры используют локальный `http://localhost:8090` и заглушку ключа `0`;
+при включённой авторизации укажите свой ключ локально. Вызовы инструментов
+исполняют только фиксированные функции-заглушки, без внешних сервисов.
+Примеры, требующие v2, пропускают запуск при переключении smoke runner на v1;
+обычный клиент получает 400 при `required`/`any` или хранении Responses в v1.

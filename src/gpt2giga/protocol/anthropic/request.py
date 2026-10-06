@@ -334,6 +334,7 @@ def _build_openai_data_from_anthropic_request(
     thinking = data.get("thinking")
     if thinking and isinstance(thinking, dict) and thinking.get("type") == "enabled":
         budget = thinking.get("budget_tokens", 10000)
+        openai_data["reasoning"] = {"max_tokens": budget}
         if budget >= 8000:
             openai_data["reasoning_effort"] = "high"
         elif budget >= 3000:
@@ -363,6 +364,8 @@ def _build_openai_data_from_anthropic_request(
                     openai_data["tool_choice"] = {"type": builtin_tool_choice}
                 elif not builtin_tool_choice:
                     openai_data["function_call"] = {"name": tool_name}
+        elif tool_choice_type == "any":
+            openai_data["tool_choice"] = "required"
         elif tool_choice_type == "none":
             openai_data.pop("tools", None)
             openai_data.pop("functions", None)

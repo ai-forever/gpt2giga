@@ -85,7 +85,7 @@ async def test_prepare_chat_completion_maps_tools_and_forced_function_call():
     assert spec.name == "__gpt2giga_user_search_web"
     assert spec.description == "Search the web"
     assert spec.parameters["properties"]["query"]["type"] == "string"
-    assert request.tool_config.mode == "function"
+    assert request.tool_config.mode == "forced"
     assert request.tool_config.function_name == "__gpt2giga_user_search_web"
 
 
@@ -292,9 +292,9 @@ async def test_prepare_chat_completion_maps_builtin_tools_in_v2_mode():
         }
     )
 
-    assert request.tools[0].web_search.indexes == ["web"]
-    assert request.tools[0].web_search.flags == ["trusted"]
-    assert request.tool_config.mode == "tool"
+    assert request.tools[0].web_search["indexes"] == ["web"]
+    assert request.tools[0].web_search["flags"] == ["trusted"]
+    assert request.tool_config.mode == "forced"
     assert request.tool_config.tool_name == "web_search"
 
 
@@ -328,14 +328,16 @@ async def test_prepare_chat_completion_maps_anthropic_builtin_tool_types():
         }
     )
 
-    assert request.tools[0].web_search.model_dump(exclude_none=True) == {
+    assert request.tools[0].model_dump(exclude_none=True, by_alias=True)[
+        "web_search"
+    ] == {
         "indexes": ["web"],
         "max_uses": 5,
         "allowed_domains": ["example.com"],
     }
     assert request.tools[1].url_content_extraction == {"max_uses": 2}
     assert request.tools[2].code_interpreter == {}
-    assert request.tool_config.mode == "tool"
+    assert request.tool_config.mode == "forced"
     assert request.tool_config.tool_name == "web_search"
 
 
@@ -362,10 +364,10 @@ async def test_prepare_chat_completion_maps_gemini_builtin_tool_types():
         }
     )
 
-    assert request.tools[0].web_search.indexes == ["web"]
+    assert request.tools[0].web_search["indexes"] == ["web"]
     assert request.tools[1].url_content_extraction == {"max_uses": 2}
     assert request.tools[2].code_interpreter == {}
-    assert request.tool_config.mode == "tool"
+    assert request.tool_config.mode == "forced"
     assert request.tool_config.tool_name == "web_search"
 
 
@@ -748,14 +750,14 @@ async def test_prepare_response_chat_completion_maps_responses_builtin_tools():
         }
     )
 
-    assert request.tools[0].web_search.indexes == ["web"]
-    assert request.tools[0].web_search.flags == ["trusted"]
+    assert request.tools[0].web_search["indexes"] == ["web"]
+    assert request.tools[0].web_search["flags"] == ["trusted"]
     assert request.tools[1].code_interpreter == {"container": {"type": "auto"}}
     assert request.tools[2].image_generate == {"size": "1024x1024"}
     spec = request.tools[3].functions.specifications[0]
     assert spec.name == "save_result"
     assert spec.parameters["properties"]["value"]["type"] == "string"
-    assert request.tool_config.mode == "tool"
+    assert request.tool_config.mode == "forced"
     assert request.tool_config.tool_name == "web_search"
 
 

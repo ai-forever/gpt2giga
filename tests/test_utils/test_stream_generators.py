@@ -1742,3 +1742,67 @@ async def test_stream_responses_generator_unmaps_reserved_web_search_name():
     event_type, data = parse_sse(lines[6])
     assert event_type == "response.completed"
     assert data["response"]["output"][0]["name"] == "web_search"
+
+
+@pytest.mark.parametrize("call_count", [1, 2])
+async def test_responses_v2_stream_preserves_all_native_function_ids(call_count):
+    calls = [
+        {
+            "function_call": {
+                "id": f"call_native-{i}",
+                "name": "lookup",
+                "arguments": {"room": i},
+            }
+        }
+        for i in range(call_count)
+    ]
+    chunks = [
+        ChatCompletionChunk.model_validate(
+            {
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "content": calls,
+                        "tools_state_id": "shared-state",
+                    }
+                ],
+                "finish_reason": "function_call",
+            }
+        )
+    ]
+    request = FakeRequest(FakeClientV2Stream(chunks=chunks))
+    request.app.state.response_processor = ResponseProcessor(logger=MagicMock())
+    events = []
+    async for line in stream_responses_chat_completion_generator(
+        request,
+        {"contract": "v2"},
+        response_id="parallel",
+        request_data={"model": "giga"},
+    ):
+        events.append(json.loads(line.strip().split("\ndata: ", 1)[1]))
+    added = [event for event in events if event["type"] == "response.output_item.added"]
+    done = [event for event in events if event["type"] == "response.output_item.done"]
+    arguments = [
+        event
+        for event in events
+        if event["type"] == "response.function_call_arguments.done"
+    ]
+    final = next(
+        event["response"] for event in events if event["type"] == "response.completed"
+    )
+    expected_ids = [f"call_native-{i}" for i in range(call_count)]
+    assert [event["item"]["call_id"] for event in added] == expected_ids
+    assert [event["item"]["call_id"] for event in done] == expected_ids
+    assert [item["call_id"] for item in final["output"]] == expected_ids
+    assert [json.loads(event["arguments"]) for event in arguments] == [
+        {"room": i} for i in range(call_count)
+    ]
+    assert [json.loads(item["arguments"]) for item in final["output"]] == [
+        {"room": i} for i in range(call_count)
+    ]
+    assert [event["output_index"] for event in added] == list(range(call_count))
+    assert [event["item"]["id"] for event in added] == [
+        event["item"]["id"] for event in done
+    ]
+    assert len({event["item"]["id"] for event in added}) == call_count
+    assert [event["sequence_number"] for event in events] == list(range(len(events)))

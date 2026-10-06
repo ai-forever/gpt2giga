@@ -13,6 +13,7 @@ from gpt2giga.common.reasoning import (
 from gpt2giga.common.sources import render_text_with_sources
 from gpt2giga.common.tools import map_tool_name_from_gigachat
 from gpt2giga.core.context import RequestContext
+from gpt2giga.protocols.normalized.usage import cached_input_tokens
 from gpt2giga.protocols.normalized import (
     NormalizedChoice,
     NormalizedContentPart,
@@ -142,10 +143,19 @@ def _stop_reason(
 
 
 def _usage_to_anthropic(usage: NormalizedUsage | None) -> dict[str, int]:
-    return {
-        "input_tokens": int(usage.input_tokens or 0) if usage else 0,
+    cached = cached_input_tokens(usage)
+    anthropic = usage.provider_metadata.get("anthropic", {}) if usage else {}
+    created = int(anthropic.get("cache_creation_input_tokens") or 0)
+    result = {
+        "input_tokens": max(0, int(usage.input_tokens or 0) - cached - created)
+        if usage
+        else 0,
         "output_tokens": int(usage.output_tokens or 0) if usage else 0,
+        **({"cache_read_input_tokens": cached} if cached else {}),
     }
+    if "cache_creation_input_tokens" in anthropic:
+        result["cache_creation_input_tokens"] = created
+    return result
 
 
 def _response_id(

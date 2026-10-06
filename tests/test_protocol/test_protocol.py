@@ -595,6 +595,7 @@ async def test_prepare_response_chat_function_calling_example_keeps_functions():
         "function",
     ]
     assert chat["messages"][2]["function_call"] == {
+        "id_": state_id,
         "name": "get_horoscope",
         "arguments": {"sign": "Aquarius"},
     }

@@ -9,7 +9,7 @@ from loguru import logger
 
 from gpt2giga.common.api_mode import force_gigachat_api_mode
 from gpt2giga.models.config import ProxyConfig, ProxySettings
-from gpt2giga.protocol import ResponseProcessor
+from gpt2giga.protocol import RequestTransformer, ResponseProcessor
 from gpt2giga.routers.openai import router
 
 
@@ -158,6 +158,28 @@ def make_app(gigachat_api_mode: str):
     app.include_router(router)
     configure_app_state(app, gigachat_api_mode)
     return app
+
+
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize(
+    ("param", "value"),
+    [("previous_response_id", "resp_1"), ("store", True)],
+)
+def test_responses_v1_rejects_unsupported_history_before_upstream(stream, param, value):
+    app = make_app("v1")
+    app.state.request_transformer = RequestTransformer(app.state.config, logger=logger)
+
+    response = TestClient(app).post(
+        "/responses",
+        json={"model": "gpt-x", "input": "hello", "stream": stream, param: value},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["error"]["param"] == param
+    assert response.json()["error"]["code"] == "unsupported_parameter"
+    assert not app.state.gigachat_client.achat.chat_calls
+    assert not app.state.gigachat_client.achat.chat_completion_calls
+    assert not app.state.gigachat_client.achat.stream_calls
 
 
 def make_versioned_app(gigachat_api_mode: str):

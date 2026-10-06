@@ -257,3 +257,73 @@ GigaChat v2.
 окружения. Новые возможности встроенных инструментов развиваются преимущественно
 вокруг режима GigaChat v2, поэтому клиенты, которым они нужны, могут указывать
 `http://localhost:8090/v2`.
+
+## Согласование контрактов SDK в 0.3.1a1
+
+Включённый wheel `gigachat==0.2.4a1` собран из коммита SDK `6e9bb50`.
+Его SHA-256 записан в lock-файле. Совместимость шлюза и SDK проверяется
+синтетическими HTTP-ответами; эти проверки не подтверждают качество живой модели,
+права доступа к возможностям, экономию кэша или детерминированность генерации.
+
+| Контракт | Поведение шлюза |
+|---|---|
+| Параметры генерации v2 | Лимиты и параметры сэмплирования сериализуются в `model_options`; бюджет reasoning сохраняется. Преобразованные публичные параметры имеют приоритет над дополнительными; остальные вложенные настройки сохраняются. |
+| Обязательный вызов функции | OpenAI `tool_choice="required"` и Anthropic `tool_choice.type="any"` преобразуются в v2 `tool_config.mode="any"`. v1 отклоняет требование вместо молчаливого `auto`. Выбор по имени использует `mode="forced"`. |
+| Параллельные результаты функций | Каждый результат сохраняет `id` своего вызова, в том числе при одинаковых именах функций. `tools_state_id` остаётся отдельным полем состояния диалога. |
+| Дополнительные параметры | `extra_body` / SDK `additional_fields` сохраняют поддерживаемые провайдером настройки без отдельных классов шлюза для внутренних сервисов. |
+| Кэшированные токены | OpenAI prompt/input включает кэш; число токенов кэша также доступно в деталях usage. Anthropic возвращает незакэшированный `input_tokens` и отдельный `cache_read_input_tokens`. |
+| Настройки Responses | Если `temperature` и `top_p` не заданы, ответ содержит `null`, в том числе в потоке; отсутствие `store` отображается как `false`. |
+| История Responses | Native v2 отображает `previous_response_id` в `storage.thread_id`, убирает `model` при продолжении и отправляет новый input. v1 отклоняет `previous_response_id` и `store=true`; передавайте полную историю или используйте `/v2/responses`. |
+| Выбор assistant/thread | Native `assistant_id` и stateful storage выбирают upstream без подстановки модели по умолчанию, в том числе в v1. |
+| Заголовок сессии | `GIGACHAT_SESSION_ID` задаёт значение SDK по умолчанию; `X-Session-ID` запроса переопределяет его и не влияет на следующие запросы. |
+| Env-файл CLI | Относительный `--env-path` разрешается от рабочего каталога. Отсутствующий явно указанный файл останавливает запуск. |
+
+Получение сохранённого ответа (`GET /responses/{id}`) остаётся нереализованным:
+продолжение v2 использует треды GigaChat, а не полное хранилище OpenAI Responses.
+Клиент должен сохранить идентификатор ответа. JSON Schema передаётся без изменений;
+шлюз не исправляет сгенерированные моделью аргументы или поведение v1 с `anyOf`.
+
+Часть отличий намеренная: строковый результат инструмента оборачивается в
+`{"result": "..."}` для GigaChat; Messages принимает отсутствие `max_tokens`
+(Anthropic SDK требует этот параметр). Для переносимости передавайте лимит явно.
+Wildcard CORS в DEV остаётся настройкой разработки; управление авторизацией и CORS
+описано в [Конфигурации](configuration.md). Ограничение зависимости остаётся
+`openai>=2.50,<3`.
+
+### Примеры обновлённых контрактов
+
+Запуск из корня репозитория после старта локального прокси:
+
+```bash
+uv run python examples/openai/chat_completions/basic/session_cache_usage.py
+uv run python examples/openai/responses/tools/required_parallel_stream.py
+uv run python examples/anthropic/messages/tools/required_tool.py
+uv run python examples/openai/chat_completions/reasoning/chat_reasoning.py
+uv run python examples/openai/responses/basic/stateful.py
+```
+
+[Индекс примеров](https://github.com/ai-forever/gpt2giga/blob/main/examples/README.md)
+объясняет ожидаемые поля и условия запуска. Пример Responses сохраняет каждый
+`call_id` и переносит `metadata.gigachat_tool_state_id` в отдельный `tools_state_id`
+элемента истории. Включение параллельных вызовов не гарантирует их количество.
+Инструменты в примерах используют локальные данные-заглушки.
+
+Дополнительные параметры можно передать через OpenAI SDK:
+
+```python
+response = client.chat.completions.create(
+    model="GigaChat-2-Max",
+    messages=[{"role": "user", "content": "Реши задачу кратко."}],
+    max_completion_tokens=1024,
+    reasoning_effort="low",
+    extra_body={
+        "reasoning": {"max_tokens": 256},
+        "model_options": {"repetition_penalty": 1.05},
+    },
+)
+```
+
+Здесь `client` использует `/v2`. Для выбора настроенного assistant вместо модели
+можно передать `extra_body={"assistant_id": "<ваш assistant ID>"}`:
+шлюз уберёт `model` из запроса upstream. Это не создаёт assistant и требует
+доступного в вашем аккаунте идентификатора.

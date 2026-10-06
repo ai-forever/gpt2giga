@@ -9,6 +9,8 @@ from typing import Any
 from gpt2giga.common.sources import merge_inline_data
 from gpt2giga.common.tools import split_gigachat_tool_name
 from gpt2giga.protocol.response.processor import ResponseProcessor
+from gpt2giga.protocols.openai.response_adapter import _responses_usage
+
 from gpt2giga.protocols.normalized import (
     NormalizedStreamEvent,
     NormalizedToolCall,
@@ -272,6 +274,14 @@ class ResponsesStreamProjector:
             )
 
         frames = self._complete_reasoning()
+        if (
+            start
+            and self._tool_item is not None
+            and tool_call.id != self._tool_item["call_id"]
+        ):
+            frames.extend(self._complete_tool())
+            self._tool_item = None
+            self._tool_provider_name = None
         if self._tool_item is None:
             if not start:
                 raise ResponsesStreamProtocolError("tool delta received before start")
@@ -564,12 +574,12 @@ class ResponsesStreamProjector:
             "parallel_tool_calls": True,
             "previous_response_id": None,
             "reasoning": _reasoning_config(self.request_payload),
-            "store": True,
-            "temperature": self.request_payload.get("temperature", 1),
+            "store": False,
+            "temperature": self.request_payload.get("temperature"),
             "text": text,
             "tool_choice": self.request_payload.get("tool_choice", "auto"),
             "tools": self.request_payload.get("tools", []),
-            "top_p": self.request_payload.get("top_p", 1),
+            "top_p": self.request_payload.get("top_p"),
             "truncation": "disabled",
             "usage": _usage(self._usage),
             "user": None,
@@ -611,12 +621,5 @@ def _reasoning_config(request_payload: dict[str, Any]) -> dict[str, Any]:
     return {"effort": effort, "summary": summary}
 
 
-def _usage(usage: NormalizedUsage | None) -> dict[str, int] | None:
-    if usage is None:
-        return None
-    values = {
-        "input_tokens": usage.input_tokens,
-        "output_tokens": usage.output_tokens,
-        "total_tokens": usage.total_tokens,
-    }
-    return {key: value for key, value in values.items() if value is not None}
+def _usage(usage: NormalizedUsage | None) -> dict[str, Any] | None:
+    return _responses_usage(usage)

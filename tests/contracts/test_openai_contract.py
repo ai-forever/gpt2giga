@@ -81,7 +81,7 @@ async def test_chat_tools_schema_and_usage_cross_stable_sdk(contract_stack) -> N
     assert sdk_payload.__class__.__module__.startswith("gigachat.models")
     assert upstream["tools"][0]["functions"]["specifications"][0]["name"] == "weather"
     assert upstream["tool_config"] == {
-        "mode": "function",
+        "mode": "forced",
         "function_name": "weather",
     }
     assert upstream["model_options"]["response_format"]["type"] == "json_schema"

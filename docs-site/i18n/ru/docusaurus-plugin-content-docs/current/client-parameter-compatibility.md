@@ -76,7 +76,7 @@ SDK OpenAI и Anthropic обычно объединяют `extra_body` с исх
 отправлены как поля верхнего уровня: например `logprobs`, `audio`, `container` или
 `mcp_servers`. `previous_response_id` поддерживается для OpenAI Responses в
 режиме GigaChat v2 и сопоставляется с `storage.thread_id`; в режиме Responses v1 он
-принимается и игнорируется.
+отклоняется при значении, отличном от `null`; `store=true` в v1 также отклоняется.
 Если такой же ключ явно положить внутрь буквального `extra_body`, gpt2giga передаст
 его в `additional_fields`, а итоговую поддержку определит вышестоящий GigaChat.
 
@@ -115,8 +115,7 @@ normalized parity.
 Неподдерживаемые необязательные параметры OpenAI принимаются и игнорируются. Примеры:
 `logprobs`, `top_logprobs`, `logit_bias`, аудиовывод, `prediction`,
 `web_search_options`, встроенные инструменты вне режима GigaChat v2, `n > 1`,
-сохранённые запросы completions, `conversation`, а также `previous_response_id`
-в режиме Responses v1. `/chat/completions` v1
+сохранённые запросы completions и `conversation`. `/chat/completions` v1
 остаётся поддерживаемым маршрутом совместимости, но новые возможности
 инструментов и встроенных инструментов развиваются для GigaChat `v2/chat/completions`.
 
@@ -133,7 +132,7 @@ declaration. В ответе сохраняются ID всех вызовов, 
 
 | Эндпоинт | Поддерживается |
 |---|---|
-| Messages | `model`, `messages`, `system`, `max_tokens`, `stream`, `temperature`, `top_p`, `stop_sequences`, локальные функциональные `tools`, провайдерские инструменты Anthropic в режиме GigaChat v2 (`web_search*`, `web_fetch*` как `url_content_extraction`, `code_execution*` как `code_interpreter`), значения `tool_choice` `auto`/`none`/принудительный `tool`, `thinking`, `output_config.format`, `output_format`, проброс `extra_body` |
+| Messages | `model`, `messages`, `system`, `max_tokens`, `stream`, `temperature`, `top_p`, `stop_sequences`, локальные функциональные `tools`, провайдерские инструменты Anthropic в режиме GigaChat v2 (`web_search*`, `web_fetch*` как `url_content_extraction`, `code_execution*` как `code_interpreter`), значения `tool_choice` `auto`/`none`/принудительный `tool`/v2 `any`, `thinking`, `output_config.format`, `output_format`, проброс `extra_body` |
 | Count Tokens | `model`, `messages`, `system`, `tools`, текст схемы структурированного вывода, совместимая проверка содержимого сообщений |
 | Models | `GET /models`, `GET /models/{model_id}`, когда запрос содержит заголовки Anthropic SDK, например `anthropic-version` |
 
