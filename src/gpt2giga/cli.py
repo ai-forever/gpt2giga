@@ -1,7 +1,7 @@
 import argparse
-import os
+from pathlib import Path
 
-from dotenv import find_dotenv, load_dotenv
+from dotenv import load_dotenv
 
 from gpt2giga.common.app_meta import warn_sensitive_cli_args
 from gpt2giga.models.config import ProxyConfig
@@ -18,8 +18,9 @@ def load_config() -> ProxyConfig:
     args, _ = parser.parse_known_args()
 
     # Загружаем переменные окружения
-    requested_env = args.env_path if args.env_path else f"{os.getcwd()}/.env"
-    env_path = find_dotenv(requested_env)
+    env_path = Path(args.env_path or ".env").expanduser().resolve()
+    if args.env_path and not env_path.is_file():
+        parser.error(f"env file does not exist: {env_path}")
     load_dotenv(env_path)
 
     # pydantic-settings автоматически распарсит аргументы командной строки

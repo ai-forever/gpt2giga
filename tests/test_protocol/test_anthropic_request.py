@@ -152,7 +152,7 @@ def test_build_openai_data_from_anthropic_request_maps_parallel_tool_choice():
     assert openai_data["parallel_tool_calls"] is True
 
 
-def test_build_openai_data_from_anthropic_request_ignores_tool_choice_any():
+def test_build_openai_data_from_anthropic_request_preserves_tool_choice_any():
     data = {
         "model": "claude-x",
         "messages": [{"role": "user", "content": "hi"}],
@@ -161,7 +161,7 @@ def test_build_openai_data_from_anthropic_request_ignores_tool_choice_any():
 
     openai_data = _build_openai_data_from_anthropic_request(data, logger)
 
-    assert "tool_choice" not in openai_data
+    assert openai_data["tool_choice"] == "required"
     assert "function_call" not in openai_data
 
 

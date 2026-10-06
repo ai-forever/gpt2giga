@@ -98,7 +98,12 @@ async def test_normalized_hosted_tool_nonstream_parity(monkeypatch) -> None:
 
     provider_request = giga_client.achat.create_calls[0]
     assert provider_request.model == "GigaChat-2-Max"
-    assert provider_request.tools[0].web_search.model_dump(exclude_none=True) == {}
+    assert (
+        provider_request.tools[0].model_dump(exclude_none=True, by_alias=True)[
+            "web_search"
+        ]
+        == {}
+    )
     assert provider_request.tool_config.tool_name == "web_search"
 
     public = normalized_chat_response_to_responses(
@@ -156,7 +161,12 @@ async def test_normalized_hosted_tool_stream_parity(monkeypatch) -> None:
 
     provider_request = giga_client.achat.stream_calls[0]
     assert provider_request.model == "GigaChat-2-Max"
-    assert provider_request.tools[0].web_search.model_dump(exclude_none=True) == {}
+    assert (
+        provider_request.tools[0].model_dump(exclude_none=True, by_alias=True)[
+            "web_search"
+        ]
+        == {}
+    )
     event_names = [frame.splitlines()[0].removeprefix("event: ") for frame in frames]
     assert event_names == [
         "response.created",

@@ -6,6 +6,7 @@ import json
 from typing import Any
 
 from gpt2giga.protocols.normalized import NormalizedStreamEvent, NormalizedToolCall
+from gpt2giga.protocols.anthropic.response_adapter import _usage_to_anthropic
 
 
 class AnthropicStreamProjector:
@@ -23,11 +24,16 @@ class AnthropicStreamProjector:
         self._block_type: str | None = None
         self._input_tokens = 0
         self._output_tokens = 0
+        self._cache_usage: dict[str, int] = {}
 
     def project(self, event: NormalizedStreamEvent) -> list[str]:
         """Render zero or more Anthropic SSE frames for one normalized event."""
         if event.usage is not None and event.usage.input_tokens is not None:
-            self._input_tokens = int(event.usage.input_tokens)
+            usage = _usage_to_anthropic(event.usage)
+            self._input_tokens = usage["input_tokens"]
+            self._cache_usage = {
+                key: value for key, value in usage.items() if key.startswith("cache_")
+            }
         if event.usage is not None and event.usage.output_tokens is not None:
             self._output_tokens = int(event.usage.output_tokens)
         if event.type == "message_start":
@@ -54,10 +60,15 @@ class AnthropicStreamProjector:
             return self._text_delta(event.content_delta or "")
         if event.type == "reasoning_delta":
             return self._thinking_delta(event.reasoning_delta or "")
-        if event.type == "tool_call_start":
-            return self._tool_start(event.tool_call)
-        if event.type == "tool_call_delta":
-            return self._tool_delta(event.tool_call)
+        if event.type in {"tool_call_start", "tool_call_delta"}:
+            frames = (
+                self._tool_start(event.tool_call)
+                if event.type == "tool_call_start"
+                else self._tool_delta(event.tool_call)
+            )
+            if event.finish_reason is not None:
+                frames.extend(self._message_end(event))
+            return frames
         if event.type == "message_end":
             return self._message_end(event)
         if event.type == "error":
@@ -131,14 +142,17 @@ class AnthropicStreamProjector:
 
     def _tool_start(self, tool_call: NormalizedToolCall | None) -> list[str]:
         call = tool_call or NormalizedToolCall()
-        frames = self._start_block(
-            "tool_use",
-            {
-                "type": "tool_use",
-                "id": call.id or f"toolu_{self.response_id}",
-                "name": call.name or "",
-                "input": {},
-            },
+        frames = self._stop_block()
+        frames.extend(
+            self._start_block(
+                "tool_use",
+                {
+                    "type": "tool_use",
+                    "id": call.id or f"toolu_{self.response_id}",
+                    "name": call.name or "",
+                    "input": {},
+                },
+            )
         )
         frames.extend(self._tool_delta(call))
         return frames
@@ -187,6 +201,7 @@ class AnthropicStreamProjector:
                         "usage": {
                             "input_tokens": self._input_tokens,
                             "output_tokens": self._output_tokens,
+                            **self._cache_usage,
                         },
                     },
                 ),

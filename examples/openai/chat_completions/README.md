@@ -39,3 +39,14 @@ GigaChat v2 backend contract. Root `base_url` без версии тоже по�
 - `structured_outputs/json_schema.py`: JSON Schema
 - `multimodal/image_url.py`, `multimodal/base64_image.py`: изображения
 - `files/documents.py`: документы/вложения
+
+## Обновлённые контракты
+
+- [Сессия и кэш](basic/session_cache_usage.py): два запроса с одним `X-Session-ID`,
+  полный `prompt_tokens` и его кэшированная часть. Не прибавляйте `cached_tokens`
+  повторно; наличие session ID не гарантирует попадания в кэш.
+- [Бюджет reasoning](reasoning/chat_reasoning.py): `max_completion_tokens` ограничивает
+  генерацию, а `extra_body.reasoning.max_tokens` задаёт бюджет рассуждений.
+  В v1 он передаётся как `reasoning_max_tokens`, в v2 — внутри `model_options.reasoning`.
+- [Responses SSE с required](../responses/tools/required_parallel_stream.py):
+  полный цикл параллельных вызовов с сохранением ID.

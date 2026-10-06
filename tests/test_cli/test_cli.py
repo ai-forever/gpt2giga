@@ -1,4 +1,5 @@
 from loguru import logger as loguru_logger
+import pytest
 
 from gpt2giga.cli import load_config
 from gpt2giga.common.app_meta import warn_sensitive_cli_args
@@ -19,6 +20,21 @@ def test_load_config_env_path(monkeypatch, tmp_path):
     monkeypatch.setattr("sys.argv", ["prog", "--env-path", str(env_file)])
     config = load_config()
     assert isinstance(config, ProxyConfig)
+
+
+def test_load_config_relative_env_path(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("GPT2GIGA_PORT", raising=False)
+    (tmp_path / "custom.env").write_text("GPT2GIGA_PORT=8123\n")
+    monkeypatch.setattr("sys.argv", ["prog", "--env-path", "custom.env"])
+    assert load_config().proxy_settings.port == 8123
+
+
+def test_load_config_missing_explicit_env_path(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("sys.argv", ["prog", "--env-path", "missing.env"])
+    with pytest.raises(SystemExit, match="2"):
+        load_config()
 
 
 def test_load_config_boolean_flags(monkeypatch):

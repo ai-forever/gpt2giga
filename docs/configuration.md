@@ -15,6 +15,10 @@ The CLI accepts an explicit env file:
 gpt2giga --env-path .env
 ```
 
+Relative `--env-path` values resolve from the current working directory, including
+when launched with `uvx`. An explicitly named missing file is an error. Without
+the flag, the CLI optionally loads `.env` from the current working directory.
+
 You can pass structured CLI flags:
 
 ```sh
@@ -190,6 +194,7 @@ Common upstream settings:
 | `GIGACHAT_ACCESS_TOKEN` | empty | Alternative authorization via a ready access token. |
 | `GIGACHAT_BASE_URL` | `https://api.giga.chat/v1` | SDK API endpoint. Set it explicitly for username/password authorization. |
 | `GIGACHAT_MODEL` | empty | Recommended explicit upstream model and the fallback when the gateway does not accept a request model. |
+| `GIGACHAT_SESSION_ID` | empty | Default upstream `X-Session-ID`; an incoming request header overrides it. Use a distinct identifier per conversation. Cache hits are not guaranteed. |
 | `GIGACHAT_PROFANITY_CHECK` | SDK default | Upstream profanity check flag. |
 | `GIGACHAT_VERIFY_SSL_CERTS` | SDK default | Keep `True` in production. |
 | `GIGACHAT_TIMEOUT` | SDK default | Upstream request timeout. |

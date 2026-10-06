@@ -105,3 +105,23 @@ def test_normalized_stream_event_prefers_legacy_openai_chunk_extension():
     )
 
     assert chunk is legacy_chunk
+
+
+def test_normalized_stream_usage_preserves_anthropic_cache_without_legacy_chunk():
+    frame = normalized_stream_event_to_openai_sse(
+        NormalizedStreamEvent(
+            type="usage",
+            usage=NormalizedUsage(
+                input_tokens=2444,
+                output_tokens=2,
+                total_tokens=2446,
+                provider_metadata={"anthropic": {"cache_read_input_tokens": 2430}},
+            ),
+        ),
+        requested_model="claude-test",
+        response_id="cache-fixture",
+    )
+    usage = _sse_payload(frame)["usage"]
+    assert usage["prompt_tokens"] == 2444
+    assert usage["total_tokens"] == 2446
+    assert usage["prompt_tokens_details"]["cached_tokens"] == 2430

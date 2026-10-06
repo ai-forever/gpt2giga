@@ -328,6 +328,8 @@ def _normalize_tool_choice(
         return "auto", parallel
     if choice_type == "none":
         return "none", parallel
+    if choice_type == "any":
+        return "required", parallel
     if choice_type != "tool" or not value.get("name"):
         return None, parallel
     name = str(value["name"])
@@ -359,15 +361,20 @@ def _normalize_response_format(
 def _normalize_generation_config(
     data: Mapping[str, Any],
 ) -> NormalizedGenerationConfig:
-    reasoning_effort = _reasoning_effort(data.get("thinking"))
+    thinking = data.get("thinking")
+    reasoning_effort = _reasoning_effort(thinking)
+    raw_extensions = {}
+    if reasoning_effort:
+        raw_extensions["reasoning_effort"] = reasoning_effort
+        raw_extensions["reasoning"] = {
+            "max_tokens": thinking.get("budget_tokens", 10_000)
+        }
     return NormalizedGenerationConfig(
         temperature=_optional_float(data.get("temperature")),
         top_p=_optional_float(data.get("top_p")),
         max_tokens=_optional_int(data.get("max_tokens")),
         stop=data.get("stop_sequences"),
-        raw_extensions=(
-            {"reasoning_effort": reasoning_effort} if reasoning_effort else {}
-        ),
+        raw_extensions=raw_extensions,
     )
 
 

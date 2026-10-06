@@ -20,7 +20,7 @@ Other client families are not covered by this compatibility check.
 |---|---|
 | `supported` | The parameter affects the request or response and is covered by tests. |
 | `accepted_ignored` | The parameter is accepted for SDK compatibility but is not sent upstream. |
-| `rejected` | The request has an unexecutable shape, for example a missing required `input` or an `extra_body` that is not an object. Optional client feature flags do not use this status. |
+| `rejected` | The request has an unexecutable shape, for example a missing required `input` or an `extra_body` that is not an object. Stateful requests and required tool selection are rejected when the selected backend cannot preserve them. |
 | `not_applicable` | The option relates to client-side transport configuration, not to a server-side request body parameter. |
 
 ## SDK transport options
@@ -75,7 +75,7 @@ Known unsupported optional client parameters are accepted and ignored if sent as
 top-level fields: for example `logprobs`, `audio`, `container`, or
 `mcp_servers`. `previous_response_id` is supported for OpenAI Responses in
 GigaChat v2 mode and is mapped to `storage.thread_id`; in Responses v1 mode it is
-accepted and ignored.
+rejected when non-null (`store=true` is also rejected in v1).
 If the same key is explicitly placed inside a literal `extra_body`, gpt2giga
 passes it to `additional_fields`, and the GigaChat upstream determines the final
 support.
@@ -115,8 +115,7 @@ accepted and ignored where they are classified.
 Unsupported optional OpenAI parameters are accepted and ignored. Examples:
 `logprobs`, `top_logprobs`, `logit_bias`, audio output, `prediction`,
 `web_search_options`, built-in tools outside GigaChat v2 mode, `n > 1`,
-stored completions requests, `conversation`, and `previous_response_id` in
-Responses v1 mode. `/chat/completions` v1
+stored completions requests and `conversation`. `/chat/completions` v1
 remains a supported compatibility route, but new tool/built-in-tool
 capabilities evolve for GigaChat `v2/chat/completions`.
 
@@ -131,7 +130,7 @@ all matching tool results. The legacy v1 contract remains unchanged.
 
 | Endpoint | Supported |
 |---|---|
-| Messages | `model`, `messages`, `system`, `max_tokens`, `stream`, `temperature`, `top_p`, `stop_sequences`, local function `tools`, Anthropic provider tools in GigaChat v2 mode (`web_search*`, `web_fetch*` as `url_content_extraction`, `code_execution*` as `code_interpreter`), `tool_choice` values `auto`/`none`/forced `tool`, `thinking`, `output_config.format`, `output_format`, `extra_body` passthrough |
+| Messages | `model`, `messages`, `system`, `max_tokens`, `stream`, `temperature`, `top_p`, `stop_sequences`, local function `tools`, Anthropic provider tools in GigaChat v2 mode (`web_search*`, `web_fetch*` as `url_content_extraction`, `code_execution*` as `code_interpreter`), `tool_choice` values `auto`/`none`/forced `tool`/v2 `any`, `thinking`, `output_config.format`, `output_format`, `extra_body` passthrough |
 | Count Tokens | `model`, `messages`, `system`, `tools`, structured-output schema text, compatible message content validation |
 | Models | `GET /models`, `GET /models/{model_id}`, when the request contains Anthropic SDK headers, for example `anthropic-version` |
 

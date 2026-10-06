@@ -268,6 +268,13 @@ def extract_chat_completion_provider_metadata(response_or_chunk: Any) -> dict[st
             separators=(",", ":"),
         )
 
+    for key in ("additional_data", "error_details"):
+        value = data.get(key)
+        if isinstance(value, (dict, list)):
+            metadata[f"gigachat_{key}"] = json.dumps(
+                value, ensure_ascii=False, separators=(",", ":")
+            )
+
     return metadata
 
 

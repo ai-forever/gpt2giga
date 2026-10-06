@@ -180,9 +180,13 @@ async def messages(request: Request):
 
     if mode == "v2":
         async with gigachat_request_options(giga_client, request_options):
-            chat_request = await state.request_transformer.prepare_chat_completion(
-                openai_data, giga_client
-            )
+            try:
+                chat_request = await state.request_transformer.prepare_chat_completion(
+                    openai_data, giga_client
+                )
+            except ClientCompatibilityError as exc:
+                exc.provider = "anthropic"
+                raise
         resolution = resolve_upstream_model(
             chat_request,
             state.config,
@@ -248,9 +252,13 @@ async def messages(request: Request):
         )
 
     async with gigachat_request_options(giga_client, request_options):
-        chat_messages = await state.request_transformer.prepare_chat(
-            openai_data, giga_client
-        )
+        try:
+            chat_messages = await state.request_transformer.prepare_chat(
+                openai_data, giga_client
+            )
+        except ClientCompatibilityError as exc:
+            exc.provider = "anthropic"
+            raise
     resolution = resolve_upstream_model(
         chat_messages,
         state.config,

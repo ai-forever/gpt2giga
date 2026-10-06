@@ -281,7 +281,7 @@ def test_transform_responses_parameters_accepts_builtin_tools_in_v2_mode():
         {"image_generate": {"size": "1024x1024"}},
     ]
     assert out["_gpt2giga_tool_config"] == {
-        "mode": "tool",
+        "mode": "forced",
         "tool_name": "web_search",
     }
 
@@ -767,7 +767,28 @@ def test_transform_chat_parameters_applies_tool_choice_policy():
     assert "functions" not in none
 
 
-def test_transform_responses_parameters_ignores_stateful_params_in_v1_mode():
+@pytest.mark.parametrize(
+    ("param", "value"),
+    [("previous_response_id", "resp_1"), ("store", True)],
+)
+def test_transform_responses_parameters_rejects_stateful_params_in_v1_mode(
+    param, value
+):
+    cfg = ProxyConfig()
+    rt = RequestTransformer(cfg, logger=logger)
+
+    with pytest.raises(ClientCompatibilityError) as exc_info:
+        rt.transform_responses_parameters(
+            {"model": "gpt-x", "input": "hello", param: value}
+        )
+
+    assert exc_info.value.param == param
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.code == "unsupported_parameter"
+
+
+@pytest.mark.parametrize("store", [False, None])
+def test_transform_responses_parameters_allows_stateless_params_in_v1_mode(store):
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger=logger)
 
@@ -775,11 +796,13 @@ def test_transform_responses_parameters_ignores_stateful_params_in_v1_mode():
         {
             "model": "gpt-x",
             "input": "hello",
-            "previous_response_id": "resp_1",
+            "previous_response_id": None,
+            "store": store,
         }
     )
 
     assert "previous_response_id" not in out
+    assert "store" not in out
 
 
 def test_transform_responses_parameters_allows_stateful_params_in_v2_mode():

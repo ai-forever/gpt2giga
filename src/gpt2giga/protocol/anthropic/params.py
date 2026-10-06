@@ -138,7 +138,7 @@ def _sanitize_tool_choice(data: dict[str, Any]) -> None:
         data.pop("tool_choice", None)
         return
     tool_choice_type = tool_choice.get("type")
-    if tool_choice_type in {"auto", "none"}:
+    if tool_choice_type in {"auto", "none", "any"}:
         return
     if tool_choice_type == "tool":
         if _is_non_empty_string(tool_choice.get("name")):

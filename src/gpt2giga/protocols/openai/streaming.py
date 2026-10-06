@@ -6,6 +6,8 @@ import json
 from datetime import timezone
 from typing import Any
 
+from gpt2giga.protocols.normalized.usage import cached_input_tokens
+
 from gpt2giga.protocols.normalized import (
     NormalizedMessage,
     NormalizedStreamEvent,
@@ -112,7 +114,7 @@ def _base_chunk(
         "model": event.model or requested_model,
         "choices": [],
         "usage": None,
-        "system_fingerprint": f"fp_{event.id or response_id}",
+        "system_fingerprint": None,
     }
 
 
@@ -170,6 +172,6 @@ def _usage(usage: NormalizedUsage | None) -> dict[str, Any] | None:
         "prompt_tokens": usage.input_tokens,
         "completion_tokens": usage.output_tokens,
         "total_tokens": usage.total_tokens,
-        "prompt_tokens_details": {"cached_tokens": 0},
+        "prompt_tokens_details": {"cached_tokens": cached_input_tokens(usage)},
         "completion_tokens_details": {"reasoning_tokens": 0},
     }

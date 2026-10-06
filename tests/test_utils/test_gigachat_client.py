@@ -2,6 +2,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
+import httpx
 from gigachat.settings import BASE_URL
 
 from gpt2giga.providers.gigachat import client as client_module
@@ -10,6 +11,43 @@ from gpt2giga.providers.gigachat.client import (
     build_gigachat_client,
     create_gigachat_client,
 )
+from gpt2giga.models.config import GigaChatCLI
+from gpt2giga.providers.gigachat.request_options import (
+    GigaRequestOptions,
+    gigachat_request_options,
+)
+
+
+async def test_configured_session_header_and_request_override(monkeypatch):
+    monkeypatch.setenv("GIGACHAT_SESSION_ID", "configured-session")
+    for key in ("CREDENTIALS", "USER", "PASSWORD"):
+        monkeypatch.delenv(f"GIGACHAT_{key}", raising=False)
+    settings = GigaChatCLI(
+        base_url="https://gigachat.test/v1", model="test-model", access_token="test"
+    )
+    seen = []
+
+    def handle(request):
+        seen.append(request.headers.get("X-Session-ID"))
+        return httpx.Response(
+            200, json={"messages": [{"role": "assistant", "content": "ok"}]}
+        )
+
+    original_client = httpx.AsyncClient
+
+    def mocked_client(**kwargs):
+        return original_client(**kwargs, transport=httpx.MockTransport(handle))
+
+    monkeypatch.setattr(httpx, "AsyncClient", mocked_client)
+    async with build_gigachat_client(settings) as client:
+        await client.achat.create("hello")
+        options = GigaRequestOptions(
+            headers={"x-session-id": "request-session"}, query=(), body={}
+        )
+        async with gigachat_request_options(client, options):
+            await client.achat.create("hello")
+        await client.achat.create("hello")
+    assert seen == ["configured-session", "request-session", "configured-session"]
 
 
 class FakeSettings:

@@ -255,3 +255,73 @@ goes to the GigaChat v2 contract.
 `/chat/completions` remains a compatibility route and follows the env. The new
 built-in-tool capabilities evolve mostly around GigaChat v2 mode, so clients that
 need them can point to `http://localhost:8090/v2`.
+
+## SDK contract alignment in 0.3.1a1
+
+The bundled `gigachat==0.2.4a1` wheel is built from SDK commit `6e9bb50`.
+The lock file records its SHA-256. The gateway and SDK are tested together
+with synthetic HTTP responses; these checks do not establish live model quality,
+feature permissions, cache savings, or deterministic generation.
+
+| Contract | Gateway behavior |
+|---|---|
+| v2 generation options | Limits and sampling options are serialized under `model_options`; reasoning token budgets are retained. Mapped public parameters take precedence over extra options; other nested options are preserved. |
+| Required function selection | OpenAI `tool_choice="required"` and Anthropic `tool_choice.type="any"` use v2 `tool_config.mode="any"`. v1 rejects this requirement instead of silently using `auto`. Forced choices use `mode="forced"`. |
+| Parallel function results | Each result retains its call `id`, including repeated function names. `tools_state_id` remains a separate conversation-state field. |
+| Advanced options | `extra_body` / SDK `additional_fields` retain supported provider options without adding specialized gateway classes for internal services. |
+| Cached tokens | OpenAI prompt/input totals include cached tokens, with the cache count also exposed in token details. Anthropic exposes uncached `input_tokens` and separate `cache_read_input_tokens`. |
+| Responses settings | Omitted `temperature` and `top_p` are reported as `null`, including streaming responses; an omitted `store` is reported as `false`. |
+| Responses history | Native v2 maps `previous_response_id` to `storage.thread_id`, omits `model` on continuation, and sends only the new input. v1 rejects `previous_response_id` and `store=true`; send full history or use `/v2/responses`. |
+| Assistant/thread selectors | Native `assistant_id` and stateful storage select the upstream without an injected default model, including v1. |
+| Session header | `GIGACHAT_SESSION_ID` supplies the SDK default; request `X-Session-ID` overrides it without leaking into later requests. |
+| CLI env file | Relative `--env-path` resolves from the working directory. A missing explicit file stops startup. |
+
+Stored Responses retrieval (`GET /responses/{id}`) remains unimplemented; v2
+continuation is backed by GigaChat threads, not a full OpenAI Responses store.
+Clients must retain the response identifier. JSON Schemas are forwarded intact;
+the gateway cannot repair model-generated arguments or v1 `anyOf` behavior.
+
+Some differences are intentional: plain-text tool results are wrapped as
+`{"result": "..."}` for GigaChat, and Messages accepts omitted `max_tokens`
+(the Anthropic SDK requires it). Send an explicit token limit for portability.
+DEV wildcard CORS remains a development configuration; authentication and CORS
+controls are described in [Configuration](configuration.md). The dependency
+constraint remains `openai>=2.50,<3`.
+
+### Examples for the updated contracts
+
+Run these from the repository root after starting a local proxy:
+
+```bash
+uv run python examples/openai/chat_completions/basic/session_cache_usage.py
+uv run python examples/openai/responses/tools/required_parallel_stream.py
+uv run python examples/anthropic/messages/tools/required_tool.py
+uv run python examples/openai/chat_completions/reasoning/chat_reasoning.py
+uv run python examples/openai/responses/basic/stateful.py
+```
+
+The [example index](https://github.com/ai-forever/gpt2giga/blob/main/examples/README.md)
+explains expected fields and prerequisites. The Responses example preserves each
+`call_id` and copies `metadata.gigachat_tool_state_id` into a separate `tools_state_id`
+on the history item. Enabling parallel calls does not guarantee their count.
+The examples execute tools using fixed local stub data.
+
+Additional options can be sent through the OpenAI SDK:
+
+```python
+response = client.chat.completions.create(
+    model="GigaChat-2-Max",
+    messages=[{"role": "user", "content": "Give a short solution."}],
+    max_completion_tokens=1024,
+    reasoning_effort="low",
+    extra_body={
+        "reasoning": {"max_tokens": 256},
+        "model_options": {"repetition_penalty": 1.05},
+    },
+)
+```
+
+Here `client` uses `/v2`. To select a configured assistant instead of a model,
+pass `extra_body={"assistant_id": "<your assistant ID>"}`: the gateway removes
+`model` from the upstream request. This does not create an assistant; it requires
+an existing identifier available to your account.

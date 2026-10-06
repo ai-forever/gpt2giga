@@ -2,6 +2,7 @@ import asyncio
 import json
 
 import httpx
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from gigachat.models.chat_completions import ChatCompletionChunk, ChatCompletionResponse
@@ -10,7 +11,7 @@ from loguru import logger
 from gpt2giga.common.signed_model_override import _model_override_signature
 from gpt2giga.common.model_concurrency import ModelConcurrencyLimiter
 from gpt2giga.models.config import ProxyConfig, ProxySettings
-from gpt2giga.protocol import ResponseProcessor
+from gpt2giga.protocol import RequestTransformer, ResponseProcessor
 from gpt2giga.routers.anthropic import router
 
 
@@ -291,6 +292,32 @@ def test_anthropic_messages_v1_mode_uses_root_achat():
     assert not app.state.request_transformer.chat_completion_calls
     assert app.state.gigachat_client.achat.chat_calls == [{"contract": "anthropic-v1"}]
     assert app.state.gigachat_client.achat.chat_completion_calls == []
+
+
+@pytest.mark.parametrize("stream", [False, True])
+def test_anthropic_v1_any_tool_choice_returns_anthropic_error(stream):
+    app = make_app("v1")
+    app.state.request_transformer = RequestTransformer(app.state.config, logger=logger)
+    response = TestClient(app).post(
+        "/messages",
+        json={
+            "model": "claude-x",
+            "max_tokens": 16,
+            "stream": stream,
+            "messages": [{"role": "user", "content": "hi"}],
+            "tools": [{"name": "lookup", "input_schema": {"type": "object"}}],
+            "tool_choice": {"type": "any"},
+        },
+    )
+
+    assert response.status_code == 400
+    body = response.json()
+    assert body["type"] == "error"
+    assert body["error"]["type"] == "invalid_request_error"
+    assert "v2" in body["error"]["message"]
+    assert not app.state.gigachat_client.achat.chat_calls
+    assert not app.state.gigachat_client.achat.chat_completion_calls
+    assert not app.state.gigachat_client.achat.stream_calls
 
 
 def test_anthropic_messages_v2_mode_uses_chat_completion_create():

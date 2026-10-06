@@ -315,7 +315,8 @@ class GigaChatProviderAdapter:
                         if await _is_disconnected(is_disconnected):
                             _log_disconnect(logger, context)
                             break
-                        yield mapper.chunk_to_event(chunk)
+                        for event in mapper.chunk_to_events(chunk):
+                            yield event
 
             for event in mapper.flush_reasoning_events():
                 yield event
@@ -387,9 +388,10 @@ class GigaChatProviderAdapter:
                             chunk,
                             default_model=request.model or resolution.model or "",
                         )
-                        yield mapper.chunk_to_event(
+                        for event in mapper.chunk_to_events(
                             SimpleNamespace(model_dump=lambda: adapted)
-                        )
+                        ):
+                            yield event
 
             for event in mapper.flush_reasoning_events():
                 yield event
@@ -476,6 +478,9 @@ def normalized_chat_to_openai_payload(
     reasoning_effort = generation.raw_extensions.get("reasoning_effort")
     if request.protocol == "anthropic" and isinstance(reasoning_effort, str):
         payload["reasoning_effort"] = reasoning_effort
+        reasoning = generation.raw_extensions.get("reasoning")
+        if isinstance(reasoning, Mapping):
+            payload["reasoning"] = dict(reasoning)
 
     if request.protocol == "openai":
         payload.update(request.raw_extensions)
@@ -720,9 +725,13 @@ def _function_call_to_normalized(
     arguments = function_call.get("arguments", {})
     return NormalizedToolCall(
         id=(
-            str(message.get("id"))
-            if isinstance(message.get("id"), str) and message.get("id")
-            else _backend_state_id_from_message(message)
+            function_call.get("id")
+            or function_call.get("id_")
+            or (
+                str(message.get("id"))
+                if isinstance(message.get("id"), str) and message.get("id")
+                else _backend_state_id_from_message(message)
+            )
         ),
         type="function",
         name=map_tool_name_from_gigachat(str(function_call.get("name", ""))),
@@ -736,9 +745,15 @@ def _usage_to_normalized(value: Any) -> NormalizedUsage | None:
     input_tokens = value.get("prompt_tokens", value.get("input_tokens"))
     output_tokens = value.get("completion_tokens", value.get("output_tokens"))
     return NormalizedUsage(
-        input_tokens=input_tokens,
+        input_tokens=(input_tokens + (value.get("precached_prompt_tokens") or 0))
+        if input_tokens is not None
+        else None,
         output_tokens=output_tokens,
-        total_tokens=value.get("total_tokens"),
+        total_tokens=(
+            value["total_tokens"] + (value.get("precached_prompt_tokens") or 0)
+        )
+        if value.get("total_tokens") is not None
+        else None,
         raw_extensions={
             key: item
             for key, item in value.items()
@@ -756,6 +771,15 @@ def _usage_to_normalized(value: Any) -> NormalizedUsage | None:
 
 def _response_metadata(data: Mapping[str, Any]) -> dict[str, Any]:
     metadata: dict[str, Any] = {}
+    provider_metadata = data.get("_gpt2giga_provider_metadata")
+    if isinstance(provider_metadata, Mapping):
+        metadata.update(provider_metadata)
+    for key in ("additional_data", "error_details"):
+        value = data.get(key)
+        if isinstance(value, (dict, list)):
+            metadata[f"gigachat_{key}"] = json.dumps(
+                value, ensure_ascii=False, separators=(",", ":")
+            )
     headers = data.get("x_headers")
     if isinstance(headers, Mapping):
         for key, value in headers.items():
@@ -781,7 +805,7 @@ def _backend_state_id_from_message(message: Mapping[str, Any]) -> str | None:
         state_id = value.strip()
         if not state_id:
             continue
-        for prefix in ("fc_", "call_"):
+        for prefix in ("fc_",):
             if state_id.startswith(prefix) and len(state_id) > len(prefix):
                 return state_id.removeprefix(prefix)
         return state_id

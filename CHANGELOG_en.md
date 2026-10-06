@@ -8,10 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.3.1a1] - 2026-08-06
 
 ### Added
+- **Contract examples**: add session/cache usage, required parallel Responses SSE, and Anthropic any; update reasoning budgets and stateful Responses examples.
 - **Buffered Chat Completions streaming**: an OpenAI-compatible v3 profile can explicitly set `upstream_stream_mode: buffered`; the gateway sends `stream: false` upstream and synthesizes a delayed Responses, Anthropic Messages, or Gemini stream with text/tool-call events, a terminal event, and usage. Strict SSE remains the default.
 - **Reasoning through the Chat Completions bridge**: the reviewed `reasoning_controls_and_summaries` capability forwards Responses effort as `reasoning_effort`, projects `reasoning_content` into a Responses reasoning summary for SSE and buffered mode, and restores it on the next assistant tool-call message.
 
 ### Fixed
+- **SDK contract alignment**: refresh the bundled GigaChat wheel from SDK commit `6e9bb50`; preserve reasoning budgets, nested generation settings and distinct function/result IDs, use valid v2 forced/any modes, and reject required tools or stored Responses when the v1 route cannot execute them.
+- **Usage and response fidelity**: include cached tokens in OpenAI input totals, expose Anthropic cache reads, keep SDK fields out of public message objects, and report unknown Responses sampling settings and model fingerprints as null.
+- **Session and CLI settings**: support the SDK session-ID default with per-request overrides; resolve relative `--env-path` from the working directory and fail for a missing explicit file.
 - **Parallel function calls in GigaChat v2**: OpenAI Chat Completions, Anthropic Messages, and Gemini `generateContent` now map requests for two local functions to `model_options.parallel_tool_calls`, preserve every returned `function_call` and `id` in buffered responses, and replay both results on the next turn. Support is limited to `GigaChat-2-Max` on v2; the refreshed vendored `gigachat==0.2.4a1` wheel provides the required SDK contract, while legacy v1 remains unchanged.
 - **Tool loops with incompatible chat templates**: when the same OpenAI-compatible upstream returns a confirmed 5xx `chat_template_application_failed` for tool history, the gateway retries once before the first event with reasoning, function calls, and tool results represented as explicit text. Normal requests, other failures, and the current tool schema remain unchanged; successful fallback is reported in metadata.
 - **Native function-calling schemas**: OpenAI, Responses, Anthropic, and Gemini no longer pass function JSON Schemas through GigaChat-specific workaround transformations. Schemas using `$defs`/`$ref`, composition, union types, mixed `enum` values, boolean subschemas, and extension keywords are forwarded losslessly to GigaChat v1 and v2 through `gigachat>=0.2.4a1`.
