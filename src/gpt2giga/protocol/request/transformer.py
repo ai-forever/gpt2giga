@@ -179,8 +179,16 @@ class RequestTransformer:
                     ) or self._extract_tool_call_id(tool_call)
                     if tool_call_id:
                         tool_state_by_call_id[tool_call_id] = (
-                            self._extract_backend_state_id(message)
+                            self._extract_backend_state_id(tool_call)
+                            or self._extract_backend_state_id(message)
                             or self._normalize_backend_state_id(tool_call_id)
+                        )
+                    explicit_state_id = self._extract_backend_state_id(tool_call)
+                    if explicit_state_id and not self._extract_backend_state_id(
+                        message
+                    ):
+                        self._set_backend_state_id(
+                            message, explicit_state_id, preserve=True
                         )
                     self._normalize_message_function_call(function_call)
                     self._track_pending_tool_call(

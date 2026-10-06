@@ -399,10 +399,11 @@ def test_adapt_chat_completion_function_call_to_chat_shape():
     assert adapted["choices"][0]["finish_reason"] == "function_call"
     assert message["content"] is None
     assert message["function_call"] == {
+        "id": "msg_1",
         "name": "__gpt2giga_user_search_web",
         "arguments": {"query": "cats"},
     }
-    assert message["functions_state_id"] == "msg_1"
+    assert "functions_state_id" not in message
     assert adapted["usage"]["total_tokens"] == 1
 
 
@@ -1002,6 +1003,7 @@ def test_adapt_chat_completion_openai_style_final_chunk_keeps_stop_and_usage():
     assert adapted["choices"][0]["delta"] == {
         "content": "",
         "role": "assistant",
+        "tools_state_id": "019ebe32-089b-7bee-b7a2-0d924c288064",
     }
     assert adapted["choices"][0]["finish_reason"] == "stop"
     assert adapted["usage"] == {
@@ -1044,6 +1046,7 @@ def test_adapt_chat_completion_named_done_event_keeps_stop_usage_and_state():
     assert adapted["choices"][0]["delta"] == {
         "content": "",
         "role": "assistant",
+        "tools_state_id": "019ec0e2-2bc1-7cf4-86fb-0280fd4c7cb9",
     }
     assert adapted["choices"][0]["finish_reason"] == "stop"
     assert adapted["usage"] == {

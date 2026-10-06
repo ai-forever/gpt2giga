@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Reasoning through the Chat Completions bridge**: the reviewed `reasoning_controls_and_summaries` capability forwards Responses effort as `reasoning_effort`, projects `reasoning_content` into a Responses reasoning summary for SSE and buffered mode, and restores it on the next assistant tool-call message.
 
 ### Fixed
+- **Tool-call continuation**: preserve opaque GigaChat `tools_state_id` separately from each call ID in OpenAI Chat Completions, Responses, and Anthropic tool history, including SDK streaming accumulation and out-of-order parallel results.
+- **Responses parallel setting**: report the effective GigaChat `parallel_tool_calls` value in JSON and SSE, with `false` as the provider default and nested request overrides retained.
+- **Prerelease installation docs**: distinguish published releases from the current checkout and document installing the bundled SDK wheel alongside the gateway.
 - **SDK contract alignment**: refresh the bundled GigaChat wheel from SDK commit `6e9bb50`; preserve reasoning budgets, nested generation settings and distinct function/result IDs, use valid v2 forced/any modes, and reject required tools or stored Responses when the v1 route cannot execute them.
 - **Usage and response fidelity**: include cached tokens in OpenAI input totals, expose Anthropic cache reads, keep SDK fields out of public message objects, and report unknown Responses sampling settings and model fingerprints as null.
 - **Session and CLI settings**: support the SDK session-ID default with per-request overrides; resolve relative `--env-path` from the working directory and fail for a missing explicit file.

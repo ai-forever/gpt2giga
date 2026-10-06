@@ -162,6 +162,75 @@ def make_app(gigachat_api_mode: str):
 
 @pytest.mark.parametrize("stream", [False, True])
 @pytest.mark.parametrize(
+    "options",
+    [
+        {},
+        {"parallel_tool_calls": True},
+        {"parallel_tool_calls": False},
+        {"parallel_tool_calls": None},
+        {"parallel_tool_calls": "true"},
+        {"model_options": {"parallel_tool_calls": True}},
+        {"extra_body": {"parallel_tool_calls": True}},
+        {"extra_body": {"model_options": {"parallel_tool_calls": True}}},
+        {"additional_fields": {"model_options": {"parallel_tool_calls": True}}},
+        {
+            "parallel_tool_calls": False,
+            "additional_fields": {"model_options": {"parallel_tool_calls": True}},
+        },
+        {
+            "extra_body": {"model_options": {"parallel_tool_calls": True}},
+            "additional_fields": {"model_options": {"parallel_tool_calls": False}},
+        },
+    ],
+)
+def test_responses_v2_parallel_tool_calls_echo_matches_prepared_request(
+    stream, options
+):
+    app = make_app("v2")
+    app.state.request_transformer = RequestTransformer(app.state.config, logger=logger)
+
+    response = TestClient(app).post(
+        "/responses",
+        json={"model": "GigaChat-2-Max", "input": "hello", "stream": stream, **options},
+    )
+
+    assert response.status_code == 200
+    calls = (
+        app.state.gigachat_client.achat.stream_calls
+        if stream
+        else app.state.gigachat_client.achat.chat_completion_calls
+    )
+    upstream = calls[0].model_dump(by_alias=True, exclude_none=True)
+    expected = (upstream.get("model_options") or {}).get("parallel_tool_calls", False)
+    if stream:
+        events = [
+            json.loads(line.removeprefix("data: "))
+            for line in response.text.splitlines()
+            if line.startswith("data: ")
+        ]
+        assert any(event["type"] == "response.completed" for event in events)
+        responses = [event["response"] for event in events if "response" in event]
+    else:
+        responses = [response.json()]
+    assert responses
+    assert all(item["parallel_tool_calls"] is expected for item in responses)
+
+
+def test_responses_v1_echo_does_not_enable_ignored_parallel_tool_calls():
+    app = make_app("v1")
+    app.state.request_transformer = RequestTransformer(app.state.config, logger=logger)
+
+    response = TestClient(app).post(
+        "/responses",
+        json={"model": "GigaChat-2-Max", "input": "hello", "parallel_tool_calls": True},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["parallel_tool_calls"] is False
+
+
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize(
     ("param", "value"),
     [("previous_response_id", "resp_1"), ("store", True)],
 )

@@ -105,12 +105,16 @@ def _content_text(value: str | list[NormalizedContentPart] | None) -> str:
 
 
 def _tool_call_to_anthropic(call: NormalizedToolCall) -> dict[str, Any]:
-    return {
+    payload = {
         "type": "tool_use",
         "id": call.id or f"toolu_{uuid.uuid4().hex[:24]}",
         "name": map_tool_name_from_gigachat(call.name or ""),
         "input": _tool_arguments(call.arguments),
     }
+    state_id = call.raw_extensions.get("tools_state_id")
+    if isinstance(state_id, str) and state_id:
+        payload["tools_state_id"] = state_id
+    return payload
 
 
 def _tool_arguments(value: Any) -> dict[str, Any]:

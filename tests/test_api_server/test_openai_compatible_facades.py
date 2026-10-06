@@ -1005,6 +1005,7 @@ def test_codex_runtime_envelope_reaches_chat_and_restores_namespace(
             },
         )
         assert response.status_code == 200, response.text
+        assert response.json()["parallel_tool_calls"] is False
         first_output = response.json()["output"]
         follow_up = client.post(
             "/v1/responses",

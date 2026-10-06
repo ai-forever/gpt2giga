@@ -271,7 +271,16 @@ def _normalize_function_call(
 ) -> NormalizedMessage:
     _reject_unknown_fields(
         item,
-        {"arguments", "call_id", "id", "name", "namespace", "status", "type"},
+        {
+            "arguments",
+            "call_id",
+            "id",
+            "name",
+            "namespace",
+            "status",
+            "tools_state_id",
+            "type",
+        },
         path=path,
     )
     _validate_replayed_output_item(item, path=path)
@@ -295,6 +304,7 @@ def _normalize_function_call(
                 type="function",
                 name=name,
                 arguments=arguments,
+                raw_extensions=_tool_state_extension(item, path=path),
             )
         ],
     )
@@ -307,7 +317,7 @@ def _normalize_function_output(
 ) -> NormalizedMessage:
     _reject_unknown_fields(
         item,
-        {"call_id", "id", "output", "status", "type"},
+        {"call_id", "id", "output", "status", "tools_state_id", "type"},
         path=path,
     )
     _validate_replayed_output_item(item, path=path)
@@ -319,7 +329,15 @@ def _normalize_function_output(
         role="tool",
         content=output,
         tool_call_id=call_id,
+        raw_extensions=_tool_state_extension(item, path=path),
     )
+
+
+def _tool_state_extension(item: Mapping[str, Any], *, path: str) -> dict[str, str]:
+    state_id = item.get("tools_state_id")
+    if state_id is None:
+        return {}
+    return {"tools_state_id": _required_string(state_id, f"{path}.tools_state_id")}
 
 
 def _validate_replayed_output_item(

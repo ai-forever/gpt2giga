@@ -36,37 +36,60 @@ GigaChat не является drop-in заменой OpenAI или Anthropic AP
 
 ## Быстрый Старт
 
-Создайте `.env` из шаблона и заполните GigaChat credentials:
+Текущий checkout содержит prerelease gateway и требует GigaChat SDK
+`>=0.2.4a1,<0.3.0`. Пока эта версия SDK не опубликована в PyPI, запуск из
+репозитория через `uv` и сборка Docker используют включённый
+`gigachat-0.2.4a1-py3-none-any.whl`.
+
+Из корня репозитория создайте `.env` из шаблона и заполните GigaChat credentials:
 
 ```sh
 cp .env.example .env
 ```
 
-Запуск через Docker Compose:
+Соберите и запустите текущий checkout через Docker Compose:
 
 ```sh
-docker compose --env-file .env -f deploy/base.yaml --profile DEV up -d
+docker compose --env-file .env -f deploy/base.yaml --profile DEV up -d --build --pull never
 ```
 
-Или локальная установка gateway:
+Или запустите его локально:
+
+```sh
+uv sync --all-extras --dev
+uv run gpt2giga
+```
+
+Для установки этого checkout через pip в существующее окружение укажите SDK
+wheel и gateway вместе:
+
+```sh
+python -m pip install ./gigachat-0.2.4a1-py3-none-any.whl .
+```
+
+Установка из индекса выбирает опубликованный стабильный релиз, который может
+ещё не включать возможности текущего checkout:
 
 ```sh
 uv tool install gpt2giga
 gpt2giga --help
 ```
 
-Для установки в существующее окружение:
+Для установки опубликованного релиза в существующее окружение:
 
 ```sh
 python -m pip install gpt2giga
 ```
 
 Поддерживается Python 3.10–3.14. Для Postgres, OpenSearch или Phoenix добавьте
-соответствующую extra-зависимость, например:
+соответствующую extra-зависимость. Например, для опубликованного релиза:
 
 ```sh
 python -m pip install "gpt2giga[postgres]"
 ```
+
+При установке из текущего checkout замените `.` на `".[postgres]"` в команде
+с локальным SDK wheel.
 
 Минимальный OpenAI SDK вызов:
 
@@ -171,7 +194,8 @@ v1 contract, `/v2` принудительно выбирает GigaChat v2 contr
 
 ## Деплой
 
-Docker Compose manifests лежат в [deploy/](https://github.com/ai-forever/gpt2giga/tree/main/deploy):
+Docker Compose manifests лежат в [deploy/](https://github.com/ai-forever/gpt2giga/tree/main/deploy).
+Для запуска опубликованного образа `latest`:
 
 ```sh
 docker compose --env-file .env -f deploy/base.yaml --profile PROD up -d

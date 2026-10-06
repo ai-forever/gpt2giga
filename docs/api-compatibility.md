@@ -270,7 +270,7 @@ feature permissions, cache savings, or deterministic generation.
 | Parallel function results | Each result retains its call `id`, including repeated function names. `tools_state_id` remains a separate conversation-state field. |
 | Advanced options | `extra_body` / SDK `additional_fields` retain supported provider options without adding specialized gateway classes for internal services. |
 | Cached tokens | OpenAI prompt/input totals include cached tokens, with the cache count also exposed in token details. Anthropic exposes uncached `input_tokens` and separate `cache_read_input_tokens`. |
-| Responses settings | Omitted `temperature` and `top_p` are reported as `null`, including streaming responses; an omitted `store` is reported as `false`. |
+| Responses settings | Omitted `temperature` and `top_p` are reported as `null`, including streaming responses; an omitted `store` is reported as `false`. `parallel_tool_calls` reflects the effective GigaChat request, including nested overrides; its GigaChat default is `false`. |
 | Responses history | Native v2 maps `previous_response_id` to `storage.thread_id`, omits `model` on continuation, and sends only the new input. v1 rejects `previous_response_id` and `store=true`; send full history or use `/v2/responses`. |
 | Assistant/thread selectors | Native `assistant_id` and stateful storage select the upstream without an injected default model, including v1. |
 | Session header | `GIGACHAT_SESSION_ID` supplies the SDK default; request `X-Session-ID` overrides it without leaking into later requests. |
@@ -287,6 +287,22 @@ Some differences are intentional: plain-text tool results are wrapped as
 DEV wildcard CORS remains a development configuration; authentication and CORS
 controls are described in [Configuration](configuration.md). The dependency
 constraint remains `openai>=2.50,<3`.
+
+### Replaying tool calls
+
+GigaChat's conversation state is returned as the `tools_state_id` extension on
+each OpenAI Chat Completions `tool_calls[]` entry, Responses `function_call` item,
+and Anthropic `tool_use` block. Keep that extension when replaying the assistant
+message or output items, for example with the Python SDK's `model_dump()`.
+The gateway uses it for the assistant turn and matches tool results by their
+original call ID, including multiple calls with the same function name.
+
+Treat call IDs and state IDs as separate opaque strings. Do not strip their
+prefixes or replace `id` / `call_id` / `tool_use_id` with the state. SDK streaming
+accumulators receive each identity once; tool blocks may wait for a late state
+event before they are emitted. Clients that rebuild messages from a strict
+field allowlist must explicitly retain `tools_state_id`. Response-level
+`metadata.gigachat_tool_state_id` remains available for manual history builders.
 
 ### Examples for the updated contracts
 

@@ -111,6 +111,9 @@ def _build_anthropic_response(
                     "input": arguments,
                 }
             )
+            tools_state_id = _backend_tool_state_id(tool_call) or message_state_id
+            if tools_state_id:
+                content_blocks[-1]["tools_state_id"] = tools_state_id
         stop_reason = "tool_use"
     else:
         if text_content:

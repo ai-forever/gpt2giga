@@ -42,6 +42,7 @@ from gpt2giga.protocols.openai import (
     normalized_chat_response_to_responses,
 )
 from gpt2giga.providers.gigachat import GigaChatProviderAdapter
+from gpt2giga.providers.gigachat.model_options import parallel_tool_calls_enabled
 from gpt2giga.providers.gigachat.model_resolution import resolve_upstream_model
 from gpt2giga.routers.openai.helpers import request_attachment_ids
 from gpt2giga.sinks.observability.responses import (
@@ -128,7 +129,10 @@ class NativeGigaChatResponsesExecutor:
                 )
             response_id = extract_chat_completion_thread_id(response) or current_rquid
             result = state.response_processor.process_response_api(
-                data,
+                {
+                    **data,
+                    "parallel_tool_calls": parallel_tool_calls_enabled(chat_request),
+                },
                 SimpleNamespace(model_dump=lambda: adapted),
                 data["model"],
                 response_id,
@@ -165,7 +169,7 @@ class NativeGigaChatResponsesExecutor:
                 async with gigachat_request_options(giga_client, request_options):
                     response = await giga_client.achat(chat_messages)
             result = state.response_processor.process_response_api(
-                data,
+                {**data, "parallel_tool_calls": False},
                 response,
                 data["model"],
                 current_rquid,
@@ -331,6 +335,9 @@ class NormalizedBridgeResponsesExecutor:
                 else data["model"]
             ),
             response_id=response_id,
+            default_parallel_tool_calls=(
+                getattr(provider_adapter, "name", None) != "gigachat"
+            ),
         )
 
         async def emit_stream():

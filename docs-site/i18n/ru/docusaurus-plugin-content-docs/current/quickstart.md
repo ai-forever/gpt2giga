@@ -6,15 +6,15 @@ Anthropic и Gemini, и проверить каждый протокол пер�
 ## Требования
 
 - Python 3.10–3.14 для локального запуска.
-- GigaChat Python SDK не ниже 0.2.4a1 в поддерживаемой ветке 0.2.x;
-  он устанавливается вместе с gateway.
+- Текущему checkout нужен GigaChat Python SDK `>=0.2.4a1,<0.3.0`;
+  для установки из репозитория в него включён `gigachat-0.2.4a1-py3-none-any.whl`.
 - `uv` для локальной разработки.
 - Docker с плагином Compose для контейнерного запуска.
 - Учётные данные и scope GigaChat для нужного аккаунта.
 
 ## Настройка учётных данных
 
-Создайте локальный env-файл:
+Выполняйте команды из корня текущего checkout. Создайте локальный env-файл:
 
 ```sh
 cp .env.example .env
@@ -37,17 +37,21 @@ GIGACHAT_MODEL=GigaChat-2-Max
 
 ## Запуск через Docker Compose
 
-Профиль DEV:
+Соберите и запустите текущий checkout с профилем DEV:
 
 ```sh
-docker compose --env-file .env -f deploy/base.yaml --profile DEV up -d
+docker compose --env-file .env -f deploy/base.yaml --profile DEV up -d --build --pull never
 ```
 
 Профиль PROD:
 
 ```sh
-docker compose --env-file .env -f deploy/base.yaml --profile PROD up -d
+docker compose --env-file .env -f deploy/base.yaml --profile PROD up -d --build --pull never
 ```
+
+Сборка Docker устанавливает SDK wheel из репозитория. Без `--build --pull never`
+конфигурация Compose скачивает опубликованный образ `latest`, который может
+ещё не включать изменения текущего checkout.
 
 В `PROD` compose-файл по умолчанию привязывает сервис только к `127.0.0.1`. Для внешнего доступа поставьте nginx, Traefik, Caddy или другой обратный прокси.
 
@@ -59,22 +63,39 @@ curl http://localhost:8090/health
 
 ## Установка gateway
 
-Если нужен только HTTP API, совместимый с OpenAI, Anthropic и Gemini,
-установите gateway:
+Команда установки из индекса выбирает опубликованный стабильный релиз gateway:
 
 ```sh
 uv tool install gpt2giga
 gpt2giga --help
 ```
 
+Текущий checkout содержит prerelease-возможности, которых может ещё не быть в
+этом релизе. Пока требуемая версия GigaChat SDK не опубликована в PyPI,
+устанавливайте checkout с включённым SDK wheel по инструкции ниже. Установка
+только wheel или исходного дистрибутива gateway не предоставляет этот SDK wheel.
+
 ## Запуск из репозитория
 
-Установите gateway как editable-проект вместе с зависимостями разработки:
+Установите gateway как editable-проект вместе с зависимостями разработки.
+`uv` берёт локальный SDK wheel из настройки источников в репозитории:
 
 ```sh
 uv sync --all-extras --dev
 uv run gpt2giga
 ```
+
+Для обычной установки текущего checkout через pip передайте SDK wheel и проект
+gateway в одной команде. Например, в новом виртуальном окружении Linux или macOS:
+
+```sh
+python -m venv .venv
+.venv/bin/python -m pip install ./gigachat-0.2.4a1-py3-none-any.whl .
+.venv/bin/gpt2giga
+```
+
+Для дополнительных зависимостей замените `.` на `".[postgres]"`,
+`".[opensearch]"` или `".[phoenix]"` в команде pip.
 
 В `DEV` документация FastAPI доступна на `http://localhost:8090/docs`. В `PROD` она отключена.
 

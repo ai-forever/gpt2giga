@@ -211,6 +211,11 @@ def _convert_assistant_blocks(
             {
                 "id": tool_use.get("id", f"call_{uuid.uuid4()}"),
                 "type": "function",
+                **(
+                    {"tools_state_id": tool_use["tools_state_id"]}
+                    if tool_use.get("tools_state_id")
+                    else {}
+                ),
                 "function": {
                     "name": tool_use["name"],
                     "arguments": json.dumps(

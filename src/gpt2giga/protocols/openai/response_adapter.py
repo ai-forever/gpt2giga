@@ -130,6 +130,9 @@ def normalized_chat_response_to_responses(
     response_text = request_payload.get("text")
     if not isinstance(response_text, dict):
         response_text = {"format": {"type": "text"}}
+    parallel_tool_calls = request_payload.get("parallel_tool_calls")
+    if parallel_tool_calls is None:
+        parallel_tool_calls = response.provider != "gigachat"
     return {
         "id": f"resp_{response_id}",
         "object": "response",
@@ -141,7 +144,7 @@ def normalized_chat_response_to_responses(
         "max_output_tokens": request_payload.get("max_output_tokens"),
         "model": requested_model,
         "output": output,
-        "parallel_tool_calls": True,
+        "parallel_tool_calls": parallel_tool_calls,
         "previous_response_id": None,
         "reasoning": reasoning_config,
         "store": False,
@@ -196,7 +199,7 @@ def _tool_call_to_openai(
     tool_call: NormalizedToolCall,
 ) -> dict[str, Any]:
     call_id = tool_call.id or f"call_{index}"
-    return {
+    payload = {
         "index": index,
         "id": call_id,
         "type": tool_call.type,
@@ -205,6 +208,10 @@ def _tool_call_to_openai(
             "arguments": _tool_arguments_to_json(tool_call.arguments),
         },
     }
+    state_id = tool_call.raw_extensions.get("tools_state_id")
+    if isinstance(state_id, str) and state_id:
+        payload["tools_state_id"] = state_id
+    return payload
 
 
 def _tool_arguments_to_json(value: Any) -> str:
@@ -242,6 +249,9 @@ def _responses_tool_calls(
         }
         if namespace is not None:
             item["namespace"] = namespace
+        state_id = tool_call.raw_extensions.get("tools_state_id")
+        if isinstance(state_id, str) and state_id:
+            item["tools_state_id"] = state_id
         items.append(item)
     return items
 

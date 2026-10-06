@@ -25,12 +25,10 @@ def adapt_chat_completion_to_chat_shape(response: Any, *, default_model: str) ->
     if reasoning_text:
         message_payload["reasoning_content"] = reasoning_text
     if function_call:
+        function_call.setdefault("id", _functions_state_id(response_data, message))
         message_payload["function_call"] = function_call
-        message_payload["functions_state_id"] = _functions_state_id(
-            response_data,
-            message,
-            function_call=function_call,
-        )
+        if metadata.get("tools_state_id"):
+            message_payload["functions_state_id"] = metadata["tools_state_id"]
     elif function_calls:
         message_payload["tool_calls"] = _openai_tool_calls(
             function_calls,
@@ -80,17 +78,18 @@ def adapt_chat_completion_chunk_to_chat_chunk_shape(
     if reasoning_text:
         delta["reasoning_content"] = reasoning_text
     if function_call:
+        # State can arrive on a later chunk. It must not change a synthetic
+        # call identity while an SDK is accumulating argument fragments.
+        function_call.setdefault("id", "v2")
         delta["function_call"] = function_call
-        delta["functions_state_id"] = _functions_state_id(
-            chunk_data,
-            message,
-            function_call=function_call,
-        )
+        if metadata.get("tools_state_id"):
+            delta["functions_state_id"] = metadata["tools_state_id"]
     elif function_calls:
         delta["tool_calls"] = _openai_tool_calls(
             function_calls,
             response_data=chunk_data,
             message=message,
+            default_call_id="v2",
         )
 
     result = {
@@ -204,6 +203,11 @@ def extract_chat_completion_message_metadata(
                         files.append(normalized_file)
 
     metadata: dict[str, Any] = {}
+    tools_state_id = _extract_message_tool_state_id(
+        message
+    ) or _extract_message_tool_state_id(data)
+    if tools_state_id:
+        metadata["tools_state_id"] = tools_state_id
     if tool_executions:
         metadata["tool_executions"] = tool_executions
     if files:
@@ -582,8 +586,9 @@ def _openai_tool_calls(
     *,
     response_data: dict[str, Any],
     message: dict[str, Any],
+    default_call_id: Optional[str] = None,
 ) -> list[dict[str, Any]]:
-    base_state_id = _functions_state_id(response_data, message)
+    base_state_id = default_call_id or _functions_state_id(response_data, message)
     tool_calls = []
     for index, function_call in enumerate(function_calls):
         call_id = _normalize_metadata_string(function_call.get("id"))
@@ -594,6 +599,14 @@ def _openai_tool_calls(
                 "index": index,
                 "id": call_id,
                 "type": "function",
+                **(
+                    {"tools_state_id": state_id}
+                    if (
+                        state_id := _extract_message_tool_state_id(message)
+                        or _extract_message_tool_state_id(response_data)
+                    )
+                    else {}
+                ),
                 "function": {
                     "name": function_call["name"],
                     "arguments": function_call.get("arguments", {}),

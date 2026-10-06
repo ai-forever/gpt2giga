@@ -245,7 +245,7 @@ class ResponseProcessor:
             "max_output_tokens": request_data.get("max_output_tokens"),
             "model": gpt_model,
             "output": output,
-            "parallel_tool_calls": request_data.get("parallel_tool_calls", True),
+            "parallel_tool_calls": request_data.get("parallel_tool_calls") is True,
             "previous_response_id": request_data.get("previous_response_id"),
             "reasoning": cls._build_reasoning_config(request_data),
             "store": request_data.get("store", False),
@@ -303,7 +303,10 @@ class ResponseProcessor:
         )
         try:
             if is_tool_call:
-                return reasoning_items + [message["output"]]
+                output = message["output"]
+                return reasoning_items + (
+                    output if isinstance(output, list) else [output]
+                )
             builtin_items = ResponseProcessor._create_builtin_tool_items(
                 message,
                 response_id,
@@ -770,7 +773,7 @@ class ResponseProcessor:
             if message.get("tool_calls"):
                 self._process_tool_calls(message)
             elif message.get("function_call"):
-                self._process_function_call(message, is_tool_call)
+                self._process_function_call(message, is_tool_call or is_stream)
             self._extract_reasoning_from_message(
                 message,
                 is_stream=is_stream,
@@ -898,10 +901,9 @@ class ResponseProcessor:
     def _process_function_call(self, message: Dict, is_tool_call: bool):
         """Обрабатывает function call."""
         try:
-            arguments = json.dumps(
-                message["function_call"]["arguments"],
-                ensure_ascii=False,
-            )
+            arguments = message["function_call"]["arguments"]
+            if not isinstance(arguments, str):
+                arguments = json.dumps(arguments, ensure_ascii=False)
             tool_name = map_tool_name_from_gigachat(message["function_call"]["name"])
             tool_call_id = self._normalize_metadata_string(
                 message["function_call"].get("id")
@@ -911,6 +913,7 @@ class ResponseProcessor:
                 "name": tool_name,
                 "arguments": arguments,
             }
+            state_id = self._raw_backend_state_id_from_message(message)
             if is_tool_call:
                 message["tool_calls"] = [
                     {
@@ -918,6 +921,7 @@ class ResponseProcessor:
                         "id": tool_call_id or f"call_{uuid.uuid4()}",
                         "type": "function",
                         "function": function_call,
+                        **({"tools_state_id": state_id} if state_id else {}),
                     }
                 ]
                 message.pop("function_call", None)
@@ -944,6 +948,9 @@ class ResponseProcessor:
             if not isinstance(arguments, str):
                 arguments = json.dumps(arguments, ensure_ascii=False)
             tool_call_id = self._normalize_metadata_string(tool_call.get("id"))
+            state_id = self._raw_backend_state_id_from_message(
+                tool_call
+            ) or self._raw_backend_state_id_from_message(message)
             if not tool_call_id and index == 0:
                 tool_call_id = message_state_id
             normalized_tool_calls.append(
@@ -951,6 +958,7 @@ class ResponseProcessor:
                     "index": tool_call.get("index", index),
                     "id": tool_call_id or f"call_{uuid.uuid4()}",
                     "type": "function",
+                    **({"tools_state_id": state_id} if state_id else {}),
                     "function": {
                         "name": map_tool_name_from_gigachat(name),
                         "arguments": arguments,
@@ -1012,7 +1020,28 @@ class ResponseProcessor:
                 finish_reason=choice.get("finish_reason"),
             )
 
-            if message.get("role") == "assistant" and message.get("function_call"):
+            if message.get("tool_calls"):
+                outputs = []
+                for tool_call in message["tool_calls"]:
+                    if not isinstance(tool_call, Mapping):
+                        continue
+                    function = tool_call.get("function")
+                    if not isinstance(function, Mapping):
+                        continue
+                    call_message = {
+                        **message,
+                        "function_call": {**function, "id": tool_call.get("id")},
+                    }
+                    state_id = self._raw_backend_state_id_from_message(tool_call)
+                    if state_id:
+                        call_message["tools_state_id"] = state_id
+                    self._process_function_call_responses(
+                        call_message, response_id, request_tools=request_tools
+                    )
+                    if call_message.get("output"):
+                        outputs.append(call_message["output"])
+                message["output"] = outputs
+            elif message.get("role") == "assistant" and message.get("function_call"):
                 self._process_function_call_responses(
                     message,
                     response_id,
@@ -1027,10 +1056,9 @@ class ResponseProcessor:
     ):
         """Обрабатывает function call (Responses API)."""
         try:
-            arguments = json.dumps(
-                message["function_call"]["arguments"],
-                ensure_ascii=False,
-            )
+            arguments = message["function_call"]["arguments"]
+            if not isinstance(arguments, str):
+                arguments = json.dumps(arguments, ensure_ascii=False)
             state_id = (
                 self._normalize_metadata_string(
                     message["function_call"].get("id")
@@ -1053,6 +1081,9 @@ class ResponseProcessor:
             ).model_dump()
             if namespace:
                 output["namespace"] = namespace
+            tools_state_id = self._raw_backend_state_id_from_message(message)
+            if tools_state_id:
+                output["tools_state_id"] = tools_state_id
             message["output"] = output
 
         except Exception as e:
@@ -1205,6 +1236,9 @@ class ResponseProcessor:
             if call_id:
                 item["call_id"] = call_id
                 item["tools_state_id"] = call_id
+            tools_state_id = cls._raw_backend_state_id_from_message(raw_item)
+            if tools_state_id:
+                item["tools_state_id"] = tools_state_id
             item_id = cls._normalize_metadata_string(raw_item.get("id"))
             if item_id:
                 item["id"] = item_id
@@ -1320,7 +1354,9 @@ class ResponseProcessor:
         if call_id:
             item["call_id"] = call_id
             item["tools_state_id"] = call_id
-        state_id = cls._raw_backend_state_id_from_message(message)
+        state_id = cls._raw_backend_state_id_from_message(
+            tool_call
+        ) or cls._raw_backend_state_id_from_message(message)
         if state_id:
             item["tools_state_id"] = state_id
         return item

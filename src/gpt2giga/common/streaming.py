@@ -39,7 +39,74 @@ from gpt2giga.protocol.response import (
     hydrate_chat_completion_image_files,
 )
 from gpt2giga.protocol.response.processor import ResponseProcessor
+from gpt2giga.providers.gigachat.model_options import parallel_tool_calls_enabled
 from gpt2giga.providers.gigachat.model_resolution import resolve_upstream_model
+
+
+def _deduplicate_tool_call_identity(
+    chunk: dict[str, Any],
+    emitted: set[tuple[int, int, str]],
+    call_indexes: dict[tuple[int, str], int],
+    known_state_id: Optional[str],
+) -> Optional[str]:
+    """Emit each tool identity once; SDKs concatenate repeated string deltas."""
+    state_id = (chunk.get("metadata") or {}).get(
+        "gigachat_tool_state_id"
+    ) or known_state_id
+    for choice in chunk.get("choices", []):
+        delta = choice.get("delta", {})
+        role_key = (choice.get("index", 0), -1, "role")
+        if delta.get("role"):
+            if role_key in emitted:
+                delta.pop("role")
+            else:
+                emitted.add(role_key)
+        calls = delta.get("tool_calls") or []
+        for call in calls:
+            call_id = call.get("id")
+            if isinstance(call_id, str) and call_id:
+                choice_index = choice.get("index", 0)
+                key = (choice_index, call_id)
+                if key not in call_indexes:
+                    call_indexes[key] = sum(
+                        index == choice_index for index, _ in call_indexes
+                    )
+                call["index"] = call_indexes[key]
+        if state_id:
+            existing_indexes = {call.get("index", 0) for call in calls}
+            for choice_index, call_index, field in sorted(emitted):
+                if (
+                    choice_index == choice.get("index", 0)
+                    and field == "id"
+                    and call_index not in existing_indexes
+                    and (choice_index, call_index, "tools_state_id") not in emitted
+                ):
+                    calls.append(
+                        {
+                            "index": call_index,
+                            "tools_state_id": state_id,
+                            "function": {},
+                        }
+                    )
+            for call in calls:
+                call.setdefault("tools_state_id", state_id)
+            if calls:
+                delta["tool_calls"] = calls
+        for call in calls:
+            function = call.get("function", {})
+            for container, field in (
+                (call, "id"),
+                (call, "tools_state_id"),
+                (function, "name"),
+            ):
+                if not container.get(field):
+                    continue
+                key = (choice.get("index", 0), call.get("index", 0), field)
+                if key in emitted:
+                    container.pop(field)
+                else:
+                    emitted.add(key)
+    return state_id
 
 
 async def stream_chat_generator(
@@ -72,6 +139,9 @@ async def stream_chat_generator(
         logger = getattr(request.app.state, "logger", None)
 
         async def emit_stream() -> AsyncGenerator[str, None]:
+            emitted_tool_identity: set[tuple[int, int, str]] = set()
+            call_indexes: dict[tuple[int, str], int] = {}
+            known_state_id: Optional[str] = None
             async with gigachat_request_options(giga_client, request_options):
                 async for chunk in giga_client.astream(chat_messages):
                     if await request.is_disconnected():
@@ -87,6 +157,9 @@ async def stream_chat_generator(
                             response_id,
                             request_data=request_data,
                         )
+                    )
+                    known_state_id = _deduplicate_tool_call_identity(
+                        processed, emitted_tool_identity, call_indexes, known_state_id
                     )
                     yield f"data: {json.dumps(processed)}\n\n"
 
@@ -232,6 +305,9 @@ async def stream_chat_completion_generator(
         logger = getattr(request.app.state, "logger", None)
 
         async def emit_stream() -> AsyncGenerator[str, None]:
+            emitted_tool_identity: set[tuple[int, int, str]] = set()
+            call_indexes: dict[tuple[int, str], int] = {}
+            known_state_id: Optional[str] = None
             async with gigachat_request_options(giga_client, request_options):
                 async for chunk in giga_client.achat.stream(chat_request):
                     if await request.is_disconnected():
@@ -251,6 +327,9 @@ async def stream_chat_completion_generator(
                             response_id,
                             request_data=request_data,
                         )
+                    )
+                    known_state_id = _deduplicate_tool_call_identity(
+                        processed, emitted_tool_identity, call_indexes, known_state_id
                     )
                     yield f"data: {json.dumps(processed)}\n\n"
 
@@ -663,7 +742,7 @@ async def stream_responses_generator(
             ),
             "model": model,
             "output": output or [],
-            "parallel_tool_calls": True,
+            "parallel_tool_calls": parallel_tool_calls_enabled(chat_messages),
             "previous_response_id": (
                 request_data.get("previous_response_id") if request_data else None
             ),
@@ -734,6 +813,7 @@ async def stream_responses_generator(
         source_renderer = SourceMarkerStreamRenderer()
         source_rendering_enabled = False
         function_calls: dict[int, dict[str, Any]] = {}
+        function_indexes: dict[str, int] = {}
         function_call_argument_parts: dict[int, list[str]] = {}
         functions_state_id = None
         output_item_added = False
@@ -1158,6 +1238,13 @@ async def stream_responses_generator(
                         yield event
 
                     delta_tool_calls = delta.get("tool_calls")
+                    delta_state_id = (
+                        ResponseProcessor._raw_backend_state_id_from_message(delta)
+                    )
+                    if delta_state_id:
+                        functions_state_id = delta_state_id
+                        for call in function_calls.values():
+                            call.setdefault("tools_state_id", delta_state_id)
                     if not isinstance(delta_tool_calls, list) or not delta_tool_calls:
                         delta_tool_calls = (
                             [{"index": 0, "function": delta_function_call}]
@@ -1170,9 +1257,27 @@ async def stream_responses_generator(
                         delta_function_call = tool_call.get("function")
                         if not isinstance(delta_function_call, dict):
                             continue
+                        tools_state_id = (
+                            ResponseProcessor._raw_backend_state_id_from_message(
+                                tool_call
+                            )
+                            or ResponseProcessor._raw_backend_state_id_from_message(
+                                delta
+                            )
+                            or functions_state_id
+                        )
                         if functions_state_id is None:
-                            functions_state_id = delta.get("functions_state_id")
+                            functions_state_id = tools_state_id
                         call_index = tool_call.get("index", position)
+                        call_id = (
+                            tool_call.get("id")
+                            or delta_function_call.get("id")
+                            or delta_function_call.get("id_")
+                        )
+                        if isinstance(call_id, str) and call_id:
+                            call_index = function_indexes.setdefault(
+                                call_id, len(function_indexes)
+                            )
                         function_call_data = function_calls.get(call_index)
                         tool_name, namespace = split_gigachat_tool_name(
                             delta_function_call.get("name", ""),
@@ -1204,6 +1309,8 @@ async def stream_responses_generator(
                             }
                             if namespace:
                                 function_call_data["namespace"] = namespace
+                            if tools_state_id:
+                                function_call_data["tools_state_id"] = tools_state_id
                             function_calls[call_index] = function_call_data
                             function_call_argument_parts[call_index] = []
                             yield emit_sequenced_event(
@@ -1215,6 +1322,8 @@ async def stream_responses_generator(
                             )
                             output_item_added = True
                         output_index = list(function_calls).index(call_index)
+                        if tools_state_id:
+                            function_call_data["tools_state_id"] = tools_state_id
                         if delta_function_call.get("name"):
                             function_call_data["name"] = tool_name
                             if namespace:
@@ -1305,7 +1414,9 @@ async def stream_responses_generator(
                 [
                     {
                         **_stream_called_tool_item(
-                            call, tools_state_id=functions_state_id
+                            call,
+                            tools_state_id=call.get("tools_state_id")
+                            or functions_state_id,
                         ),
                         "index": index,
                     }

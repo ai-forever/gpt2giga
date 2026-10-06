@@ -318,6 +318,8 @@ class GigaChatProviderAdapter:
                         for event in mapper.chunk_to_events(chunk):
                             yield event
 
+            for event in mapper.flush_tool_events():
+                yield event
             for event in mapper.flush_reasoning_events():
                 yield event
         except ModelConcurrencyTimeoutError as exc:
@@ -393,6 +395,8 @@ class GigaChatProviderAdapter:
                         ):
                             yield event
 
+            for event in mapper.flush_tool_events():
+                yield event
             for event in mapper.flush_reasoning_events():
                 yield event
         except ModelConcurrencyTimeoutError as exc:
@@ -698,6 +702,7 @@ def _response_message_to_normalized(value: Any) -> NormalizedMessage | None:
                 _function_call_to_normalized(
                     function,
                     tool_call,
+                    message_state_id=_explicit_backend_state_id(value),
                 )
             )
     return NormalizedMessage(
@@ -721,8 +726,11 @@ def _response_message_to_normalized(value: Any) -> NormalizedMessage | None:
 def _function_call_to_normalized(
     function_call: Mapping[str, Any],
     message: Mapping[str, Any],
+    *,
+    message_state_id: str | None = None,
 ) -> NormalizedToolCall:
     arguments = function_call.get("arguments", {})
+    state_id = _explicit_backend_state_id(message) or message_state_id
     return NormalizedToolCall(
         id=(
             function_call.get("id")
@@ -736,6 +744,7 @@ def _function_call_to_normalized(
         type="function",
         name=map_tool_name_from_gigachat(str(function_call.get("name", ""))),
         arguments=arguments,
+        raw_extensions={"tools_state_id": state_id} if state_id else {},
     )
 
 
@@ -792,23 +801,27 @@ def _response_metadata(data: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _backend_state_id_from_message(message: Mapping[str, Any]) -> str | None:
+    value = _explicit_backend_state_id(message) or message.get("tool_call_id")
+    if not isinstance(value, str):
+        return None
+    state_id = value.strip()
+    if not state_id:
+        return None
+    if state_id.startswith("fc_") and len(state_id) > len("fc_"):
+        return state_id.removeprefix("fc_")
+    return state_id
+
+
+def _explicit_backend_state_id(message: Mapping[str, Any]) -> str | None:
     for field_name in (
         "tools_state_id",
         "tool_state_id",
         "functions_state_id",
         "function_state_id",
-        "tool_call_id",
     ):
         value = message.get(field_name)
-        if not isinstance(value, str):
-            continue
-        state_id = value.strip()
-        if not state_id:
-            continue
-        for prefix in ("fc_",):
-            if state_id.startswith(prefix) and len(state_id) > len(prefix):
-                return state_id.removeprefix(prefix)
-        return state_id
+        if isinstance(value, str) and value.strip():
+            return value
     return None
 
 

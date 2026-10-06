@@ -177,6 +177,11 @@ def _normalize_assistant_message(value: Any) -> NormalizedMessage:
                     type="function",
                     name=str(block["name"]),
                     arguments=block.get("input", {}),
+                    raw_extensions=(
+                        {"tools_state_id": block["tools_state_id"]}
+                        if _string_or_none(block.get("tools_state_id"))
+                        else {}
+                    ),
                 )
             )
     return NormalizedMessage(
@@ -224,6 +229,11 @@ def _normalize_user_messages(
                     tool_call_id=call_id,
                     content=ensure_json_object_str(
                         _tool_result_content(block.get("content", ""))
+                    ),
+                    raw_extensions=(
+                        {"tools_state_id": block["tools_state_id"]}
+                        if _string_or_none(block.get("tools_state_id"))
+                        else {}
                     ),
                 )
             )

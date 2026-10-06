@@ -110,7 +110,11 @@ async def _stream_anthropic_generator(
                     delta = choice.get("delta", {})
                     delta_content = _delta_text(delta.get("content"))
                     delta_function_calls = [
-                        {**call["function"], "id": call.get("id")}
+                        {
+                            **call["function"],
+                            "id": call.get("id"),
+                            "tools_state_id": _backend_tool_state_id(call),
+                        }
                         for call in delta.get("tool_calls") or []
                         if isinstance(call, dict)
                         and isinstance(call.get("function"), dict)
@@ -203,6 +207,9 @@ async def _stream_anthropic_generator(
                                     ),
                                     "tool_id": tool_id,
                                 }
+                                tools_state_id = _backend_tool_state_id(
+                                    delta_function_call
+                                ) or _backend_tool_state_id(delta)
                                 yield sse(
                                     "content_block_start",
                                     {
@@ -213,6 +220,11 @@ async def _stream_anthropic_generator(
                                             "id": tool_id,
                                             "name": function_call_data["name"],
                                             "input": {},
+                                            **(
+                                                {"tools_state_id": tools_state_id}
+                                                if tools_state_id
+                                                else {}
+                                            ),
                                         },
                                     },
                                 )
@@ -428,6 +440,8 @@ class _ChatCompletionAnthropicStreamClient:
 
     def astream(self, chat_request: Any):
         async def gen():
+            pending: list[dict[str, Any]] = []
+            known_state_id: Optional[str] = None
             async with gigachat_request_options(
                 self._giga_client,
                 self._request_options,
@@ -437,7 +451,29 @@ class _ChatCompletionAnthropicStreamClient:
                         chunk,
                         default_model=self._model,
                     )
-                    yield SimpleNamespace(model_dump=lambda adapted=adapted: adapted)
+                    delta = adapted["choices"][0]["delta"]
+                    state_id = _backend_tool_state_id(delta) or known_state_id
+                    if state_id:
+                        known_state_id = state_id
+                        delta.setdefault("tools_state_id", state_id)
+                    has_calls = bool(
+                        delta.get("tool_calls") or delta.get("function_call")
+                    )
+                    # Anthropic SDKs retain extras from block_start only. Wait for
+                    # a late provider state before starting the corresponding block.
+                    if pending or (has_calls and not state_id):
+                        pending.append(adapted)
+                        if not state_id:
+                            continue
+                        for buffered in pending:
+                            buffered_delta = buffered["choices"][0]["delta"]
+                            buffered_delta.setdefault("tools_state_id", state_id)
+                            yield SimpleNamespace(model_dump=lambda item=buffered: item)
+                        pending.clear()
+                    else:
+                        yield SimpleNamespace(model_dump=lambda item=adapted: item)
+            for buffered in pending:
+                yield SimpleNamespace(model_dump=lambda item=buffered: item)
 
         return gen()
 

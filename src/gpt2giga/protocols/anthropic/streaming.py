@@ -142,16 +142,20 @@ class AnthropicStreamProjector:
 
     def _tool_start(self, tool_call: NormalizedToolCall | None) -> list[str]:
         call = tool_call or NormalizedToolCall()
+        block = {
+            "type": "tool_use",
+            "id": call.id or f"toolu_{self.response_id}",
+            "name": call.name or "",
+            "input": {},
+        }
+        state_id = call.raw_extensions.get("tools_state_id")
+        if isinstance(state_id, str) and state_id:
+            block["tools_state_id"] = state_id
         frames = self._stop_block()
         frames.extend(
             self._start_block(
                 "tool_use",
-                {
-                    "type": "tool_use",
-                    "id": call.id or f"toolu_{self.response_id}",
-                    "name": call.name or "",
-                    "input": {},
-                },
+                block,
             )
         )
         frames.extend(self._tool_delta(call))

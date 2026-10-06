@@ -32,11 +32,15 @@ class ResponsesStreamProjector:
         requested_model: str,
         response_id: str,
         created_at: int | None = None,
+        default_parallel_tool_calls: bool = True,
     ) -> None:
         self.request_payload = request_payload
         self.requested_model = requested_model
         self.response_id = response_id
         self.created_at = int(time.time()) if created_at is None else created_at
+        self.parallel_tool_calls = request_payload.get("parallel_tool_calls")
+        if self.parallel_tool_calls is None:
+            self.parallel_tool_calls = default_parallel_tool_calls
         self._sequence = 0
         self._last_provider_sequence: int | None = None
         self._started = False
@@ -302,6 +306,9 @@ class ResponsesStreamProjector:
             }
             if namespace is not None:
                 self._tool_item["namespace"] = namespace
+            state_id = tool_call.raw_extensions.get("tools_state_id")
+            if isinstance(state_id, str) and state_id:
+                self._tool_item["tools_state_id"] = state_id
             self._output.append(self._tool_item)
             frames.append(
                 self._frame(
@@ -571,7 +578,7 @@ class ResponsesStreamProjector:
             "max_output_tokens": self.request_payload.get("max_output_tokens"),
             "model": self.requested_model,
             "output": list(self._output) if output is None else output,
-            "parallel_tool_calls": True,
+            "parallel_tool_calls": self.parallel_tool_calls,
             "previous_response_id": None,
             "reasoning": _reasoning_config(self.request_payload),
             "store": False,
