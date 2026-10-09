@@ -66,6 +66,11 @@ class ProviderMachineContracts:
                     "network_policy_ref": profile.network_policy_ref,
                     "tls_policy_ref": profile.tls_policy_ref,
                     "allow_loopback": profile.allow_loopback,
+                    **(
+                        {"upstream_stream_mode": profile.upstream_stream_mode}
+                        if profile.upstream_stream_mode is not None
+                        else {}
+                    ),
                     "model_inventory": (
                         profile.model_inventory.value
                         if profile.model_inventory is not None
@@ -76,6 +81,22 @@ class ProviderMachineContracts:
                             "public_alias": model.public_alias,
                             "upstream_model": model.upstream_model,
                             "capability_profile": model.capability_profile,
+                            **(
+                                {
+                                    "capabilities": {
+                                        "features": sorted(
+                                            feature.value
+                                            for feature in model.capabilities.features
+                                        ),
+                                        "limits": model.capabilities.limits.model_dump(
+                                            mode="json",
+                                            exclude_none=True,
+                                        ),
+                                    }
+                                }
+                                if model.capabilities is not None
+                                else {}
+                            ),
                             "support_status": model.support_status.value,
                             "enabled": model.enabled,
                             "deprecated": model.deprecated,

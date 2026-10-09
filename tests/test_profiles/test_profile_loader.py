@@ -19,7 +19,12 @@ from gpt2giga.providers.profiles import (
 
 POLICIES = ProviderPolicyCatalog(
     network_policy_refs=frozenset(
-        {"public-anthropic", "public-gigachat", "loopback-development"}
+        {
+            "public-anthropic",
+            "public-gigachat",
+            "public-openai",
+            "loopback-development",
+        }
     ),
     tls_policy_refs=frozenset({"system-default"}),
 )
@@ -111,6 +116,35 @@ def test_dynamic_gigachat_profile_resolves_credential_without_static_aliases(
     assert profile.model_inventory.value == "dynamic"
     assert profile.models == ()
     assert loaded.credential_for("gigachat-main") == SECRET
+
+
+def test_v3_keyless_openai_compatible_profile_needs_no_dummy_secret(
+    tmp_path: Path,
+) -> None:
+    payload = _payload(
+        provider_kind="openai_compatible",
+        base_url="https://upstream.example/v1/chat/completions",
+        network_policy_ref="public-openai",
+        credential_env=None,
+        models=[
+            {
+                "public_alias": "bridge/chat-only",
+                "upstream_model": "exact-model",
+                "capability_profile": "chat-only-v1",
+                "capabilities": {
+                    "features": ["roles", "text", "context_token_limits"],
+                    "limits": {"context_window": 8192},
+                },
+                "support_status": "technical_preview",
+            }
+        ],
+    )
+    payload["schema_version"] = "gpt2giga.provider-profiles.v3"
+    path = _write_json(tmp_path / "profiles.json", payload)
+
+    loaded = load_provider_profiles(path, environ={}, policies=POLICIES)
+
+    assert loaded.credential_for("anthropic-main") is None
 
 
 def test_yaml_uses_safe_loading_and_rejects_duplicate_keys(tmp_path: Path) -> None:

@@ -42,21 +42,11 @@ def _map_stop_reason(finish_reason: Optional[str]) -> str:
     return mapping.get(finish_reason or "stop", "end_turn")
 
 
-def _tool_call_arguments_to_text(tool_call: Dict) -> str:
-    """Extract function-call arguments as JSON text."""
-    function = tool_call.get("function", {})
-    arguments = function.get("arguments", {})
-    if isinstance(arguments, str):
-        return arguments
-    return json.dumps(arguments, ensure_ascii=False)
-
-
 def _build_anthropic_response(
     giga_dict: Dict,
     model: str,
     response_id: str,
     *,
-    is_structured_output: bool = False,
     logger: Any = None,
     mode: str = "DEV",
     log_level: str = "INFO",
@@ -84,20 +74,16 @@ def _build_anthropic_response(
     tool_calls = list(message.get("tool_calls") or [])
     if message.get("function_call"):
         function_tool_call: Dict[str, Any] = {"function": message["function_call"]}
-        state_id = _backend_tool_state_id(message)
+        state_id = (
+            message["function_call"].get("id")
+            or message["function_call"].get("id_")
+            or _backend_tool_state_id(message)
+        )
         if state_id:
             function_tool_call["id"] = state_id
         tool_calls.append(function_tool_call)
 
-    if is_structured_output and tool_calls:
-        content_blocks.append(
-            {
-                "type": "text",
-                "text": _tool_call_arguments_to_text(tool_calls[0]),
-            }
-        )
-        stop_reason = "end_turn"
-    elif tool_calls:
+    if tool_calls:
         if text_content:
             content_blocks.append({"type": "text", "text": text_content})
         message_state_id = _backend_tool_state_id(message)
@@ -125,6 +111,9 @@ def _build_anthropic_response(
                     "input": arguments,
                 }
             )
+            tools_state_id = _backend_tool_state_id(tool_call) or message_state_id
+            if tools_state_id:
+                content_blocks[-1]["tools_state_id"] = tools_state_id
         stop_reason = "tool_use"
     else:
         if text_content:
@@ -144,6 +133,11 @@ def _build_anthropic_response(
         "usage": {
             "input_tokens": usage.get("prompt_tokens", 0),
             "output_tokens": usage.get("completion_tokens", 0),
+            **(
+                {"cache_read_input_tokens": usage["precached_prompt_tokens"]}
+                if usage.get("precached_prompt_tokens")
+                else {}
+            ),
         },
     }
     log_debug_payload(

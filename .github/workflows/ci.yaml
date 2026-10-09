@@ -155,10 +155,10 @@ jobs:
       - name: Create clean minimum SDK environment
         run: uv venv --python ${{ matrix.python-version }} .venv-min-sdk
 
-      - name: Install minimum stable SDK and gateway wheel
+      - name: Install minimum SDK and gateway wheel
         run: |
-          uv pip install --python .venv-min-sdk/bin/python "gigachat==0.2.3"
-          uv pip install --python .venv-min-sdk/bin/python dist/min-sdk/gpt2giga-*.whl
+          uv pip install --python .venv-min-sdk/bin/python \
+            "gigachat==0.2.4a1" dist/min-sdk/gpt2giga-*.whl
 
       - name: Run minimum-SDK installed contract smoke
         env:
@@ -166,7 +166,7 @@ jobs:
         run: |
           .venv-min-sdk/bin/python -I scripts/gateway_artifact_smoke.py \
             --expected-gateway-version "${GATEWAY_VERSION}" \
-            --expected-gigachat-version "0.2.3"
+            --expected-gigachat-version "0.2.4a1"
           .venv-min-sdk/bin/gpt2giga --help
 
   artifact-smoke:

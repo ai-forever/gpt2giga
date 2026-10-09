@@ -20,7 +20,7 @@ Other client families are not covered by this compatibility check.
 |---|---|
 | `supported` | The parameter affects the request or response and is covered by tests. |
 | `accepted_ignored` | The parameter is accepted for SDK compatibility but is not sent upstream. |
-| `rejected` | The request has an unexecutable shape, for example a missing required `input` or an `extra_body` that is not an object. Optional client feature flags do not use this status. |
+| `rejected` | The request has an unexecutable shape, for example a missing required `input` or an `extra_body` that is not an object. Stateful requests and required tool selection are rejected when the selected backend cannot preserve them. |
 | `not_applicable` | The option relates to client-side transport configuration, not to a server-side request body parameter. |
 
 ## SDK transport options
@@ -75,7 +75,7 @@ Known unsupported optional client parameters are accepted and ignored if sent as
 top-level fields: for example `logprobs`, `audio`, `container`, or
 `mcp_servers`. `previous_response_id` is supported for OpenAI Responses in
 GigaChat v2 mode and is mapped to `storage.thread_id`; in Responses v1 mode it is
-accepted and ignored.
+rejected when non-null (`store=true` is also rejected in v1).
 If the same key is explicitly placed inside a literal `extra_body`, gpt2giga
 passes it to `additional_fields`, and the GigaChat upstream determines the final
 support.
@@ -103,12 +103,10 @@ Structured output is supported through `json_schema`. Schema-less JSON mode
 `responseMimeType=application/json` without `responseJsonSchema` / `responseSchema`)
 is rejected, because the GigaChat upstream does not support a separate JSON mode.
 
-With `GPT2GIGA_DISABLE_REASONING=True`, the proxy accepts `reasoning` and
-`reasoning_effort` but does not pass them to the upstream payload sent to GigaChat.
-
-With `GPT2GIGA_DISABLE_BUILTIN_TOOL_MAPPING=True`, the proxy accepts provider
-built-in tools for compatibility but does not map or send them to GigaChat as
-executable tools. User function tools continue to work.
+An explicit `reasoning.effort="none"` or `reasoning_effort="none"` disables
+reasoning for that request, including Codex `model_reasoning_effort=none`.
+Otherwise the proxy forwards the client's explicit reasoning effort and does
+not apply a global default or override.
 
 OpenAI metadata fields such as `user`, `metadata`, `service_tier`,
 `safety_identifier`, `seed`, `prompt_cache_key`, and `prompt_cache_retention` are
@@ -117,16 +115,22 @@ accepted and ignored where they are classified.
 Unsupported optional OpenAI parameters are accepted and ignored. Examples:
 `logprobs`, `top_logprobs`, `logit_bias`, audio output, `prediction`,
 `web_search_options`, built-in tools outside GigaChat v2 mode, `n > 1`,
-`parallel_tool_calls=true`, stored completions requests, `conversation`, and
-`previous_response_id` in Responses v1 mode. `/chat/completions` v1
+stored completions requests and `conversation`. `/chat/completions` v1
 remains a supported compatibility route, but new tool/built-in-tool
 capabilities evolve for GigaChat `v2/chat/completions`.
+
+Buffered parallel local function calls are supported for `GigaChat-2-Max` on
+v2 routes. OpenAI Chat Completions sends `parallel_tool_calls=true`; Anthropic
+Messages sends `tool_choice.disable_parallel_tool_use=false`; Gemini enables
+the same upstream option when more than one function declaration remains after
+filtering. The response preserves every call ID, and the next request may send
+all matching tool results. The legacy v1 contract remains unchanged.
 
 ## Anthropic body parameters
 
 | Endpoint | Supported |
 |---|---|
-| Messages | `model`, `messages`, `system`, `max_tokens`, `stream`, `temperature`, `top_p`, `stop_sequences`, local function `tools`, Anthropic provider tools in GigaChat v2 mode (`web_search*`, `web_fetch*` as `url_content_extraction`, `code_execution*` as `code_interpreter`), `tool_choice` values `auto`/`none`/forced `tool`, `thinking`, `output_config.format`, `output_format`, `extra_body` passthrough |
+| Messages | `model`, `messages`, `system`, `max_tokens`, `stream`, `temperature`, `top_p`, `stop_sequences`, local function `tools`, Anthropic provider tools in GigaChat v2 mode (`web_search*`, `web_fetch*` as `url_content_extraction`, `code_execution*` as `code_interpreter`), `tool_choice` values `auto`/`none`/forced `tool`/v2 `any`, `thinking`, `output_config.format`, `output_format`, `extra_body` passthrough |
 | Count Tokens | `model`, `messages`, `system`, `tools`, structured-output schema text, compatible message content validation |
 | Models | `GET /models`, `GET /models/{model_id}`, when the request contains Anthropic SDK headers, for example `anthropic-version` |
 

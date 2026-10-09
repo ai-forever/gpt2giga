@@ -25,7 +25,7 @@ def mock_attachment_processor():
 
 @pytest.fixture
 def request_transformer(mock_logger, mock_attachment_processor):
-    config = ProxyConfig(proxy=ProxySettings(structured_output_mode="function_call"))
+    config = ProxyConfig(proxy=ProxySettings())
     config.proxy_settings.enable_images = True
     return RequestTransformer(config, mock_logger, mock_attachment_processor)
 
@@ -122,11 +122,9 @@ def test_transform_chat_parameters(request_transformer):
     assert "temperature" not in res  # pop(temperature, 0) -> if 0 set top_p=0
     assert res["max_tokens"] == 100
     assert "max_output_tokens" not in res
-    # transform_chat_parameters no longer keeps response_format if it is converted to function call
-    # assert res["response_format"] == {"type": "json_schema", "schema": {}}
-    assert len(res["functions"]) == 2  # One from tools + one from structured output
-    assert res["functions"][1]["name"] == "structured_output"
-    assert res["function_call"]["name"] == "structured_output"
+    assert res["response_format"] == {"type": "json_schema", "schema": {}}
+    assert res["functions"] == [{"name": "f"}]
+    assert "function_call" not in res
 
 
 def test_transform_response_format_complex(request_transformer):

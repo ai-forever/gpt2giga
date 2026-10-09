@@ -1,6 +1,10 @@
 # gpt2giga documentation
 
-`gpt2giga` is a FastAPI compatibility gateway that accepts requests in the OpenAI, Anthropic, and Gemini formats and forwards them to GigaChat. It is useful when a client, editor, agent framework, or SDK can talk to the OpenAI/Anthropic/Gemini API, but the real backend must be GigaChat.
+`gpt2giga` is a FastAPI compatibility gateway that accepts requests in the
+OpenAI, Anthropic, and Gemini formats and forwards them to GigaChat or to a
+reviewed OpenAI-compatible Chat Completions server. It is useful when a client,
+editor, agent framework, or SDK speaks one of these public APIs but the real
+backend uses a different compatible contract.
 
 Default local address:
 
@@ -13,6 +17,7 @@ http://localhost:8090
 | Capability | Where to read |
 |---|---|
 | Quick start via Docker Compose or `uv` | [Quickstart](quickstart.md) |
+| Codex, Claude Code, and Gemini CLI with a Chat Completions-only server | [Chat Completions bridge](chat-completions-bridge.md) |
 | Supported OpenAI, Anthropic, Gemini, and LiteLLM routes | [API compatibility](api-compatibility.md) |
 | Behavior of `extra_headers`, `extra_query`, `extra_body`, and optional fields | [Client parameters](client-parameter-compatibility.md) |
 | GigaChat built-in tools and their mapping to OpenAI/Anthropic/Gemini | [Built-in tools](builtin-tools.md) |

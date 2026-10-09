@@ -15,6 +15,10 @@ CLI принимает явный env-файл:
 gpt2giga --env-path .env
 ```
 
+Относительный `--env-path` разрешается от текущего рабочего каталога, в том числе
+при запуске через `uvx`. Если явно указанный файл отсутствует, запуск завершается
+ошибкой. Без флага CLI читает `.env` из текущего каталога, если файл существует.
+
 Можно передавать структурированные флаги CLI:
 
 ```sh
@@ -176,7 +180,7 @@ x-api-key: <GPT2GIGA_API_KEY>
 
 ## Настройки GigaChat
 
-Минимальная поддерживаемая версия GigaChat Python SDK — `0.2.3`; gateway
+Минимальная поддерживаемая версия GigaChat Python SDK — `0.2.4a1`; gateway
 остаётся в совместимой ветке `0.2.x`. API base URL SDK по умолчанию —
 `https://api.giga.chat/v1`.
 
@@ -190,6 +194,7 @@ x-api-key: <GPT2GIGA_API_KEY>
 | `GIGACHAT_ACCESS_TOKEN` | empty | Альтернативная авторизация через готовый access-токен. |
 | `GIGACHAT_BASE_URL` | `https://api.giga.chat/v1` | API endpoint SDK. Для авторизации по логину и паролю задайте его явно. |
 | `GIGACHAT_MODEL` | empty | Рекомендуемая явная upstream-модель и fallback, если gateway не принимает модель из запроса. |
+| `GIGACHAT_SESSION_ID` | пусто | Значение `X-Session-ID` по умолчанию; заголовок входящего запроса имеет приоритет. Используйте отдельный идентификатор на диалог. Попадание в кэш не гарантируется. |
 | `GIGACHAT_PROFANITY_CHECK` | SDK default | Флаг проверки на нецензурную лексику в вышестоящем сервисе. |
 | `GIGACHAT_VERIFY_SSL_CERTS` | SDK default | В production держите `True`. |
 | `GIGACHAT_TIMEOUT` | SDK default | Таймаут запроса к вышестоящему сервису. |
@@ -211,26 +216,14 @@ GigaChat также поддерживает настройки клиентск
 
 Рассуждения:
 
-```dotenv
-GPT2GIGA_ENABLE_REASONING=False
-GPT2GIGA_DISABLE_REASONING=False
-```
-
-- `GPT2GIGA_ENABLE_REASONING=True` добавляет `reasoning_effort="high"`, если клиент не передал явную настройку рассуждений.
-- `GPT2GIGA_DISABLE_REASONING=True` удаляет `reasoning` и `reasoning_effort`, включая явные клиентские поля и проброс `extra_body`.
+- Рассуждения управляются каждым клиентским запросом; прокси не добавляет и глобально не переопределяет effort.
+- Клиентские `reasoning.effort="none"` или `reasoning_effort="none"` отключают рассуждения для отдельного запроса и удаляют поля reasoning из GigaChat payload.
+- Другие явно заданные reasoning effort передаются в GigaChat.
 
 Структурированный вывод:
 
-```dotenv
-GPT2GIGA_STRUCTURED_OUTPUT_MODE=function_call
-```
-
-Значения:
-
-- `function_call`: запасной путь совместимости через вызов функций;
-- `native`: передаёт JSON Schema через GigaChat `response_format`, если это поддерживают модель/API.
-
-Оба режима рассчитаны на структурированный вывод на основе схемы. OpenAI
+JSON Schema нативно передаётся через GigaChat `response_format`; gateway не
+создаёт искусственный function call для структурированного вывода. OpenAI
 `response_format.type=json_object` и Gemini `responseMimeType=application/json`
 без `responseJsonSchema` / `responseSchema` не проксируются в GigaChat, потому
 что вышестоящий сервис не поддерживает отдельный режим JSON без схемы.
@@ -259,21 +252,15 @@ Gateway поддерживает root compatibility methods SDK для v1 и res
 `storage.thread_id`. Это исключение не добавляет в gateway OpenAI-маршруты
 Assistants или Threads.
 
-Сопоставление built-in tools можно выключить отдельно:
-
-```dotenv
-GPT2GIGA_DISABLE_BUILTIN_TOOL_MAPPING=False
-```
-
-Когда значение `True`, OpenAI/Anthropic/Gemini provider built-in tools
-(`web_search*`, `code_execution*`, `urlContext` и похожие) не сопоставляются со
-встроенными инструментами GigaChat v2 и игнорируются. Пользовательские
-function/local tools остаются включены.
+Распознанные OpenAI/Anthropic/Gemini provider built-in tools (`web_search*`,
+`code_execution*`, `urlContext` и похожие) сопоставляются со встроенными
+инструментами GigaChat на маршрутах v2. Пользовательские function/local tools
+сопоставляются независимо.
 
 ## Флаги нормализованного слоя
 
-Режим нормализации управляет нормализованными путями OpenAI Chat Completions
-и Anthropic Messages и по умолчанию сохраняет прежнее поведение для этих маршрутов:
+Режим нормализации управляет встроенными GigaChat-путями OpenAI Chat
+Completions и Anthropic Messages и по умолчанию сохраняет их прежнее поведение:
 
 ```dotenv
 GPT2GIGA_NORMALIZATION_MODE=off
@@ -292,16 +279,22 @@ GPT2GIGA_LEGACY_CHAT_FALLBACK=True
   Gemini `countTokens` на нормализованный путь с откатом к прежнему до старта
   ответа, если откат включён.
 
+Эти флаги не переопределяют явный внешний маршрут. Модель из профиля
+`openai_compatible` всегда проходит через нормализованный адаптер для Responses,
+Chat Completions, Anthropic Messages и Gemini GenerateContent. Отката на
+постороннюю модель GigaChat нет.
+
 Gemini GenerateContent использует свой выделенный адаптер Gemini-в-нормализованное и
 путь провайдера GigaChat независимо от этих флагов. Его принятое bridge-
 подмножество использует типизированные inline-изображения и полностью
 смоделированные поля functions/JSON Schema; safety settings, cached content,
 files, неподдерживаемые tools и прочая несмоделированная семантика остаются
 явными и отклоняются admission для OpenAI-compatible bridge до provider I/O.
-OpenAI Responses остаётся на прежнем пути выполнения. Семантика Anthropic вне
-normalized v1, включая prompt caching, computer use, files и неподдерживаемые
-блоки контента, не объявляется поддержанной нормализованным путём и может
-использовать прежний fallback.
+OpenAI Responses для встроенного маршрута GigaChat остаётся на существующем
+пути, а для явного внешнего алиаса использует нормализованный bridge. Семантика
+Anthropic вне normalized v1, включая prompt caching, computer use, files и
+неподдерживаемые блоки контента, не перенаправляется на другого провайдера, а
+отклоняется.
 
 Подробное описание моделей и текущих путей выполнения: [Нормализованные сообщения](./architecture/normalized-messages.md).
 

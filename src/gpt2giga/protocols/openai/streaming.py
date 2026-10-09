@@ -6,6 +6,8 @@ import json
 from datetime import timezone
 from typing import Any
 
+from gpt2giga.protocols.normalized.usage import cached_input_tokens
+
 from gpt2giga.protocols.normalized import (
     NormalizedMessage,
     NormalizedStreamEvent,
@@ -46,6 +48,8 @@ def normalized_stream_event_to_openai_chunk(
     response_id: str,
 ) -> dict[str, Any] | None:
     """Return an OpenAI Chat Completions stream chunk for one event."""
+    if event.type == "heartbeat":
+        return None
     legacy_chunk = event.raw_extensions.get("openai_chunk")
     if isinstance(legacy_chunk, dict):
         return legacy_chunk
@@ -83,7 +87,17 @@ def normalized_stream_event_to_openai_chunk(
         ]
     elif event.type in {"tool_call_start", "tool_call_delta"}:
         chunk["choices"] = [
-            _choice(event, delta={"tool_calls": [_tool_call_delta(event.tool_call)]})
+            _choice(
+                event,
+                delta={
+                    "tool_calls": [
+                        _tool_call_delta(
+                            event.tool_call,
+                            include_state=event.type == "tool_call_start",
+                        )
+                    ]
+                },
+            )
         ]
     elif event.type == "usage":
         chunk["usage"] = _usage(event.usage)
@@ -112,7 +126,7 @@ def _base_chunk(
         "model": event.model or requested_model,
         "choices": [],
         "usage": None,
-        "system_fingerprint": f"fp_{event.id or response_id}",
+        "system_fingerprint": None,
     }
 
 
@@ -140,18 +154,24 @@ def _message_content(message: NormalizedMessage | None) -> str:
 def _message_reasoning(message: NormalizedMessage | None) -> str:
     if message is None:
         return ""
+    if message.reasoning_content is not None:
+        return message.reasoning_content
     value = message.raw_extensions.get("reasoning_content")
     return value if isinstance(value, str) else ""
 
 
-def _tool_call_delta(tool_call: NormalizedToolCall | None) -> dict[str, Any]:
+def _tool_call_delta(
+    tool_call: NormalizedToolCall | None,
+    *,
+    include_state: bool,
+) -> dict[str, Any]:
     if tool_call is None:
         return {"index": 0, "function": {}}
     function = {
         "name": tool_call.name,
         "arguments": tool_call.arguments,
     }
-    return {
+    payload = {
         "index": int(tool_call.raw_extensions.get("index", 0)),
         "id": tool_call.id,
         "type": tool_call.type,
@@ -159,6 +179,10 @@ def _tool_call_delta(tool_call: NormalizedToolCall | None) -> dict[str, Any]:
             key: value for key, value in function.items() if value is not None
         },
     }
+    state_id = tool_call.raw_extensions.get("tools_state_id")
+    if include_state and isinstance(state_id, str) and state_id:
+        payload["tools_state_id"] = state_id
+    return payload
 
 
 def _usage(usage: NormalizedUsage | None) -> dict[str, Any] | None:
@@ -168,6 +192,6 @@ def _usage(usage: NormalizedUsage | None) -> dict[str, Any] | None:
         "prompt_tokens": usage.input_tokens,
         "completion_tokens": usage.output_tokens,
         "total_tokens": usage.total_tokens,
-        "prompt_tokens_details": {"cached_tokens": 0},
+        "prompt_tokens_details": {"cached_tokens": cached_input_tokens(usage)},
         "completion_tokens_details": {"reasoning_tokens": 0},
     }

@@ -6,7 +6,6 @@ from collections.abc import Mapping
 from typing import Any
 
 from gpt2giga.common.content_utils import ensure_json_object_str
-from gpt2giga.common.json_schema import normalize_tool_parameters_schema
 from gpt2giga.common.tools import normalize_gigachat_builtin_tool_type
 from gpt2giga.core.context import RequestContext
 from gpt2giga.protocol.anthropic.params import (
@@ -65,15 +64,11 @@ class AnthropicProtocolAdapter:
         payload: Mapping[str, Any],
         *,
         context: RequestContext | None = None,
-        builtin_tool_mapping_enabled: bool = True,
     ) -> NormalizedChatRequest:
         """Convert one Anthropic Messages payload to normalized form."""
         original = dict(payload)
         data = sanitize_anthropic_messages_parameters(original)
-        tools = _normalize_tools(
-            data.get("tools"),
-            builtin_tool_mapping_enabled=builtin_tool_mapping_enabled,
-        )
+        tools = _normalize_tools(data.get("tools"))
         tool_choice, parallel_tool_calls = _normalize_tool_choice(
             data.get("tool_choice"),
             tools=tools,
@@ -100,13 +95,11 @@ class AnthropicProtocolAdapter:
         payload: Mapping[str, Any],
         *,
         context: RequestContext | None = None,
-        builtin_tool_mapping_enabled: bool = True,
     ) -> NormalizedTokenCountRequest:
         """Convert Anthropic count_tokens input to a normalized operation."""
         chat = self.messages_to_normalized(
             {**dict(payload), "stream": False},
             context=context,
-            builtin_tool_mapping_enabled=builtin_tool_mapping_enabled,
         )
         return NormalizedTokenCountRequest(
             id=context.request_id if context is not None else None,
@@ -184,6 +177,11 @@ def _normalize_assistant_message(value: Any) -> NormalizedMessage:
                     type="function",
                     name=str(block["name"]),
                     arguments=block.get("input", {}),
+                    raw_extensions=(
+                        {"tools_state_id": block["tools_state_id"]}
+                        if _string_or_none(block.get("tools_state_id"))
+                        else {}
+                    ),
                 )
             )
     return NormalizedMessage(
@@ -232,6 +230,11 @@ def _normalize_user_messages(
                     content=ensure_json_object_str(
                         _tool_result_content(block.get("content", ""))
                     ),
+                    raw_extensions=(
+                        {"tools_state_id": block["tools_state_id"]}
+                        if _string_or_none(block.get("tools_state_id"))
+                        else {}
+                    ),
                 )
             )
 
@@ -274,11 +277,7 @@ def _tool_result_content(value: Any) -> Any:
     return "\n".join(texts)
 
 
-def _normalize_tools(
-    value: Any,
-    *,
-    builtin_tool_mapping_enabled: bool,
-) -> list[NormalizedTool]:
+def _normalize_tools(value: Any) -> list[NormalizedTool]:
     if not isinstance(value, list):
         return []
     tools: list[NormalizedTool] = []
@@ -287,8 +286,7 @@ def _normalize_tools(
             continue
         builtin = _builtin_tool(item)
         if builtin is not None:
-            if builtin_tool_mapping_enabled:
-                tools.append(builtin)
+            tools.append(builtin)
             continue
         name = item.get("name")
         if not isinstance(name, str) or not name:
@@ -301,7 +299,7 @@ def _normalize_tools(
                 type="function",
                 name=name,
                 description=_string_or_none(item.get("description")),
-                parameters=normalize_tool_parameters_schema(schema),
+                parameters=dict(schema),
             )
         )
     return tools
@@ -340,6 +338,8 @@ def _normalize_tool_choice(
         return "auto", parallel
     if choice_type == "none":
         return "none", parallel
+    if choice_type == "any":
+        return "required", parallel
     if choice_type != "tool" or not value.get("name"):
         return None, parallel
     name = str(value["name"])
@@ -371,15 +371,20 @@ def _normalize_response_format(
 def _normalize_generation_config(
     data: Mapping[str, Any],
 ) -> NormalizedGenerationConfig:
-    reasoning_effort = _reasoning_effort(data.get("thinking"))
+    thinking = data.get("thinking")
+    reasoning_effort = _reasoning_effort(thinking)
+    raw_extensions = {}
+    if reasoning_effort:
+        raw_extensions["reasoning_effort"] = reasoning_effort
+        raw_extensions["reasoning"] = {
+            "max_tokens": thinking.get("budget_tokens", 10_000)
+        }
     return NormalizedGenerationConfig(
         temperature=_optional_float(data.get("temperature")),
         top_p=_optional_float(data.get("top_p")),
         max_tokens=_optional_int(data.get("max_tokens")),
         stop=data.get("stop_sequences"),
-        raw_extensions=(
-            {"reasoning_effort": reasoning_effort} if reasoning_effort else {}
-        ),
+        raw_extensions=raw_extensions,
     )
 
 
@@ -405,7 +410,9 @@ def _provider_metadata(data: Mapping[str, Any]) -> dict[str, Any]:
 
 def _ignored_extensions(payload: Mapping[str, Any]) -> dict[str, Any]:
     ignored = {
-        key: payload[key] for key in ANTHROPIC_ACCEPTED_IGNORED_PARAMS if key in payload
+        key: payload[key]
+        for key in ANTHROPIC_ACCEPTED_IGNORED_PARAMS
+        if key in payload and key != "metadata"
     }
     return {"accepted_ignored": ignored} if ignored else {}
 

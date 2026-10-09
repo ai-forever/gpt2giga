@@ -11,7 +11,6 @@ from typing import Any, Literal
 import gigachat
 
 from gpt2giga.common.gigachat_options import gigachat_request_options
-from gpt2giga.common.json_schema import normalize_tool_parameters_schema
 from gpt2giga.common.model_concurrency import (
     ModelConcurrencyLimiter,
     ModelConcurrencyTimeoutError,
@@ -133,10 +132,7 @@ class GigaChatProviderAdapter:
         context: RequestContext | None = None,
     ) -> NormalizedResponse:
         """Execute a non-streaming normalized chat request."""
-        payload = normalized_chat_to_openai_payload(
-            request,
-            include_builtin_tools=self._builtin_tool_mapping_enabled(),
-        )
+        payload = normalized_chat_to_openai_payload(request)
         mode = self._resolve_api_mode()
         if mode == "v2":
             return await self._chat_completion(payload, request, context=context)
@@ -154,10 +150,7 @@ class GigaChatProviderAdapter:
         if self.response_processor is None:
             raise RuntimeError("response_processor is required for streaming")
 
-        payload = normalized_chat_to_openai_payload(
-            request,
-            include_builtin_tools=self._builtin_tool_mapping_enabled(),
-        )
+        payload = normalized_chat_to_openai_payload(request)
         mode = self._resolve_api_mode()
         if mode == "v2":
             async for event in self._stream_chat_completion(
@@ -182,13 +175,6 @@ class GigaChatProviderAdapter:
     def _resolve_api_mode(self) -> Literal["v1", "v2"]:
         return self.api_mode or getattr(
             self.config.proxy_settings, "gigachat_api_mode", "v1"
-        )
-
-    def _builtin_tool_mapping_enabled(self) -> bool:
-        return not getattr(
-            self.config.proxy_settings,
-            "disable_builtin_tool_mapping",
-            False,
         )
 
     def _resolve_model(self, payload: Any) -> ResolvedUpstreamModel:
@@ -329,8 +315,11 @@ class GigaChatProviderAdapter:
                         if await _is_disconnected(is_disconnected):
                             _log_disconnect(logger, context)
                             break
-                        yield mapper.chunk_to_event(chunk)
+                        for event in mapper.chunk_to_events(chunk):
+                            yield event
 
+            for event in mapper.flush_tool_events():
+                yield event
             for event in mapper.flush_reasoning_events():
                 yield event
         except ModelConcurrencyTimeoutError as exc:
@@ -401,10 +390,13 @@ class GigaChatProviderAdapter:
                             chunk,
                             default_model=request.model or resolution.model or "",
                         )
-                        yield mapper.chunk_to_event(
+                        for event in mapper.chunk_to_events(
                             SimpleNamespace(model_dump=lambda: adapted)
-                        )
+                        ):
+                            yield event
 
+            for event in mapper.flush_tool_events():
+                yield event
             for event in mapper.flush_reasoning_events():
                 yield event
         except ModelConcurrencyTimeoutError as exc:
@@ -442,17 +434,12 @@ class GigaChatProviderAdapter:
             response_processor=self.response_processor,
             requested_model=effective_model,
             response_id=context.request_id if context is not None else "stream",
-            request_data=normalized_chat_to_openai_payload(
-                request,
-                include_builtin_tools=self._builtin_tool_mapping_enabled(),
-            ),
+            request_data=normalized_chat_to_openai_payload(request),
         )
 
 
 def normalized_chat_to_openai_payload(
     request: NormalizedChatRequest,
-    *,
-    include_builtin_tools: bool = True,
 ) -> dict[str, Any]:
     """Reconstruct an OpenAI Chat payload from normalized chat fields."""
     payload: dict[str, Any] = {
@@ -468,23 +455,14 @@ def normalized_chat_to_openai_payload(
         tools = [
             tool_payload
             for tool in request.tools
-            if (
-                tool_payload := _tool_to_openai(
-                    tool,
-                    include_builtin_tools=include_builtin_tools,
-                )
-            )
-            is not None
+            if (tool_payload := _tool_to_openai(tool)) is not None
         ]
         if tools:
             payload["tools"] = tools
     if request.tool_choice is not None:
-        tool_choice = _tool_choice_to_openai(
-            request.tool_choice,
-            include_builtin_tools=include_builtin_tools,
-        )
-        if tool_choice is not None:
-            payload["tool_choice"] = tool_choice
+        payload["tool_choice"] = request.tool_choice
+    if request.parallel_tool_calls is not None:
+        payload["parallel_tool_calls"] = request.parallel_tool_calls
     if request.response_format is not None:
         payload["response_format"] = request.response_format.to_json_dict()
 
@@ -504,6 +482,9 @@ def normalized_chat_to_openai_payload(
     reasoning_effort = generation.raw_extensions.get("reasoning_effort")
     if request.protocol == "anthropic" and isinstance(reasoning_effort, str):
         payload["reasoning_effort"] = reasoning_effort
+        reasoning = generation.raw_extensions.get("reasoning")
+        if isinstance(reasoning, Mapping):
+            payload["reasoning"] = dict(reasoning)
 
     if request.protocol == "openai":
         payload.update(request.raw_extensions)
@@ -593,14 +574,10 @@ def _content_part_to_openai(part: NormalizedContentPart) -> dict[str, Any]:
 
 def _tool_to_openai(
     tool: NormalizedTool,
-    *,
-    include_builtin_tools: bool = True,
 ) -> dict[str, Any] | None:
     raw_extensions = dict(tool.raw_extensions)
     builtin_field_name = normalize_gigachat_builtin_tool_type(tool.type)
     if builtin_field_name is not None:
-        if not include_builtin_tools:
-            return None
         source: dict[str, Any] = {"type": tool.type}
         source.update(tool.configuration)
         source.update(raw_extensions)
@@ -609,13 +586,12 @@ def _tool_to_openai(
     if tool.kind is NormalizedToolKind.HOSTED:
         raise ValueError(f"GigaChat cannot map hosted tool type {tool.type!r}")
 
-    parameters = normalize_tool_parameters_schema(tool.parameters)
     payload = {
         "type": tool.type,
         "function": {
             "name": tool.name,
             "description": tool.description,
-            "parameters": parameters,
+            "parameters": dict(tool.parameters),
         },
     }
     function_payload = {
@@ -627,30 +603,6 @@ def _tool_to_openai(
         payload["function"].update(dict(function_extensions))
     payload.update(raw_extensions)
     return payload
-
-
-def _tool_choice_to_openai(
-    tool_choice: Any,
-    *,
-    include_builtin_tools: bool = True,
-) -> Any | None:
-    if include_builtin_tools:
-        return tool_choice
-    if isinstance(tool_choice, str):
-        if normalize_gigachat_builtin_tool_type(tool_choice) is not None:
-            return None
-        return tool_choice
-    if not isinstance(tool_choice, Mapping):
-        return tool_choice
-
-    choice_type = tool_choice.get("type")
-    if normalize_gigachat_builtin_tool_type(choice_type) is not None:
-        return None
-    if choice_type == "tool":
-        tool_name = tool_choice.get("name")
-        if normalize_gigachat_builtin_tool_type(tool_name) is not None:
-            return None
-    return tool_choice
 
 
 def _tool_call_to_openai(tool_call: NormalizedToolCall) -> dict[str, Any]:
@@ -741,6 +693,18 @@ def _response_message_to_normalized(value: Any) -> NormalizedMessage | None:
     function_call = value.get("function_call")
     if isinstance(function_call, Mapping):
         tool_calls.append(_function_call_to_normalized(function_call, value))
+    for tool_call in value.get("tool_calls") or []:
+        if not isinstance(tool_call, Mapping):
+            continue
+        function = tool_call.get("function")
+        if isinstance(function, Mapping):
+            tool_calls.append(
+                _function_call_to_normalized(
+                    function,
+                    tool_call,
+                    message_state_id=_explicit_backend_state_id(value),
+                )
+            )
     return NormalizedMessage(
         role=str(value.get("role", "assistant")),
         content=value.get("content"),
@@ -753,6 +717,7 @@ def _response_message_to_normalized(value: Any) -> NormalizedMessage | None:
                 "role",
                 "content",
                 "function_call",
+                "tool_calls",
             }
         },
     )
@@ -761,13 +726,25 @@ def _response_message_to_normalized(value: Any) -> NormalizedMessage | None:
 def _function_call_to_normalized(
     function_call: Mapping[str, Any],
     message: Mapping[str, Any],
+    *,
+    message_state_id: str | None = None,
 ) -> NormalizedToolCall:
     arguments = function_call.get("arguments", {})
+    state_id = _explicit_backend_state_id(message) or message_state_id
     return NormalizedToolCall(
-        id=_backend_state_id_from_message(message),
+        id=(
+            function_call.get("id")
+            or function_call.get("id_")
+            or (
+                str(message.get("id"))
+                if isinstance(message.get("id"), str) and message.get("id")
+                else _backend_state_id_from_message(message)
+            )
+        ),
         type="function",
         name=map_tool_name_from_gigachat(str(function_call.get("name", ""))),
         arguments=arguments,
+        raw_extensions={"tools_state_id": state_id} if state_id else {},
     )
 
 
@@ -777,9 +754,15 @@ def _usage_to_normalized(value: Any) -> NormalizedUsage | None:
     input_tokens = value.get("prompt_tokens", value.get("input_tokens"))
     output_tokens = value.get("completion_tokens", value.get("output_tokens"))
     return NormalizedUsage(
-        input_tokens=input_tokens,
+        input_tokens=(input_tokens + (value.get("precached_prompt_tokens") or 0))
+        if input_tokens is not None
+        else None,
         output_tokens=output_tokens,
-        total_tokens=value.get("total_tokens"),
+        total_tokens=(
+            value["total_tokens"] + (value.get("precached_prompt_tokens") or 0)
+        )
+        if value.get("total_tokens") is not None
+        else None,
         raw_extensions={
             key: item
             for key, item in value.items()
@@ -797,6 +780,15 @@ def _usage_to_normalized(value: Any) -> NormalizedUsage | None:
 
 def _response_metadata(data: Mapping[str, Any]) -> dict[str, Any]:
     metadata: dict[str, Any] = {}
+    provider_metadata = data.get("_gpt2giga_provider_metadata")
+    if isinstance(provider_metadata, Mapping):
+        metadata.update(provider_metadata)
+    for key in ("additional_data", "error_details"):
+        value = data.get(key)
+        if isinstance(value, (dict, list)):
+            metadata[f"gigachat_{key}"] = json.dumps(
+                value, ensure_ascii=False, separators=(",", ":")
+            )
     headers = data.get("x_headers")
     if isinstance(headers, Mapping):
         for key, value in headers.items():
@@ -809,23 +801,27 @@ def _response_metadata(data: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _backend_state_id_from_message(message: Mapping[str, Any]) -> str | None:
+    value = _explicit_backend_state_id(message) or message.get("tool_call_id")
+    if not isinstance(value, str):
+        return None
+    state_id = value.strip()
+    if not state_id:
+        return None
+    if state_id.startswith("fc_") and len(state_id) > len("fc_"):
+        return state_id.removeprefix("fc_")
+    return state_id
+
+
+def _explicit_backend_state_id(message: Mapping[str, Any]) -> str | None:
     for field_name in (
         "tools_state_id",
         "tool_state_id",
         "functions_state_id",
         "function_state_id",
-        "tool_call_id",
     ):
         value = message.get(field_name)
-        if not isinstance(value, str):
-            continue
-        state_id = value.strip()
-        if not state_id:
-            continue
-        for prefix in ("fc_", "call_"):
-            if state_id.startswith(prefix) and len(state_id) > len(prefix):
-                return state_id.removeprefix(prefix)
-        return state_id
+        if isinstance(value, str) and value.strip():
+            return value
     return None
 
 

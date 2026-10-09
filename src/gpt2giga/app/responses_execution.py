@@ -42,11 +42,9 @@ from gpt2giga.protocols.openai import (
     normalized_chat_response_to_responses,
 )
 from gpt2giga.providers.gigachat import GigaChatProviderAdapter
+from gpt2giga.providers.gigachat.model_options import parallel_tool_calls_enabled
 from gpt2giga.providers.gigachat.model_resolution import resolve_upstream_model
-from gpt2giga.routers.openai.helpers import (
-    populate_giga_functions,
-    request_attachment_ids,
-)
+from gpt2giga.routers.openai.helpers import request_attachment_ids
 from gpt2giga.sinks.observability.responses import (
     emit_openai_response_observability,
     observe_openai_response_stream,
@@ -68,7 +66,6 @@ class NativeGigaChatResponsesExecutor:
         mode = resolve_gigachat_api_mode(request)
         conversation_turn = await stitch_responses_payload(request, data, mode=mode)
 
-        populate_giga_functions(data, getattr(state, "logger", None))
         attachment_ids = request_attachment_ids(request)
         attachment_kwargs = {"attachment_ids": attachment_ids} if attachment_ids else {}
         if mode == "v2":
@@ -132,7 +129,10 @@ class NativeGigaChatResponsesExecutor:
                 )
             response_id = extract_chat_completion_thread_id(response) or current_rquid
             result = state.response_processor.process_response_api(
-                data,
+                {
+                    **data,
+                    "parallel_tool_calls": parallel_tool_calls_enabled(chat_request),
+                },
                 SimpleNamespace(model_dump=lambda: adapted),
                 data["model"],
                 response_id,
@@ -169,7 +169,7 @@ class NativeGigaChatResponsesExecutor:
                 async with gigachat_request_options(giga_client, request_options):
                     response = await giga_client.achat(chat_messages)
             result = state.response_processor.process_response_api(
-                data,
+                {**data, "parallel_tool_calls": False},
                 response,
                 data["model"],
                 current_rquid,
@@ -335,9 +335,13 @@ class NormalizedBridgeResponsesExecutor:
                 else data["model"]
             ),
             response_id=response_id,
+            default_parallel_tool_calls=(
+                getattr(provider_adapter, "name", None) != "gigachat"
+            ),
         )
 
         async def emit_stream():
+            pending_message_end = None
             try:
                 async for event in provider_adapter.stream_chat(
                     normalized_request,
@@ -345,7 +349,25 @@ class NormalizedBridgeResponsesExecutor:
                     is_disconnected=request.is_disconnected,
                     logger=getattr(state, "logger", None),
                 ):
+                    if event.type == "message_end":
+                        if pending_message_end is not None:
+                            raise ResponsesStreamProtocolError(
+                                "duplicate normalized message_end"
+                            )
+                        pending_message_end = event
+                        continue
+                    if event.type == "usage" and pending_message_end is not None:
+                        pending_message_end = pending_message_end.model_copy(
+                            update={
+                                "sequence": event.sequence,
+                                "usage": event.usage,
+                            }
+                        )
+                        continue
                     for frame in projector.project(event):
+                        yield frame
+                if pending_message_end is not None:
+                    for frame in projector.project(pending_message_end):
                         yield frame
                 if await request.is_disconnected():
                     return
@@ -413,6 +435,12 @@ async def _normalized_provider_adapter(
 
 def _reject_unprofiled_injected_semantics(normalized_request) -> None:
     """Fail closed when a test-only route has no capability evidence."""
+    if normalized_request.parallel_tool_calls is not None:
+        raise ClientCompatibilityError(
+            "The selected bridge route cannot preserve this semantic.",
+            param="parallel_tool_calls",
+            code="unsupported_semantic",
+        )
     response_state = normalized_request.response_state
     if response_state is not None:
         if response_state.previous_response_id is not None:

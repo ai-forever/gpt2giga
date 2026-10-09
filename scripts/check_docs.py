@@ -253,7 +253,7 @@ def check_package_urls(root: Path) -> list[Issue]:
 
 
 def check_gigachat_dependency_floor(root: Path) -> list[Issue]:
-    """Require the stable GigaChat SDK compatibility range in root metadata."""
+    """Require the native-schema GigaChat SDK range in root metadata."""
     path = root / "pyproject.toml"
     metadata = tomllib.loads(path.read_text(encoding="utf-8"))
     dependencies = metadata["project"].get("dependencies", [])
@@ -263,15 +263,17 @@ def check_gigachat_dependency_floor(root: Path) -> list[Issue]:
         if isinstance(dependency, str)
         and re.match(r"^gigachat(?:\s|[<>=!~])", dependency, re.IGNORECASE)
     ]
-    expected = re.compile(r"^gigachat\s*>=\s*0\.2\.3\s*,\s*<\s*0\.3\.0$", re.IGNORECASE)
+    expected = re.compile(
+        r"^gigachat\s*>=\s*0\.2\.4a1\s*,\s*<\s*0\.3\.0$", re.IGNORECASE
+    )
     if len(requirements) == 1 and expected.fullmatch(requirements[0]):
         return []
     actual = ", ".join(requirements) if requirements else "missing"
     return [
         Issue(
             path,
-            "gigachat dependency must use the stable range "
-            f"'>=0.2.3,<0.3.0'; found {actual!r}",
+            "gigachat dependency must use the native-schema range "
+            f"'>=0.2.4a1,<0.3.0'; found {actual!r}",
         )
     ]
 

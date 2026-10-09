@@ -42,3 +42,16 @@ GigaChat-specific built-in tools в `tools/gigachat_tools/` оставлены �
 - `structured_outputs/structured_output.py`, `structured_outputs/structured_output_nested.py`: Structured Outputs
 - `structured_outputs/json_schema.py`: JSON Schema
 - `multimodal/image_url.py`, `multimodal/base64_image.py`: изображения
+
+## Контракты 0.3.1a1
+
+[Обязательные вызовы в потоке](tools/required_parallel_stream.py) показывают
+`tool_choice="required"`, `parallel_tool_calls`, сбор финального `response.completed`
+и возврат всех результатов по `call_id`. Даже одинаковые имена функций не смешиваются.
+Общий `tools_state_id` берётся из metadata шлюза и переносится отдельно от ID вызова.
+Финальный запрос использует `tool_choice="none"`, чтобы не требовать новый вызов.
+
+[Stateful-пример](basic/stateful.py) использует явный `/v2` независимо от настройки
+прокси. Сохраните `response.id` на клиенте: `GET /responses/{id}` не реализован.
+В v1 `store=true` и `previous_response_id` возвращают 400. Отсутствие `store`
+отображается как `false`; неуказанные `temperature` и `top_p` — как `null`.

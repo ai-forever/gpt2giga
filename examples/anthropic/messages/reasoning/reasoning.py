@@ -5,14 +5,16 @@
   budget_tokens >= 3000  → reasoning_effort="medium"
   budget_tokens <  3000  → reasoning_effort="low"
 
-GigaChat вернёт reasoning_content, который прокси конвертирует
+Бюджет также передаётся как reasoning_max_tokens (v1) или
+model_options.reasoning.max_tokens (v2), а не только выбирает effort.
+Если модель вернёт reasoning_content, прокси конвертирует его
 в блок thinking формата Anthropic.
 """
 
 from anthropic import Anthropic
 
 api_version = "v2"
-client = Anthropic(base_url=f"http://localhost:8090/{api_version}/", api_key="any-key")
+client = Anthropic(base_url=f"http://localhost:8090/{api_version}/", api_key="0")
 
 message = client.messages.create(
     model="GigaChat-2-Max",

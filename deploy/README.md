@@ -16,6 +16,8 @@ cp .env.example .env
 | `traefik.yaml` | Traefik и несколько инстансов gpt2giga. |
 | `nginx.yaml` | Минимальный nginx reverse-proxy stack. |
 | `observability.yaml` | gpt2giga с mitmproxy. |
+| `chat-completions-observability.yaml` | Локальный Chat Completions bridge с mitmproxy в reverse mode. |
+| `providers.chat-completions.example.yaml` | Профиль одной модели для reverse-mode bridge. |
 | `observe-multiple.yaml` | Несколько model-specific gpt2giga инстансов с mitmproxy. |
 | `mitmproxy.yaml` | Optional mitmproxy overlay для `base.yaml` и других overlays. |
 | `postgres.yaml` | Optional Postgres traffic-log backend. |
@@ -90,6 +92,22 @@ docker compose --env-file .env -f deploy/observability.yaml --profile DEV up -d
 Для composable запуска поверх `base.yaml` используйте `deploy/mitmproxy.yaml`.
 
 Используйте только для локальной отладки. Не открывайте mitmproxy наружу.
+
+Для OpenAI-compatible upstream обычных `HTTP_PROXY`/`HTTPS_PROXY` недостаточно:
+этот adapter не использует proxy-переменные окружения. Запустите отдельный
+reverse-mode стек, который делит network namespace между gpt2giga и mitmproxy:
+
+```sh
+docker compose --env-file .env \
+  -f deploy/chat-completions-observability.yaml up -d --build
+```
+
+По умолчанию mitmproxy отправляет запросы на
+`http://host.docker.internal:29999`, gateway слушает
+`http://127.0.0.1:8090`, а web UI — `http://127.0.0.1:8081`. Задайте
+`MITMPROXY_UPSTREAM_URL` и `GPT2GIGA_PROVIDER_CONFIG_FILE`, если адрес upstream
+или путь к profile-файлу отличаются. Туннель на host-машине должен работать до
+первого модельного запроса.
 
 ## Обновление и остановка
 

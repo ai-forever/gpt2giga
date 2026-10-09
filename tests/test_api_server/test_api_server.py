@@ -144,6 +144,31 @@ def test_v1_models_no_307_redirect(monkeypatch):
         )
 
 
+def test_codex_models_catalog_does_not_contact_provider(monkeypatch):
+    """Codex model metadata stays client-owned for explicit custom models."""
+
+    class FakeGigaChat:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def aget_models(self):
+            raise AssertionError("Codex catalog must not contact the provider")
+
+    monkeypatch.setattr(
+        "gpt2giga.app.lifecycle.create_gigachat_client",
+        lambda settings: FakeGigaChat(),
+    )
+
+    with TestClient(create_app()) as client:
+        response = client.get(
+            "/v1/models",
+            params={"client_version": "0.146.0"},
+        )
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {"models": []}
+
+
 def test_redirect_slashes_disabled():
     """FastAPI app must be created with redirect_slashes=False."""
     app = create_app()

@@ -1,3 +1,5 @@
+import json
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from loguru import logger
@@ -126,6 +128,7 @@ def test_responses_nonstream_uses_normalized_protocol_and_provider_owners() -> N
 
     assert response.status_code == 200
     assert response.json()["model"] == "bridge/codex-test"
+    assert response.json()["parallel_tool_calls"] is False
     assert response.json()["output"][0]["content"][0]["text"] == "normalized"
     assert response.json()["usage"] == {
         "input_tokens": 2,
@@ -175,6 +178,23 @@ def test_responses_normalized_rejects_state_and_reasoning_before_provider_io(
     assert transformer.chat_calls == []
     assert transformer.native_responses_calls == []
     assert giga_client.calls == []
+
+
+def test_responses_normalized_accepts_reasoning_none_as_disabled() -> None:
+    app, giga_client, transformer = _app()
+
+    response = TestClient(app).post(
+        "/responses",
+        json={
+            "input": "hello",
+            "model": "bridge/codex-test",
+            "reasoning": {"effort": "none", "summary": "auto"},
+        },
+    )
+
+    assert response.status_code == 200
+    assert len(transformer.chat_calls) == 1
+    assert len(giga_client.calls) == 1
 
 
 def test_responses_native_path_requires_no_workaround_flag() -> None:
@@ -244,6 +264,14 @@ def test_responses_stream_uses_normalized_events_without_native_fallback() -> No
     ]
     assert '"text": "normalized"' in body
     assert '"total_tokens": 5' in body
+    responses = [
+        event["response"]
+        for line in body.splitlines()
+        if line.startswith("data: ")
+        and "response" in (event := json.loads(line.removeprefix("data: ")))
+    ]
+    assert len(responses) == 2
+    assert all(response["parallel_tool_calls"] is False for response in responses)
     assert transformer.native_responses_calls == []
     assert giga_client.calls == []
     assert len(giga_client.stream_calls) == 1

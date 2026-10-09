@@ -116,11 +116,10 @@ def test_gemini_adapter_maps_generate_content_to_normalized_request():
     assert payload["tools"][0]["parameters"]["type"] == "object"
     assert payload["tools"][0]["parameters"]["properties"]["q"]["type"] == "string"
     assert payload["tools"][0]["parameters"]["properties"]["answers"] == {
-        "type": "object",
-        "properties": {},
+        "type": "object"
     }
     assert payload["tools"][0]["parameters"]["properties"]["limit"]["type"] == (
-        "integer"
+        ["integer", "null"]
     )
     assert payload["tool_choice"] == {
         "type": "function",
@@ -174,6 +173,17 @@ def test_gemini_adapter_maps_response_json_schema_alias_to_json_schema():
 )
 def test_gemini_adapter_maps_function_parameters_json_schema(schema_key):
     adapter = GeminiProtocolAdapter()
+    schema = {
+        "$defs": {"line": {"type": ["integer", "null"]}},
+        "type": "object",
+        "properties": {
+            "path": {"type": "string", "format": "uri-reference"},
+            "start_line": {"$ref": "#/$defs/line"},
+            "mode": {"anyOf": [{"const": "text"}, {"const": 1}]},
+        },
+        "required": ["path"],
+        "unevaluatedProperties": False,
+    }
 
     normalized = adapter.generate_content_to_normalized(
         {
@@ -184,14 +194,7 @@ def test_gemini_adapter_maps_function_parameters_json_schema(schema_key):
                         {
                             "name": "read_file",
                             "description": "Read a file.",
-                            schema_key: {
-                                "type": "object",
-                                "properties": {
-                                    "path": {"type": "string"},
-                                    "start_line": {"type": "integer"},
-                                },
-                                "required": ["path"],
-                            },
+                            schema_key: schema,
                         }
                     ]
                 }
@@ -203,14 +206,7 @@ def test_gemini_adapter_maps_function_parameters_json_schema(schema_key):
     tool = normalized.tools[0]
 
     assert tool.name == "read_file"
-    assert tool.parameters == {
-        "type": "object",
-        "properties": {
-            "path": {"type": "string"},
-            "start_line": {"type": "integer"},
-        },
-        "required": ["path"],
-    }
+    assert tool.parameters == schema
     assert schema_key not in tool.raw_extensions
 
 
@@ -288,6 +284,30 @@ def test_gemini_adapter_maps_function_calling_config(
 
     assert normalized.tool_choice == expected_tool_choice
     assert [tool.name for tool in normalized.tools] == expected
+
+
+def test_gemini_adapter_enables_parallel_calls_for_multiple_functions():
+    normalized = GeminiProtocolAdapter().generate_content_to_normalized(
+        _gemini_tool_config_payload(
+            {"mode": "AUTO"},
+            declarations=("first", "second"),
+        ),
+        model="GigaChat-2-Max",
+    )
+
+    assert normalized.parallel_tool_calls is True
+
+
+def test_gemini_adapter_does_not_request_parallel_calls_for_one_function():
+    normalized = GeminiProtocolAdapter().generate_content_to_normalized(
+        _gemini_tool_config_payload(
+            {"mode": "AUTO"},
+            declarations=("first",),
+        ),
+        model="GigaChat-2-Max",
+    )
+
+    assert normalized.parallel_tool_calls is None
 
 
 @pytest.mark.parametrize(
@@ -555,30 +575,6 @@ def test_gemini_adapter_maps_supported_builtin_tools_to_gigachat_tools():
     ]
     assert normalized.raw_extensions["unsupportedTools"] == [
         {"googleMaps": {"api_key": "secret-gemini-key"}}
-    ]
-
-
-def test_gemini_adapter_keeps_provider_tools_diagnostics_only_when_mapping_disabled():
-    adapter = GeminiProtocolAdapter()
-
-    normalized = adapter.generate_content_to_normalized(
-        {
-            "contents": [{"parts": [{"text": "hello"}]}],
-            "tools": [
-                {"googleSearch": {"indexes": ["web"]}},
-                {"urlContext": {"max_uses": 2}, "codeExecution": {}},
-                {"googleMaps": {"api_key": "secret-gemini-key"}},
-            ],
-        },
-        model="gemini-pro",
-        builtin_tool_mapping_enabled=False,
-    )
-
-    assert normalized.tools == []
-    assert normalized.raw_extensions["unsupportedTools"] == [
-        {"googleSearch": {"indexes": ["web"]}},
-        {"urlContext": {"max_uses": 2}, "codeExecution": {}},
-        {"googleMaps": {"api_key": "secret-gemini-key"}},
     ]
 
 
@@ -916,6 +912,69 @@ def test_gemini_bridge_rejects_unmodeled_semantics_before_transport():
         execute_after_admission()
 
     assert transport_called is False
+
+
+def test_gemini_bridge_accepts_only_synthetic_cli_tool_thought_signature():
+    adapter = GeminiProtocolAdapter()
+    payload = {
+        "contents": [
+            {
+                "role": "model",
+                "parts": [
+                    {
+                        "functionCall": {
+                            "id": "call-1",
+                            "name": "lookup",
+                            "args": {"q": "ping"},
+                        },
+                        "thoughtSignature": "skip_thought_signature_validator",
+                    }
+                ],
+            },
+            {
+                "role": "user",
+                "parts": [
+                    {
+                        "functionResponse": {
+                            "id": "call-1",
+                            "name": "lookup",
+                            "response": {"value": "pong"},
+                        }
+                    }
+                ],
+            },
+        ]
+    }
+
+    normalized = adapter.generate_content_to_normalized(
+        payload,
+        model="local-model",
+    )
+    admission = admit_protocol_bridge_request(
+        normalized,
+        downstream=DownstreamProtocol.GEMINI,
+        upstream=_bridge_capabilities(),
+        downstream_capabilities=frozenset(BridgeFeature),
+        input_token_count=1,
+    )
+
+    assert admission.downstream is DownstreamProtocol.GEMINI
+    assert normalized.messages[0].tool_calls[0].raw_extensions == {}
+
+    payload["contents"][0]["parts"][0]["thoughtSignature"] = "opaque-signature"
+    normalized = adapter.generate_content_to_normalized(
+        payload,
+        model="local-model",
+    )
+
+    with pytest.raises(UnsupportedSemanticLossError, match="raw_extensions"):
+        admit_protocol_bridge_request(
+            normalized,
+            downstream=DownstreamProtocol.GEMINI,
+            upstream=_bridge_capabilities(),
+            downstream_capabilities=frozenset(BridgeFeature),
+            input_token_count=1,
+        )
 
 
 def test_gemini_adapter_maps_count_tokens_to_normalized_operation():

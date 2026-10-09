@@ -1,0 +1,68 @@
+# Local Chat Completions bridge with reverse-mode mitmproxy interception.
+#
+# The gateway and mitmproxy share one network namespace. The provider profile
+# can therefore use the permitted loopback destination 127.0.0.1:8080, while
+# mitmproxy forwards the request to a service exposed on the Docker host.
+
+x-gpt2giga-common: &gpt2giga-common
+  image: gpt2giga:chat-completions-local
+  build:
+    context: ..
+    dockerfile: Dockerfile
+    args:
+      PYTHON_VERSION: "3.13"
+  restart: unless-stopped
+  env_file:
+    - ../.env
+  environment:
+    GPT2GIGA_HOST: 0.0.0.0
+    GPT2GIGA_MODE: "DEV"
+    GPT2GIGA_CONFIG: /etc/gpt2giga/providers.yaml
+  volumes:
+    - "${GPT2GIGA_PROVIDER_CONFIG_FILE:-./providers.chat-completions.example.yaml}:/etc/gpt2giga/providers.yaml:ro"
+  network_mode: "service:mitmproxy"
+  depends_on:
+    mitmproxy:
+      condition: service_started
+
+services:
+  gpt2giga:
+    <<: *gpt2giga-common
+
+  mitmproxy:
+    image: mitmproxy/mitmproxy:latest
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ~/.mitmproxy:/home/mitmproxy/.mitmproxy
+      - ../scripts/sse_event.py:/app/sse_event.py:ro
+    command:
+      - mitmweb
+      - --mode
+      - "reverse:${MITMPROXY_UPSTREAM_URL:-http://host.docker.internal:29999}"
+      - --listen-host
+      - 0.0.0.0
+      - --listen-port
+      - "8080"
+      - --web-host
+      - 0.0.0.0
+      - --web-port
+      - "8081"
+      - --ssl-insecure
+      - --set
+      - "web_password=${MITMPROXY_PASSWORD:-}"
+      - --set
+      - connection_strategy=lazy
+      - --set
+      - http2=false
+      - --set
+      - anticomp=true
+      - -s
+      - /app/sse_event.py
+    ports:
+      - "127.0.0.1:${GPT2GIGA_PORT:-8090}:${GPT2GIGA_PORT:-8090}"
+      - "127.0.0.1:${MITMPROXY_PORT:-8080}:8080"
+      - "127.0.0.1:${MITMPROXY_WEB_PORT:-8081}:8081"
+    stdin_open: true
+    tty: true

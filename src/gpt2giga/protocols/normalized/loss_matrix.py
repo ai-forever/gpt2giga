@@ -29,6 +29,7 @@ class BridgeFeature(str, Enum):
     TEXT = "text"
     IMAGE_REFERENCES = "image_references"
     GENERATION_CONTROLS = "generation_controls"
+    REASONING_CONTROLS_AND_SUMMARIES = "reasoning_controls_and_summaries"
     FUNCTION_TOOLS = "function_tools"
     TOOL_CHOICE = "tool_choice"
     PARALLEL_TOOL_CALLS = "parallel_tool_calls"
@@ -126,6 +127,7 @@ _BRIDGE_FEATURES = (
     BridgeFeature.TEXT,
     BridgeFeature.IMAGE_REFERENCES,
     BridgeFeature.GENERATION_CONTROLS,
+    BridgeFeature.REASONING_CONTROLS_AND_SUMMARIES,
     BridgeFeature.FUNCTION_TOOLS,
     BridgeFeature.TOOL_CHOICE,
     BridgeFeature.PARALLEL_TOOL_CALLS,
@@ -434,6 +436,7 @@ _EXACT = {
 _CONDITIONAL = {
     BridgeFeature.IMAGE_REFERENCES,
     BridgeFeature.GENERATION_CONTROLS,
+    BridgeFeature.REASONING_CONTROLS_AND_SUMMARIES,
     BridgeFeature.JSON_SCHEMA_OUTPUT,
     BridgeFeature.CONTEXT_TOKEN_LIMITS,
 }
@@ -553,6 +556,7 @@ _PREVIEW_CONDITIONAL_SEMANTICS = {
     BridgeSemantic.PARALLEL_TOOL_CALLS,
     BridgeSemantic.STRUCTURED_OUTPUT_JSON_SCHEMA,
     BridgeSemantic.SAFETY_AND_REFUSAL,
+    BridgeSemantic.REASONING_CONTROLS_AND_SUMMARIES,
     BridgeSemantic.FILES_AND_IMAGES,
 }
 
@@ -651,6 +655,26 @@ def _build_bridge_loss_matrix() -> BridgeLossMatrix:
                     ),
                 }[protocol]
                 provider_window = "gigachat-python>=0.2.3,<0.3.0"
+            elif (
+                provider is UpstreamProvider.OPENAI_COMPATIBLE
+                and protocol is not PublicProtocol.OPENAI_CHAT_COMPLETIONS
+            ):
+                status = BridgeSupportStatus.TECHNICAL_PREVIEW
+                reason_ids = ("openai_chat_completions_facade",)
+                evidence_ids = (
+                    {
+                        PublicProtocol.OPENAI_RESPONSES: (
+                            "E2E-RESPONSES-TO-OPENAI-COMPATIBLE-2026-08-06"
+                        ),
+                        PublicProtocol.ANTHROPIC_MESSAGES: (
+                            "E2E-ANTHROPIC-TO-OPENAI-COMPATIBLE-2026-08-06"
+                        ),
+                        PublicProtocol.GEMINI_GENERATE_CONTENT: (
+                            "E2E-GEMINI-TO-OPENAI-COMPATIBLE-2026-08-06"
+                        ),
+                    }[protocol],
+                )
+                provider_window = "openai-chat-completions-v1"
             else:
                 status = BridgeSupportStatus.BLOCKED
                 reason_ids = ("route_not_integrated",)
@@ -925,6 +949,13 @@ def _required_features(
     )
     if any(value is not None for value in generation_values.values()):
         required.add(BridgeFeature.GENERATION_CONTROLS)
+    if request.reasoning is not None:
+        _reject_extensions(request.reasoning, path="reasoning", issues=issues)
+        required.add(BridgeFeature.REASONING_CONTROLS_AND_SUMMARIES)
+        if request.reasoning.context is not None:
+            issues.append("reasoning.context has no Chat Completions representation")
+        if request.reasoning.mode is not None:
+            issues.append("reasoning.mode has no Chat Completions representation")
     if request.cancellation is not None:
         _reject_extensions(request.cancellation, path="cancellation", issues=issues)
     for index, message in enumerate(request.messages):
@@ -932,6 +963,10 @@ def _required_features(
         if message.role not in {"system", "user", "assistant", "tool"}:
             issues.append(f"{path}.role {message.role!r} is outside normalized v1")
         _reject_extensions(message, path=path, issues=issues)
+        if message.reasoning_content is not None:
+            required.add(BridgeFeature.REASONING_CONTROLS_AND_SUMMARIES)
+            if message.role != "assistant":
+                issues.append(f"{path}.reasoning_content requires the assistant role")
         if message.role == "tool":
             required.add(BridgeFeature.TOOL_RESULTS)
             if not message.tool_call_id:

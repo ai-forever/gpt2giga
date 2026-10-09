@@ -71,6 +71,12 @@ before the first response event is exposed. Streaming interruption, client
 disconnect, cancellation, destination mismatch, protocol error, and semantic
 rejection are not cross-route retry signals.
 
+The OpenAI-compatible chat-template repair policy is one such reviewed retry.
+It runs at most once, against the same profile and model, only for a confirmed
+5xx `chat_template_application_failed` with replayable tool history, and before
+`message_start`. The retry changes only the representation of prior tool turns;
+it does not switch route, model, account, credential, or current tool schema.
+
 All acquired model limits, network authorizations, response bodies, iterators,
 and owned clients are closed on success, failure, timeout, or cancellation.
 

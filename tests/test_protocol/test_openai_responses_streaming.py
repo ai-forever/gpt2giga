@@ -94,6 +94,38 @@ def test_responses_stream_projector_orders_text_lifecycle_and_usage() -> None:
     }
 
 
+def test_responses_stream_projector_exposes_chat_template_fallback() -> None:
+    projector = _projector()
+    frames = projector.project(NormalizedStreamEvent(type="message_start", sequence=0))
+    frames.extend(
+        projector.project(
+            NormalizedStreamEvent(
+                type="content_delta",
+                sequence=1,
+                content_delta="Recovered.",
+                metadata={
+                    "gpt2giga_chat_template_fallback": "tool_history_text_replay"
+                },
+            )
+        )
+    )
+    frames.extend(
+        projector.project(
+            NormalizedStreamEvent(
+                type="message_end",
+                sequence=2,
+                finish_reason="stop",
+            )
+        )
+    )
+    projector.finish()
+
+    completed = _event_data(frames[-1])
+    assert completed["response"]["metadata"] == {
+        "gpt2giga_chat_template_fallback": "tool_history_text_replay"
+    }
+
+
 def test_responses_stream_projector_orders_tool_lifecycle() -> None:
     projector = _projector()
     frames = projector.project(NormalizedStreamEvent(type="message_start", sequence=0))
@@ -129,6 +161,118 @@ def test_responses_stream_projector_orders_tool_lifecycle() -> None:
         "input_tokens": 5,
         "output_tokens": 2,
     }
+
+
+def test_responses_stream_projector_preserves_reasoning_before_tool_call() -> None:
+    projector = ResponsesStreamProjector(
+        request_payload={
+            "input": "inspect",
+            "model": "bridge/codex-test",
+            "stream": True,
+            "reasoning": {"effort": "xhigh", "summary": "auto"},
+        },
+        requested_model="bridge/codex-test",
+        response_id="reasoning",
+        created_at=100,
+    )
+    frames = projector.project(NormalizedStreamEvent(type="message_start", sequence=0))
+    frames.extend(
+        projector.project(
+            NormalizedStreamEvent(
+                type="reasoning_delta",
+                sequence=1,
+                reasoning_delta="Need repository state.",
+            )
+        )
+    )
+    frames.extend(
+        projector.project(
+            NormalizedStreamEvent(
+                type="tool_call_start",
+                sequence=2,
+                tool_call=NormalizedToolCall(
+                    id="call-status",
+                    name="git_status",
+                    arguments="{}",
+                ),
+            )
+        )
+    )
+    frames.extend(
+        projector.project(
+            NormalizedStreamEvent(
+                type="message_end",
+                sequence=3,
+                finish_reason="tool_calls",
+            )
+        )
+    )
+    projector.finish()
+
+    assert _event_names(frames) == [
+        "response.created",
+        "response.output_item.added",
+        "response.reasoning_summary_part.added",
+        "response.reasoning_summary_text.delta",
+        "response.reasoning_summary_text.done",
+        "response.reasoning_summary_part.done",
+        "response.output_item.done",
+        "response.output_item.added",
+        "response.function_call_arguments.delta",
+        "response.function_call_arguments.done",
+        "response.output_item.done",
+        "response.completed",
+    ]
+    completed = _event_data(frames[-1])["response"]
+    assert completed["reasoning"] == {"effort": "xhigh", "summary": "auto"}
+    assert completed["output"][0]["summary"][0]["text"] == ("Need repository state.")
+    assert completed["output"][1]["call_id"] == "call-status"
+
+
+def test_responses_stream_projector_restores_namespace_tool_identity() -> None:
+    projector = ResponsesStreamProjector(
+        request_payload={
+            "input": "inspect",
+            "model": "bridge/codex-test",
+            "stream": True,
+            "tools": [
+                {
+                    "type": "namespace",
+                    "name": "multi_agent_v1",
+                    "tools": [
+                        {
+                            "type": "function",
+                            "name": "spawn_agent",
+                            "parameters": {"type": "object"},
+                        }
+                    ],
+                }
+            ],
+        },
+        requested_model="bridge/codex-test",
+        response_id="fixture",
+        created_at=100,
+    )
+    frames = projector.project(NormalizedStreamEvent(type="message_start", sequence=0))
+    frames.extend(
+        projector.project(
+            NormalizedStreamEvent(
+                type="tool_call_start",
+                sequence=1,
+                tool_call=NormalizedToolCall(
+                    id="call_agent",
+                    name="multi_agent_v1__spawn_agent",
+                    arguments='{"task":"inspect"}',
+                ),
+                finish_reason="tool_calls",
+            )
+        )
+    )
+    projector.finish()
+
+    item = _event_data(frames[-2])["item"]
+    assert item["name"] == "spawn_agent"
+    assert item["namespace"] == "multi_agent_v1"
 
 
 def test_responses_stream_projector_projects_gigachat_hosted_results() -> None:

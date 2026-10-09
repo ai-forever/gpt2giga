@@ -209,6 +209,34 @@ def test_chat_completions_v2_mode_uses_chat_completion_create():
     assert app.state.gigachat_client.achat.chat_completion_calls == [{"contract": "v2"}]
 
 
+def test_chat_completions_v2_forwards_parallel_tool_calls():
+    app = make_app("v2")
+    client = TestClient(app)
+
+    response = client.post(
+        "/chat/completions",
+        json={
+            "model": "GigaChat-2-Max",
+            "messages": [{"role": "user", "content": "call both"}],
+            "parallel_tool_calls": True,
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {"name": "first", "parameters": {"type": "object"}},
+                },
+                {
+                    "type": "function",
+                    "function": {"name": "second", "parameters": {"type": "object"}},
+                },
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    request_data = app.state.request_transformer.chat_completion_calls[0][0]
+    assert request_data["parallel_tool_calls"] is True
+
+
 @pytest.mark.parametrize("mode", ["v1", "v2"])
 @pytest.mark.parametrize("stream", [False, True])
 def test_chat_completions_missing_upstream_model_returns_400_without_io(

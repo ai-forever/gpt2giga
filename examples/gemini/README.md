@@ -79,6 +79,7 @@ uv run python examples/gemini/content/generate_content.py
 uv run python examples/gemini/content/stream_generate_content.py
 uv run python examples/gemini/content/chat.py
 uv run python examples/gemini/content/stateful.py
+uv run python examples/gemini/content/parallel_function_calling.py
 uv run python examples/gemini/content/gigachat_tools/code_interpreter.py
 uv run python examples/gemini/content/gigachat_tools/image_generate.py
 uv run python examples/gemini/count_tokens/count_tokens.py
@@ -121,5 +122,7 @@ uv run python examples/gemini/batches/batches.py
   там, где SDK или raw Gemini-compatible payload может передать соответствующее
   поле tool. Safety enforcement, `cachedContent`, non-text embeddings content и
   часть мультимодальных/file-backed сценариев всё ещё остаются вне scope.
+- Параллельные function calls поддерживаются для `GigaChat-2-Max` через `/v2`;
+  пример проверяет два вызова и возвращает оба результата одним следующим ходом.
 - `countTokens` использует GigaChat token counting по извлеченному тексту и
   является compatibility approximation, а не точным Gemini tokenizer.

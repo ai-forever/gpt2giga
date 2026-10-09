@@ -15,6 +15,7 @@ from gpt2giga.providers.profiles import (
     INSPECT_SCHEMA_VERSION,
     READINESS_SCHEMA_VERSION,
     ROUTE_SUPPORT_MATRIX_SCHEMA_VERSION,
+    PROVIDER_PROFILE_SCHEMA_V2,
     LoadedProviderProfileSet,
     ProviderMachineContracts,
     ProviderProfileConfig,
@@ -38,6 +39,7 @@ PROVIDERS = ("anthropic", "gemini", "gigachat", "openai_compatible")
 def _contracts() -> ProviderMachineContracts:
     config = ProviderProfileConfig.model_validate(
         {
+            "schema_version": PROVIDER_PROFILE_SCHEMA_V2,
             "profiles": [
                 {
                     "profile_id": "openai-main",
@@ -55,7 +57,7 @@ def _contracts() -> ProviderMachineContracts:
                         }
                     ],
                 }
-            ]
+            ],
         }
     )
     loaded = LoadedProviderProfileSet(
@@ -221,6 +223,47 @@ def test_inspect_models_and_readiness_are_deterministic_and_redacted(
     assert "OPENAI_API_KEY" in serialized
     assert "authorization" not in serialized.lower()
     assert contracts.inspect_manifest() == inspect
+
+
+def test_inspect_manifest_exposes_explicit_buffered_stream_mode() -> None:
+    config = ProviderProfileConfig.model_validate(
+        {
+            "schema_version": "gpt2giga.provider-profiles.v3",
+            "profiles": [
+                {
+                    "profile_id": "buffered-main",
+                    "provider_kind": "openai_compatible",
+                    "base_url": "https://buffered.example/v1/chat/completions",
+                    "network_policy_ref": "public-openai",
+                    "tls_policy_ref": "system-default",
+                    "upstream_stream_mode": "buffered",
+                    "models": [
+                        {
+                            "public_alias": "buffered/default",
+                            "upstream_model": "exact-model",
+                            "capability_profile": "buffered-default-v1",
+                            "capabilities": {
+                                "features": ["roles", "text"],
+                                "limits": {"context_window": 8192},
+                            },
+                            "support_status": "technical_preview",
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+    contracts = ProviderMachineContracts(
+        ProviderRegistry(
+            LoadedProviderProfileSet(config=config, _credentials={}),
+            loss_matrix_revision=MATRIX_REVISION,
+        )
+    )
+
+    assert (
+        contracts.inspect_manifest()["profiles"][0]["upstream_stream_mode"]
+        == "buffered"
+    )
 
 
 @pytest.mark.parametrize(

@@ -1,6 +1,9 @@
 # Совместимость API
 
-`gpt2giga` — это прокси совместимости, а не полный клон OpenAI, Anthropic или Gemini. Он сосредоточен на тех частях API, которые обычно нужны SDK, редакторам и агентным инструментам, когда бэкендом выступает GigaChat.
+`gpt2giga` — прокси совместимости, а не полный клон OpenAI, Anthropic или
+Gemini. Он закрывает подмножество API, которое обычно нужно SDK, редакторам и
+агентным инструментам, когда бэкендом выступает GigaChat или проверенный
+OpenAI-compatible Chat Completions server.
 
 ## Что не работает напрямую с GigaChat
 
@@ -14,7 +17,7 @@
 | Gemini GenerateContent API | `contents`/`parts`, кандидаты, объявления функций, подсчёт токенов и потоковые фрагменты SSE в Gemini отличаются от OpenAI/Anthropic и GigaChat. | Принимает Gemini-подобные запросы в корне, под `/v1`, `/v2` и `/v1beta`, переводит их в нормализованные запросы chat/embeddings и сопоставляет ответы обратно в форму Gemini. |
 | SDK `extra_headers`, `extra_query`, `extra_body` | SDK могут прислать транспортные поля или необязательные поля модели, которые GigaChat не принимает. | Фильтрует опасные заголовки, передаёт только разрешённые метаданные, пробрасывает специфичный для GigaChat `extra_body` и игнорирует известные неподдерживаемые необязательные поля. |
 | Потоковая передача SSE | SDK OpenAI, Anthropic и Gemini ждут свои имена событий и формы дельт. | Генерирует SSE, совместимый с OpenAI, Anthropic и Gemini, из потоковых ответов GigaChat. |
-| Инструменты и структурированный вывод | Схемы функций/инструментов и управление через JSON-схему отличаются между провайдерами и режимами бэкенда. | Сопоставляет локальные инструменты/функции и даёт запасной путь через вызов функции для структурированного вывода. |
+| Инструменты и структурированный вывод | Схемы функций/инструментов и управление через JSON-схему отличаются между провайдерами и режимами бэкенда. | Сопоставляет локальные инструменты/функции и передаёт схемы структурированного вывода через нативный GigaChat `response_format`. |
 | Авторизация | Клиенты OpenAI/Anthropic работают с API-ключами, а GigaChat требует другого механизма учётных данных и scope. | Разделяет аутентификацию по API-ключу прокси и авторизацию в вышестоящем GigaChat, при необходимости поддерживает сквозную передачу для каждого запроса. |
 | Получение списка моделей | Ответы GigaChat о моделях не совпадают с формой OpenAI/Anthropic/Gemini/LiteLLM. | Переупаковывает список и описание моделей под нужный клиент. |
 | Пакетные маршруты OpenAI/Anthropic/Gemini | У установленного SDK/бэкенда GigaChat нет полного цикла create/list/retrieve/cancel для пакетных API. | Держит роутеры Files/Batches отключёнными, пока они не смогут работать сквозным образом. |
@@ -22,10 +25,11 @@
 ## Подключённые маршруты
 
 Публичные API-маршруты доступны в корне и под версионированными префиксами.
-Правило выбора бэкенда одинаково для маршрутов, совместимых с OpenAI, Anthropic
-и Gemini: `/v1` принудительно выбирает контракт GigaChat v1, `/v2` — контракт
-GigaChat v2, а корневые маршруты без версионированного префикса используют
-`GPT2GIGA_GIGACHAT_API_MODE=v1|v2`.
+Для встроенных моделей GigaChat префикс `/v1` выбирает контракт GigaChat v1,
+`/v2` — v2, а корневые маршруты используют
+`GPT2GIGA_GIGACHAT_API_MODE=v1|v2`. Модель, разрешённая в явный алиас профиля
+провайдера, использует этот профиль; версия публичного пути не перенаправляет её
+в GigaChat.
 
 Примеры:
 
@@ -38,8 +42,8 @@ GigaChat v2, а корневые маршруты без версиониров�
 
 | Маршрут / группа | Статус | Комментарий |
 |---|---|---|
-| `GET /models` | Поддерживается | Список моделей GigaChat в форме, совместимой с OpenAI. |
-| `GET /models/{model}` | Поддерживается | Одна модель в форме, совместимой с OpenAI. |
+| `GET /models` | Поддерживается | Динамический каталог GigaChat или статические алиасы профилей в форме OpenAI. Запрос Codex с `client_version` получает пустой нативный каталог Codex, чтобы явно настроенная пользовательская модель сохранила принадлежащие клиенту инструкции и метаданные инструментов. |
+| `GET /models/{model}` | Поддерживается | Одна динамическая модель или точный статический алиас в форме OpenAI. |
 | `POST /chat/completions` | Поддерживается | Чат без потоковой передачи и потоковый, инструменты/вызов функций, структурированный вывод, вложения там, где поддерживаются. |
 | `POST /responses` | Stable native / normalized preview | Native GigaChat execution сохраняет compatibility surface, включая hosted tools и attachment handoff. Route-selected normalized execution остаётся technical preview и отклоняет semantics, которые выбранные route/model/API mode не сохраняют. |
 | `POST /embeddings` | Поддерживается | Использует модель из запроса или модель прокси по умолчанию для эмбеддингов, в зависимости от конфигурации. |
@@ -58,8 +62,8 @@ GigaChat v2, а корневые маршруты без версиониров�
 |---|---|---|
 | `GET /models` | Поддерживается | Возвращается в форме Anthropic, когда запрос содержит заголовки Anthropic SDK. |
 | `GET /models/{model_id}` | Поддерживается | Возвращается в форме Anthropic, когда запрос содержит заголовки Anthropic SDK. |
-| `POST /messages` | Поддерживается | Messages API, потоковая передача, локальные инструменты, сопоставление с GigaChat v2 для совместимых провайдерских инструментов Anthropic и запасной путь для структурированного вывода. При `GPT2GIGA_NORMALIZATION_MODE=on` принятое подмножество v1 использует нормализованное ядро запросов, ответов и SSE. |
-| `POST /messages/count_tokens` | Поддерживается | Считает текст сообщений, system, инструментов и структурированного вывода через подсчёт токенов GigaChat; нормализованный режим использует `NormalizedTokenCountRequest`/`Response`. |
+| `POST /messages` | Поддерживается | Messages API, потоковая передача, локальные инструменты, сопоставление с GigaChat v2 для совместимых провайдерских инструментов Anthropic и нативный структурированный вывод. При `GPT2GIGA_NORMALIZATION_MODE=on` принятое подмножество v1 использует нормализованное ядро запросов, ответов и SSE. |
+| `POST /messages/count_tokens` | Зависит от провайдера | GigaChat умеет считать текст сообщений, system, tools и structured output. Внешний алиас только с Chat Completions отклоняет операцию: точного token-count API у него нет. |
 | `POST /messages/batches`, `GET /messages/batches*` | Отключено | Код роутера есть, но он не подключён до появления пакетных методов в SDK/бэкенде GigaChat. |
 | Files API beta | Не реализовано | Сейчас вне области поддержки. |
 | Skills API beta | Не реализовано | Сейчас вне области поддержки. |
@@ -74,6 +78,10 @@ GigaChat v2, а корневые маршруты без версиониров�
 `/v2` и `/v2/v1beta` — контракт бэкенда GigaChat v2. Корневые пути Gemini
 `/...` и `/v1beta/...` без внешнего `/v1` или `/v2` используют
 `GPT2GIGA_GIGACHAT_API_MODE=v1|v2`.
+
+Эти правила версий Gemini относятся к встроенным моделям GigaChat. Точный
+внешний алиас профиля остаётся на выбранном провайдере при любом совместимом
+публичном пути.
 
 Получение списка моделей Gemini в чистой форме Gemini всегда доступно под
 `/v1beta`, `/v1/v1beta` и `/v2/v1beta`.
@@ -99,7 +107,8 @@ query-параметрах чаще попадают в журналы дост�
 `countTokens`; модели типа эмбеддингов объявляют только `embedContent` и
 `batchEmbedContents`; неизвестные/пользовательские идентификаторы моделей
 объявляют только `countTokens`, если метаданные бэкенда не дают более точной
-информации.
+информации. Статический алиас Chat Completions объявляет генерацию и streaming,
+но не `countTokens`.
 
 | Маршрут / группа | Статус | Комментарий |
 |---|---|---|
@@ -107,7 +116,7 @@ query-параметрах чаще попадают в журналы дост�
 | `GET /v1beta/models/{model}`, `/v1/v1beta/models/{model}`, `/v2/v1beta/models/{model}` | Поддерживается | Одна модель в форме Gemini `Model`. |
 | `POST /models/{model}:generateContent`, `/v1/...`, `/v2/...`, `/v1beta/...`, `/v1/v1beta/...`, `/v2/v1beta/...` | Поддерживается | Принятые `contents`/`parts`, `systemInstruction`, `generationConfig`, объявления/результаты функций, типизированные inline-изображения и JSON Schema output сопоставляются с допустимым для bridge нормализованным чат-запросом. Несмоделированные safety, cache, file и tool-семантики остаются явными и отклоняются admission для OpenAI-compatible bridge до I/O. |
 | `POST /models/{model}:streamGenerateContent`, `/v1/...`, `/v2/...`, `/v1beta/...`, `/v1/v1beta/...`, `/v2/v1beta/...` | Поддерживается | Возвращает `text/event-stream` с фрагментами Gemini `GenerateContentResponse`. |
-| `POST /models/{model}:countTokens`, `/v1/...`, `/v2/...`, `/v1beta/...`, `/v1/v1beta/...`, `/v2/v1beta/...` | Поддерживается | Считает `systemInstruction`, `contents` и объявления функций через подсчёт токенов GigaChat; режим нормализации использует `NormalizedTokenCountRequest`/`Response`. |
+| `POST /models/{model}:countTokens`, `/v1/...`, `/v2/...`, `/v1beta/...`, `/v1/v1beta/...`, `/v2/v1beta/...` | Зависит от провайдера | GigaChat считает `systemInstruction`, `contents` и объявления функций. Внешний алиас только с Chat Completions отклоняет операцию. |
 | `POST /models/{model}:embedContent`, `/v1/...`, `/v2/...`, `/v1beta/...`, `/v1/v1beta/...`, `/v2/v1beta/...` | Поддерживается | Возвращает Gemini `embedding.values`, используя бэкенд эмбеддингов GigaChat. |
 | `POST /models/{model}:batchEmbedContents`, `/v1/...`, `/v2/...`, `/v1beta/...`, `/v1/v1beta/...`, `/v2/v1beta/...` | Поддерживается | Возвращает Gemini `embeddings[]`, используя бэкенд эмбеддингов GigaChat. |
 | `POST /v1beta/files`, `GET /v1beta/files*` | Отключено | Код роутера подготовлен, но по умолчанию не подключён. |
@@ -187,9 +196,13 @@ GPT2GIGA_RUN_GEMINI_SMOKE=1 GPT2GIGA_LIVE_ENV_FILE=.env.live uv run pytest tests
 
 Типичные поля, которые принимаются и игнорируются:
 
-- Метаданные OpenAI и параметры тонкой настройки: `user`, `metadata`, `service_tier`, `seed`, `prompt_cache_key`, `logprobs`, `top_logprobs`, `logit_bias`, `prediction`, `web_search_options`, `n > 1`, `parallel_tool_calls=true`;
-- Необязательные поля Anthropic: `metadata`, `service_tier`, `top_k`, `container`, `context_management`, `mcp_servers`, неподдерживаемые провайдерские инструменты, цитаты (citations), неподдерживаемые блоки контента document/file. Совместимые провайдерские инструменты (`web_search*`, `web_fetch*`, `code_execution*`) сопоставляются со встроенными инструментами GigaChat v2, если не включён `GPT2GIGA_DISABLE_BUILTIN_TOOL_MAPPING=True`.
-- Необязательные поля Gemini: `safetySettings`, `cachedContent`, `serviceTier`, игнорируемые настройки `generationConfig`, например `candidateCount`/`topK`/`responseModalities`, и неподдерживаемые инструменты, не являющиеся функциями, принимаются и сохраняются для диагностики, но не применяются GigaChat. Совместимые провайдерские инструменты Gemini сопоставляются со встроенными инструментами GigaChat v2: `googleSearch` / `googleSearchRetrieval` -> `web_search`, `urlContext` -> `url_content_extraction`, `codeExecution` -> `code_interpreter`, если не включён `GPT2GIGA_DISABLE_BUILTIN_TOOL_MAPPING=True`; полное сопоставление описано во [Встроенных инструментах](builtin-tools.md). Неподдерживаемые значения `responseMimeType` и `responseSchema` без `application/json` отклоняются.
+- Метаданные OpenAI и параметры тонкой настройки: `user`, `metadata`, `service_tier`, `seed`, `prompt_cache_key`, `logprobs`, `top_logprobs`, `logit_bias`, `prediction`, `web_search_options`, `n > 1`;
+- Необязательные поля Anthropic: `metadata`, `service_tier`, `top_k`, `container`, `context_management`, `mcp_servers`, неподдерживаемые провайдерские инструменты, цитаты (citations), неподдерживаемые блоки контента document/file. Совместимые провайдерские инструменты (`web_search*`, `web_fetch*`, `code_execution*`) сопоставляются со встроенными инструментами GigaChat v2.
+- Необязательные поля Gemini: `safetySettings`, `cachedContent`, `serviceTier`, игнорируемые настройки `generationConfig`, например `candidateCount`/`topK`/`responseModalities`, и неподдерживаемые инструменты, не являющиеся функциями, принимаются и сохраняются для диагностики, но не применяются GigaChat. Совместимые провайдерские инструменты Gemini сопоставляются со встроенными инструментами GigaChat v2: `googleSearch` / `googleSearchRetrieval` -> `web_search`, `urlContext` -> `url_content_extraction`, `codeExecution` -> `code_interpreter`; полное сопоставление описано во [Встроенных инструментах](builtin-tools.md). Неподдерживаемые значения `responseMimeType` и `responseSchema` без `application/json` отклоняются.
+
+Буферизованные параллельные вызовы локальных функций поддерживаются для
+`GigaChat-2-Max` на маршрутах v2 OpenAI Chat Completions, Anthropic Messages и
+Gemini `generateContent`. Поведение GigaChat v1 не изменилось.
 
 Если поле намеренно игнорируется, оно не отправляется в вышестоящий сервис как исполняемая возможность GigaChat. Буквальный объект `extra_body` может быть передан в GigaChat `additional_fields`; в таком случае поддержку определяет API GigaChat.
 
@@ -244,3 +257,90 @@ GigaChat v2.
 окружения. Новые возможности встроенных инструментов развиваются преимущественно
 вокруг режима GigaChat v2, поэтому клиенты, которым они нужны, могут указывать
 `http://localhost:8090/v2`.
+
+## Согласование контрактов SDK в 0.3.1a1
+
+Включённый wheel `gigachat==0.2.4a1` собран из коммита SDK `6e9bb50`.
+Его SHA-256 записан в lock-файле. Совместимость шлюза и SDK проверяется
+синтетическими HTTP-ответами; эти проверки не подтверждают качество живой модели,
+права доступа к возможностям, экономию кэша или детерминированность генерации.
+
+| Контракт | Поведение шлюза |
+|---|---|
+| Параметры генерации v2 | Лимиты и параметры сэмплирования сериализуются в `model_options`; бюджет reasoning сохраняется. Преобразованные публичные параметры имеют приоритет над дополнительными; остальные вложенные настройки сохраняются. |
+| Обязательный вызов функции | OpenAI `tool_choice="required"` и Anthropic `tool_choice.type="any"` преобразуются в v2 `tool_config.mode="any"`. v1 отклоняет требование вместо молчаливого `auto`. Выбор по имени использует `mode="forced"`. |
+| Параллельные результаты функций | Каждый результат сохраняет `id` своего вызова, в том числе при одинаковых именах функций. `tools_state_id` остаётся отдельным полем состояния диалога. |
+| Дополнительные параметры | `extra_body` / SDK `additional_fields` сохраняют поддерживаемые провайдером настройки без отдельных классов шлюза для внутренних сервисов. |
+| Кэшированные токены | OpenAI prompt/input включает кэш; число токенов кэша также доступно в деталях usage. Anthropic возвращает незакэшированный `input_tokens` и отдельный `cache_read_input_tokens`. |
+| Настройки Responses | Если `temperature` и `top_p` не заданы, ответ содержит `null`, в том числе в потоке; отсутствие `store` отображается как `false`. `parallel_tool_calls` отражает эффективный запрос GigaChat с учётом вложенных переопределений; значение GigaChat по умолчанию — `false`. |
+| История Responses | Native v2 отображает `previous_response_id` в `storage.thread_id`, убирает `model` при продолжении и отправляет новый input. v1 отклоняет `previous_response_id` и `store=true`; передавайте полную историю или используйте `/v2/responses`. |
+| Выбор assistant/thread | Native `assistant_id` и stateful storage выбирают upstream без подстановки модели по умолчанию, в том числе в v1. |
+| Заголовок сессии | `GIGACHAT_SESSION_ID` задаёт значение SDK по умолчанию; `X-Session-ID` запроса переопределяет его и не влияет на следующие запросы. |
+| Env-файл CLI | Относительный `--env-path` разрешается от рабочего каталога. Отсутствующий явно указанный файл останавливает запуск. |
+
+Получение сохранённого ответа (`GET /responses/{id}`) остаётся нереализованным:
+продолжение v2 использует треды GigaChat, а не полное хранилище OpenAI Responses.
+Клиент должен сохранить идентификатор ответа. JSON Schema передаётся без изменений;
+шлюз не исправляет сгенерированные моделью аргументы или поведение v1 с `anyOf`.
+
+Часть отличий намеренная: строковый результат инструмента оборачивается в
+`{"result": "..."}` для GigaChat; Messages принимает отсутствие `max_tokens`
+(Anthropic SDK требует этот параметр). Для переносимости передавайте лимит явно.
+Wildcard CORS в DEV остаётся настройкой разработки; управление авторизацией и CORS
+описано в [Конфигурации](configuration.md). Ограничение зависимости остаётся
+`openai>=2.50,<3`.
+
+### Повторная отправка вызовов инструментов
+
+Состояние диалога GigaChat возвращается в расширении `tools_state_id` каждого
+элемента OpenAI Chat Completions `tool_calls[]`, Responses `function_call` и
+Anthropic `tool_use`. Сохраняйте это поле при повторной отправке assistant-сообщения
+или элементов output, например через `model_dump()` Python SDK. Шлюз переносит
+состояние в ход assistant и сопоставляет результаты по исходному ID вызова,
+в том числе при одинаковых именах функций.
+
+ID вызова и ID состояния — отдельные непрозрачные строки. Не удаляйте их префиксы
+и не подменяйте `id` / `call_id` / `tool_use_id` состоянием. При сборке потока SDK
+получает каждый идентификатор однократно; блоки инструментов могут задерживаться
+до прихода завершающего события с состоянием. Клиенты, которые заново собирают
+сообщения по строгому списку полей, должны явно сохранять `tools_state_id`.
+Поле ответа `metadata.gigachat_tool_state_id` остаётся доступным для ручной
+сборки истории.
+
+### Примеры обновлённых контрактов
+
+Запуск из корня репозитория после старта локального прокси:
+
+```bash
+uv run python examples/openai/chat_completions/basic/session_cache_usage.py
+uv run python examples/openai/responses/tools/required_parallel_stream.py
+uv run python examples/anthropic/messages/tools/required_tool.py
+uv run python examples/openai/chat_completions/reasoning/chat_reasoning.py
+uv run python examples/openai/responses/basic/stateful.py
+```
+
+[Индекс примеров](https://github.com/ai-forever/gpt2giga/blob/main/examples/README.md)
+объясняет ожидаемые поля и условия запуска. Пример Responses сохраняет каждый
+`call_id` и переносит `metadata.gigachat_tool_state_id` в отдельный `tools_state_id`
+элемента истории. Включение параллельных вызовов не гарантирует их количество.
+Инструменты в примерах используют локальные данные-заглушки.
+
+Дополнительные параметры можно передать через OpenAI SDK:
+
+```python
+response = client.chat.completions.create(
+    model="GigaChat-2-Max",
+    messages=[{"role": "user", "content": "Реши задачу кратко."}],
+    max_completion_tokens=1024,
+    reasoning_effort="low",
+    extra_body={
+        "reasoning": {"max_tokens": 256},
+        "model_options": {"repetition_penalty": 1.05},
+    },
+)
+```
+
+Здесь `client` использует `/v2`. Для выбора настроенного assistant вместо модели
+можно передать `extra_body={"assistant_id": "<ваш assistant ID>"}`:
+шлюз уберёт `model` из запроса upstream. Это не создаёт assistant и требует
+доступного в вашем аккаунте идентификатора.

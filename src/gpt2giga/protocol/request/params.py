@@ -101,10 +101,15 @@ def sanitize_openai_chat_parameters(
     *,
     allow_builtin_tools: bool = False,
     allow_namespace_tools: bool = False,
+    allow_parallel_tool_calls: bool = False,
 ) -> dict[str, Any]:
     """Return a sanitized Chat Completions payload or raise compatibility errors."""
     sanitized = dict(data)
-    _sanitize_openai_payload(sanitized, OPENAI_CHAT_SUPPORTED_PARAMS)
+    _sanitize_openai_payload(
+        sanitized,
+        OPENAI_CHAT_SUPPORTED_PARAMS,
+        allow_parallel_tool_calls=allow_parallel_tool_calls,
+    )
     _normalize_gigachat_extra_fields(sanitized)
     _sanitize_tools(
         sanitized,
@@ -125,10 +130,25 @@ def sanitize_openai_responses_parameters(
 ) -> dict[str, Any]:
     """Return a sanitized Responses API payload or raise compatibility errors."""
     sanitized = dict(data)
+    if not allow_stateful:
+        for param in ("previous_response_id", "store"):
+            requested = (
+                sanitized.get(param) is not None
+                if param == "previous_response_id"
+                else sanitized.get(param) is True
+            )
+            if requested:
+                _raise_openai_param_error(
+                    param,
+                    f"`{param}` requires GigaChat v2 mode for Responses history. "
+                    "Enable GPT2GIGA_GIGACHAT_API_MODE=v2 or pass the full "
+                    "conversation explicitly in `input`.",
+                )
     _sanitize_openai_payload(
         sanitized,
         OPENAI_RESPONSES_SUPPORTED_PARAMS,
         allow_stateful_responses=allow_stateful,
+        allow_parallel_tool_calls=allow_builtin_tools,
     )
     _normalize_gigachat_extra_fields(sanitized)
     _sanitize_tools(
@@ -178,10 +198,16 @@ def _sanitize_openai_payload(
     supported_params: frozenset[str],
     *,
     allow_stateful_responses: bool = False,
+    allow_parallel_tool_calls: bool = False,
 ) -> None:
     extra_fields: dict[str, Any] = {}
     for name in list(data):
         if name in OPENAI_ACCEPTED_IGNORED_PARAMS:
+            if name == "parallel_tool_calls" and allow_parallel_tool_calls:
+                if isinstance(data.get(name), bool):
+                    continue
+                data.pop(name, None)
+                continue
             if name == "previous_response_id" and allow_stateful_responses:
                 if data.get(name) is None:
                     data.pop(name, None)
@@ -246,6 +272,15 @@ def _apply_tool_choice_policy(
     tool_choice = data.pop("tool_choice")
     if tool_choice in (None, "auto"):
         return
+    if tool_choice == "required":
+        if not allow_builtin_tools:
+            _raise_openai_param_error(
+                "tool_choice",
+                "tool_choice='required' requires GigaChat API v2; "
+                "v1 supports only auto, none, or a named function.",
+            )
+        data["_gpt2giga_tool_config"] = {"mode": "any"}
+        return
     if tool_choice == "none":
         data.pop("tools", None)
         data.pop("functions", None)
@@ -273,7 +308,7 @@ def _apply_tool_choice_policy(
         )
         if builtin_tool_name:
             data["_gpt2giga_tool_config"] = {
-                "mode": "tool",
+                "mode": "forced",
                 "tool_name": builtin_tool_name,
             }
             return

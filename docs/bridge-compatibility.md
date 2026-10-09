@@ -21,6 +21,14 @@ The normalized OpenAI Responses to GigaChat cell remains `technical_preview`:
 hosted-tool coverage is admitted per model and API mode, while attachments and
 other native-only semantics are not yet normalized end to end.
 
+Responses, Anthropic Messages, and Gemini GenerateContent can also select an
+exact `openai_compatible` profile alias. Those three cells are
+`technical_preview` and use one startup-owned Chat Completions adapter. The
+direct OpenAI Chat Completions cell remains blocked until its public route is
+integrated with this registry. A v3 profile must declare the model's verified
+normalized features and limits. Unsupported semantics and exact token-count
+requests are rejected before that adapter performs I/O.
+
 ## Cell support statuses
 
 Every cell has exactly one status. `unknown`, a missing cell, and an implicit

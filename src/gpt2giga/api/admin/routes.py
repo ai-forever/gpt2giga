@@ -112,10 +112,7 @@ async def normalized_to_gigachat(request: Request):
     payload = await _read_json_object(request)
     normalized_payload = payload.get("normalized", payload)
     normalized = NormalizedChatRequest.model_validate(normalized_payload)
-    openai_payload = normalized_chat_to_openai_payload(
-        normalized,
-        include_builtin_tools=_builtin_tool_mapping_enabled(request),
-    )
+    openai_payload = normalized_chat_to_openai_payload(normalized)
     state = request.app.state
     mode = getattr(state.config.proxy_settings, "gigachat_api_mode", "v1")
     giga_client = getattr(state, "gigachat_client", None)
@@ -235,10 +232,7 @@ async def _translate_normalized_request_to_target(
         }
     if target == "openai":
         return {
-            "payload": normalized_chat_to_openai_payload(
-                normalized,
-                include_builtin_tools=_builtin_tool_mapping_enabled(request),
-            ),
+            "payload": normalized_chat_to_openai_payload(normalized),
             "intermediate": {"normalized": normalized.to_json_dict(), **intermediate},
         }
     if target == "anthropic":
@@ -331,7 +325,6 @@ def _anthropic_payload_to_openai(
     return _build_openai_data_from_anthropic_request(
         payload,
         logger,
-        builtin_tool_mapping_enabled=_builtin_tool_mapping_enabled(request),
     )
 
 
@@ -339,10 +332,7 @@ async def _normalized_chat_to_gigachat_payload(
     request: Request,
     normalized: NormalizedChatRequest,
 ) -> dict[str, Any]:
-    openai_payload = normalized_chat_to_openai_payload(
-        normalized,
-        include_builtin_tools=_builtin_tool_mapping_enabled(request),
-    )
+    openai_payload = normalized_chat_to_openai_payload(normalized)
     state = request.app.state
     mode = getattr(state.config.proxy_settings, "gigachat_api_mode", "v1")
     giga_client = getattr(state, "gigachat_client", None)
@@ -360,10 +350,6 @@ async def _normalized_chat_to_gigachat_payload(
         "openai_payload": openai_payload,
         "gigachat_payload": _serialize(gigachat_payload),
     }
-
-
-def _builtin_tool_mapping_enabled(request: Request) -> bool:
-    return not request.app.state.config.proxy_settings.disable_builtin_tool_mapping
 
 
 def _normalized_chat_to_anthropic_payload(

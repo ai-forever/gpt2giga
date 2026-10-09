@@ -46,7 +46,6 @@ def resolve_upstream_model(
     """Resolve model precedence used by every GigaChat chat-like call."""
     settings = getattr(config, "gigachat_settings", None)
     selection = ModelSelectionPolicy(
-        default_model=_non_blank_string(getattr(settings, "model", None)),
         forced_model=_non_blank_string(forced_model),
     ).select(_field(payload, "model"))
     if selection.model is not None:
@@ -59,23 +58,28 @@ def resolve_upstream_model(
             source = "forced"
         return ResolvedUpstreamModel(selection.model, selection.model, source)
 
-    if api_mode == "v2":
-        assistant_id = _non_blank_string(_field(payload, "assistant_id"))
-        if assistant_id is not None:
-            return ResolvedUpstreamModel(
-                model=None,
-                limiter_key=f"assistant:{assistant_id}",
-                source="assistant",
-            )
+    storage = _field(payload, "storage")
+    assistant_id = _non_blank_string(_field(payload, "assistant_id"))
+    if assistant_id is None and api_mode == "v1":
+        assistant_id = _non_blank_string(_field(storage, "assistant_id"))
+    if assistant_id is not None:
+        return ResolvedUpstreamModel(
+            model=None,
+            limiter_key=f"assistant:{assistant_id}",
+            source="assistant",
+        )
 
-        storage = _field(payload, "storage")
-        thread_id = _non_blank_string(_field(storage, "thread_id"))
-        if thread_id is not None:
-            return ResolvedUpstreamModel(
-                model=None,
-                limiter_key=f"thread:{thread_id}",
-                source="thread",
-            )
+    thread_id = _non_blank_string(_field(storage, "thread_id"))
+    if thread_id is not None:
+        return ResolvedUpstreamModel(
+            model=None,
+            limiter_key=f"thread:{thread_id}",
+            source="thread",
+        )
+
+    configured_model = _non_blank_string(getattr(settings, "model", None))
+    if configured_model is not None:
+        return ResolvedUpstreamModel(configured_model, configured_model, "settings")
 
     raise UpstreamModelRequiredError(provider=provider)
 

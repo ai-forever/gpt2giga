@@ -40,6 +40,9 @@ def test_exact_max_v2_overlay_adds_hosted_tools_over_family_baseline() -> None:
     assert layer.capabilities[CapabilityKey.IMAGE_INPUT].state is (
         CapabilityState.SUPPORTED
     )
+    assert layer.capabilities[CapabilityKey.PARALLEL_TOOL_CALLS].state is (
+        CapabilityState.SUPPORTED
+    )
 
 
 def test_api_mode_constraint_does_not_expand_v1_hosted_tools() -> None:
@@ -50,6 +53,9 @@ def test_api_mode_constraint_does_not_expand_v1_hosted_tools() -> None:
     )
     assert layer.capabilities[CapabilityKey.HOSTED_WEB_SEARCH].source is (
         CapabilitySource.UNRESOLVED
+    )
+    assert layer.capabilities[CapabilityKey.PARALLEL_TOOL_CALLS].state is (
+        CapabilityState.UNKNOWN
     )
 
 

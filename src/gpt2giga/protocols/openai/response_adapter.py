@@ -8,6 +8,8 @@ from datetime import datetime
 from typing import Any
 
 from gpt2giga.core.context import RequestContext
+from gpt2giga.protocols.normalized.usage import cached_input_tokens
+from gpt2giga.common.tools import split_gigachat_tool_name
 from gpt2giga.protocol.response.processor import ResponseProcessor
 from gpt2giga.protocols.normalized import (
     NormalizedChoice,
@@ -44,7 +46,7 @@ def normalized_chat_response_to_openai(
         "model": requested_model,
         "choices": [_choice_to_openai(choice) for choice in response.choices],
         "usage": _usage_to_openai(response.usage),
-        "system_fingerprint": f"fp_{response_id}",
+        "system_fingerprint": None,
     }
     metadata = _metadata_to_openai(response)
     if metadata:
@@ -72,10 +74,25 @@ def normalized_chat_response_to_responses(
 
     status, incomplete_details = _responses_status(response)
     output: list[dict[str, Any]] = []
+    reasoning_config = _responses_reasoning_config(request_payload)
     for choice_index, choice in enumerate(response.choices):
         message = choice.message
         if message is None:
             continue
+        reasoning_text = _message_reasoning(message)
+        if reasoning_text and any(reasoning_config.values()):
+            output.append(
+                {
+                    "id": f"rs_{response_id}_{choice_index}",
+                    "type": "reasoning",
+                    "summary": [
+                        {
+                            "type": "summary_text",
+                            "text": reasoning_text,
+                        }
+                    ],
+                }
+            )
         hosted_items = ResponseProcessor.create_hosted_tool_response_items(
             message.raw_extensions,
             response_id,
@@ -83,7 +100,7 @@ def normalized_chat_response_to_responses(
         )
         output.extend(hosted_items)
         text = _responses_message_text(message)
-        if text or not hosted_items:
+        if text or (not hosted_items and not message.tool_calls):
             output.append(
                 {
                     "type": "message",
@@ -100,13 +117,22 @@ def normalized_chat_response_to_responses(
                     ],
                 }
             )
-        output.extend(_responses_tool_calls(message, choice_index=choice_index))
+        output.extend(
+            _responses_tool_calls(
+                message,
+                choice_index=choice_index,
+                request_tools=request_payload.get("tools"),
+            )
+        )
 
     metadata = dict(request_payload.get("metadata") or {})
     metadata.update(_metadata_to_openai(response))
     response_text = request_payload.get("text")
     if not isinstance(response_text, dict):
         response_text = {"format": {"type": "text"}}
+    parallel_tool_calls = request_payload.get("parallel_tool_calls")
+    if parallel_tool_calls is None:
+        parallel_tool_calls = response.provider != "gigachat"
     return {
         "id": f"resp_{response_id}",
         "object": "response",
@@ -118,15 +144,15 @@ def normalized_chat_response_to_responses(
         "max_output_tokens": request_payload.get("max_output_tokens"),
         "model": requested_model,
         "output": output,
-        "parallel_tool_calls": True,
+        "parallel_tool_calls": parallel_tool_calls,
         "previous_response_id": None,
-        "reasoning": {"effort": None, "summary": None},
-        "store": True,
-        "temperature": request_payload.get("temperature", 1),
+        "reasoning": reasoning_config,
+        "store": False,
+        "temperature": request_payload.get("temperature"),
         "text": response_text,
         "tool_choice": request_payload.get("tool_choice", "auto"),
         "tools": request_payload.get("tools", []),
-        "top_p": request_payload.get("top_p", 1),
+        "top_p": request_payload.get("top_p"),
         "truncation": "disabled",
         "usage": _responses_usage(response.usage),
         "user": None,
@@ -154,6 +180,9 @@ def _message_to_openai(message: NormalizedMessage | None) -> dict[str, Any]:
     }
     if message.name is not None:
         payload["name"] = message.name
+    reasoning_content = _message_reasoning(message)
+    if reasoning_content:
+        payload["reasoning_content"] = reasoning_content
     if message.tool_call_id is not None:
         payload["tool_call_id"] = message.tool_call_id
     if message.tool_calls:
@@ -170,7 +199,7 @@ def _tool_call_to_openai(
     tool_call: NormalizedToolCall,
 ) -> dict[str, Any]:
     call_id = tool_call.id or f"call_{index}"
-    return {
+    payload = {
         "index": index,
         "id": call_id,
         "type": tool_call.type,
@@ -179,6 +208,10 @@ def _tool_call_to_openai(
             "arguments": _tool_arguments_to_json(tool_call.arguments),
         },
     }
+    state_id = tool_call.raw_extensions.get("tools_state_id")
+    if isinstance(state_id, str) and state_id:
+        payload["tools_state_id"] = state_id
+    return payload
 
 
 def _tool_arguments_to_json(value: Any) -> str:
@@ -197,20 +230,29 @@ def _responses_tool_calls(
     message: NormalizedMessage,
     *,
     choice_index: int,
+    request_tools: Any,
 ) -> list[dict[str, Any]]:
     items = []
     for call_index, tool_call in enumerate(message.tool_calls):
         call_id = tool_call.id or f"call_{choice_index}_{call_index}"
-        items.append(
-            {
-                "id": f"fc_{call_id}",
-                "type": "function_call",
-                "status": "completed",
-                "call_id": call_id,
-                "name": tool_call.name or "",
-                "arguments": _responses_tool_arguments_to_json(tool_call.arguments),
-            }
+        name, namespace = split_gigachat_tool_name(
+            tool_call.name or "",
+            request_tools=request_tools,
         )
+        item = {
+            "id": f"fc_{call_id}",
+            "type": "function_call",
+            "status": "completed",
+            "call_id": call_id,
+            "name": name,
+            "arguments": _responses_tool_arguments_to_json(tool_call.arguments),
+        }
+        if namespace is not None:
+            item["namespace"] = namespace
+        state_id = tool_call.raw_extensions.get("tools_state_id")
+        if isinstance(state_id, str) and state_id:
+            item["tools_state_id"] = state_id
+        items.append(item)
     return items
 
 
@@ -227,6 +269,21 @@ def _responses_message_text(message: NormalizedMessage) -> str | None:
     return "".join(parts) if parts else None
 
 
+def _message_reasoning(message: NormalizedMessage) -> str | None:
+    if message.reasoning_content is not None:
+        return message.reasoning_content
+    value = message.raw_extensions.get("reasoning_content")
+    return value if isinstance(value, str) else None
+
+
+def _responses_reasoning_config(request_payload: dict[str, Any]) -> dict[str, Any]:
+    reasoning = request_payload.get("reasoning")
+    values = reasoning if isinstance(reasoning, dict) else {}
+    effort = values.get("effort", request_payload.get("reasoning_effort"))
+    summary = values.get("summary", values.get("generate_summary"))
+    return {"effort": effort, "summary": summary}
+
+
 def _responses_status(
     response: NormalizedResponse,
 ) -> tuple[str, dict[str, str] | None]:
@@ -240,11 +297,21 @@ def _responses_status(
     return "completed", None
 
 
-def _responses_usage(usage: NormalizedUsage | None) -> dict[str, int] | None:
+def _responses_usage(usage: NormalizedUsage | None) -> dict[str, Any] | None:
     if usage is None:
         return None
     values = {
         "input_tokens": usage.input_tokens,
+        **(
+            {
+                "input_tokens_details": {
+                    "cached_tokens": cached_input_tokens(usage),
+                    "cache_write_tokens": 0,
+                }
+            }
+            if cached_input_tokens(usage)
+            else {}
+        ),
         "output_tokens": usage.output_tokens,
         "total_tokens": usage.total_tokens,
     }
@@ -258,9 +325,7 @@ def _usage_to_openai(usage: NormalizedUsage | None) -> dict[str, Any] | None:
         "prompt_tokens": usage.input_tokens,
         "completion_tokens": usage.output_tokens,
         "total_tokens": usage.total_tokens,
-        "prompt_tokens_details": {
-            "cached_tokens": usage.raw_extensions.get("precached_prompt_tokens", 0)
-        },
+        "prompt_tokens_details": {"cached_tokens": cached_input_tokens(usage)},
         "completion_tokens_details": {"reasoning_tokens": 0},
     }
 

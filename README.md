@@ -11,7 +11,11 @@
 
 ![Gateway coverage](https://raw.githubusercontent.com/ai-forever/gpt2giga/main/badges/coverage.svg)
 
-`gpt2giga` — FastAPI-прокси, который принимает OpenAI-, Anthropic- и Gemini-like запросы и отправляет их в GigaChat. Он нужен, когда клиент, редактор, агентный фреймворк или SDK умеет работать с OpenAI/Anthropic/Gemini API, а реальный backend должен быть GigaChat.
+`gpt2giga` — FastAPI-прокси, который принимает OpenAI-, Anthropic- и
+Gemini-like запросы и отправляет их в GigaChat либо в проверенный
+OpenAI-compatible Chat Completions backend. Он нужен, когда клиент, редактор,
+агентный фреймворк или SDK говорит на одном API, а реальный backend предоставляет
+другой совместимый контракт.
 
 Локальный адрес по умолчанию: `http://localhost:8090`.
 ## Зачем Нужен
@@ -32,37 +36,57 @@ GigaChat не является drop-in заменой OpenAI или Anthropic AP
 
 ## Быстрый Старт
 
-Создайте `.env` из шаблона и заполните GigaChat credentials:
+Текущий checkout содержит prerelease gateway и требует GigaChat SDK
+`>=0.2.4a1,<0.3.0`. SDK `0.2.4a1` опубликован в PyPI и устанавливается
+автоматически вместе со шлюзом через `uv`, pip или при сборке Docker.
+
+Из корня репозитория создайте `.env` из шаблона и заполните GigaChat credentials:
 
 ```sh
 cp .env.example .env
 ```
 
-Запуск через Docker Compose:
+Соберите и запустите текущий checkout через Docker Compose:
 
 ```sh
-docker compose --env-file .env -f deploy/base.yaml --profile DEV up -d
+docker compose --env-file .env -f deploy/base.yaml --profile DEV up -d --build --pull never
 ```
 
-Или локальная установка gateway:
+Или запустите его локально:
+
+```sh
+uv sync --all-extras --dev
+uv run gpt2giga
+```
+
+Для установки этого checkout через pip в существующее окружение:
+
+```sh
+python -m pip install .
+```
+
+Установка из индекса выбирает опубликованный стабильный релиз, который может
+ещё не включать возможности текущего checkout:
 
 ```sh
 uv tool install gpt2giga
 gpt2giga --help
 ```
 
-Для установки в существующее окружение:
+Для установки опубликованного релиза в существующее окружение:
 
 ```sh
 python -m pip install gpt2giga
 ```
 
 Поддерживается Python 3.10–3.14. Для Postgres, OpenSearch или Phoenix добавьте
-соответствующую extra-зависимость, например:
+соответствующую extra-зависимость. Например, для опубликованного релиза:
 
 ```sh
 python -m pip install "gpt2giga[postgres]"
 ```
+
+При установке из текущего checkout используйте `python -m pip install ".[postgres]"`.
 
 Минимальный OpenAI SDK вызов:
 
@@ -124,6 +148,7 @@ make docs-dev-ru
 | Тема | Документ |
 |---|---|
 | Быстрый запуск и первые запросы | [Quickstart](https://ai-forever.github.io/gpt2giga/quickstart) |
+| Codex, Claude Code и Gemini CLI через `/v1/chat/completions` | [Chat Completions bridge](https://ai-forever.github.io/gpt2giga/chat-completions-bridge) |
 | Что поддерживается, отключено или намеренно игнорируется | [API compatibility](https://ai-forever.github.io/gpt2giga/api-compatibility) |
 | Совместимость SDK `extra_*` и параметров клиентов | [Client parameter compatibility](https://ai-forever.github.io/gpt2giga/client-parameter-compatibility) |
 | Встроенные инструменты GigaChat и маппинг OpenAI/Anthropic/Gemini | [Built-in tools](https://ai-forever.github.io/gpt2giga/builtin-tools) |
@@ -166,7 +191,8 @@ v1 contract, `/v2` принудительно выбирает GigaChat v2 contr
 
 ## Деплой
 
-Docker Compose manifests лежат в [deploy/](https://github.com/ai-forever/gpt2giga/tree/main/deploy):
+Docker Compose manifests лежат в [deploy/](https://github.com/ai-forever/gpt2giga/tree/main/deploy).
+Для запуска опубликованного образа `latest`:
 
 ```sh
 docker compose --env-file .env -f deploy/base.yaml --profile PROD up -d

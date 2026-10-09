@@ -37,7 +37,7 @@
       "reasoning_tokens": 0
     }
   },
-  "system_fingerprint": "fp_golden-tools",
+  "system_fingerprint": null,
   "metadata": {
     "gigachat_called_tools": "[{\"index\":0,\"choice_index\":0,\"name\":\"get_weather\",\"arguments\":{\"city\":\"Moscow\"},\"role\":\"assistant\"}]"
   }

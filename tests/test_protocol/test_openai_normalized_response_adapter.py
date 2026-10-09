@@ -94,6 +94,57 @@ def test_normalized_chat_response_to_openai_maps_tool_calls():
     ]
 
 
+def test_normalized_reasoning_maps_to_chat_and_responses_tool_output():
+    response = NormalizedResponse(
+        id="reasoning-fixture",
+        choices=[
+            NormalizedChoice(
+                message=NormalizedMessage(
+                    role="assistant",
+                    content=None,
+                    reasoning_content="Need current repository state.",
+                    tool_calls=[
+                        NormalizedToolCall(
+                            id="call-status",
+                            name="git_status",
+                            arguments="{}",
+                        )
+                    ],
+                ),
+                finish_reason="tool_calls",
+                stop_reason="tool_calls",
+            )
+        ],
+    )
+
+    chat = normalized_chat_response_to_openai(response, requested_model="gpt-x")
+    assert chat["choices"][0]["message"]["reasoning_content"] == (
+        "Need current repository state."
+    )
+
+    responses = normalized_chat_response_to_responses(
+        response,
+        request_payload={
+            "model": "bridge/codex-test",
+            "reasoning": {"effort": "xhigh", "summary": "auto"},
+        },
+        requested_model="bridge/codex-test",
+        response_id="reasoning-fixture",
+    )
+    assert responses["reasoning"] == {"effort": "xhigh", "summary": "auto"}
+    assert responses["output"][0] == {
+        "id": "rs_reasoning-fixture_0",
+        "type": "reasoning",
+        "summary": [
+            {
+                "type": "summary_text",
+                "text": "Need current repository state.",
+            }
+        ],
+    }
+    assert responses["output"][1]["type"] == "function_call"
+
+
 def test_normalized_chat_response_to_openai_maps_errors():
     response = NormalizedResponse(
         error=NormalizedError(

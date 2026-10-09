@@ -9,6 +9,7 @@
 uv run python examples/gemini/content/generate_content.py
 uv run python examples/gemini/content/stream_generate_content.py
 uv run python examples/gemini/content/stateful.py
+uv run python examples/gemini/content/parallel_function_calling.py
 uv run python examples/gemini/content/gigachat_tools/code_interpreter.py
 uv run python examples/gemini/content/gigachat_tools/image_generate.py
 ```
@@ -41,6 +42,7 @@ client = genai.Client(
 - `chat.py`: клиентский chat-session поверх `generateContent`
 - `stateful.py`: stateful `generateContent` через `x-gpt2giga-conversation-id` и GigaChat v2 chat completions
 - `function_calling.py`: function declarations и tool response
+- `parallel_function_calling.py`: два function call в одном ходе (`GigaChat-2-Max`, `/v2`)
 - `gigachat_tools/code_interpreter.py`: GigaChat v2 built-in code interpreter через typed `google-genai`
 - `gigachat_tools/image_generate.py`: GigaChat v2 built-in image generation через raw Gemini-compatible request
 - `structured_output.py`: JSON schema / structured output

@@ -42,7 +42,6 @@ class ResponseProcessor:
         logger=None,
         mode: str = "DEV",
         log_level: str = "INFO",
-        structured_output_mode: str = "function_call",
     ):
         if logger is None:
             from loguru import logger as default_logger
@@ -51,38 +50,8 @@ class ResponseProcessor:
         self.logger = logger
         self._mode = mode.upper() if isinstance(mode, str) else "DEV"
         self._log_level = log_level.upper() if isinstance(log_level, str) else "INFO"
-        self._structured_output_mode = (
-            structured_output_mode.lower()
-            if isinstance(structured_output_mode, str)
-            else "function_call"
-        )
         self._stream_reasoning_parsers: dict[str, ReasoningContentParser] = {}
         self._stream_source_renderers: dict[str, SourceMarkerStreamRenderer] = {}
-
-    def _uses_structured_output_function_call(self) -> bool:
-        return self._structured_output_mode == "function_call"
-
-    def _is_chat_structured_output_function_call(
-        self, request_data: Optional[Dict]
-    ) -> bool:
-        if not self._uses_structured_output_function_call():
-            return False
-        response_format = None
-        if isinstance(request_data, dict):
-            response_format = request_data.get("response_format")
-        return (
-            isinstance(response_format, dict)
-            and response_format.get("type") == "json_schema"
-        )
-
-    def _is_responses_structured_output_function_call(self, data: dict) -> bool:
-        if not self._uses_structured_output_function_call():
-            return False
-        text_param = data.get("text")
-        if not isinstance(text_param, dict):
-            return False
-        fmt = text_param.get("format")
-        return isinstance(fmt, dict) and fmt.get("type") == "json_schema"
 
     def process_response(
         self,
@@ -98,34 +67,24 @@ class ResponseProcessor:
         )
         is_tool_call = giga_dict["choices"][0]["finish_reason"] == "function_call"
 
-        is_structured_output = self._is_chat_structured_output_function_call(
-            request_data
-        )
         provider_metadata = self._extract_provider_response_metadata(giga_dict)
-        if is_structured_output:
-            provider_metadata.pop("gigachat_called_tools", None)
-        else:
-            called_tools = self._extract_chat_messages_called_tool_items(
-                request_data or {}
+        called_tools = self._extract_chat_messages_called_tool_items(request_data or {})
+        called_tools.extend(
+            self._extract_called_tool_items_from_metadata(
+                provider_metadata.pop("gigachat_called_tools", None)
             )
-            called_tools.extend(
-                self._extract_called_tool_items_from_metadata(
-                    provider_metadata.pop("gigachat_called_tools", None)
-                )
+        )
+        called_tools.extend(
+            self._extract_called_tool_items_from_response(
+                giga_dict,
+                request_tools=(request_data or {}).get("tools"),
             )
-            called_tools.extend(
-                self._extract_called_tool_items_from_response(
-                    giga_dict,
-                    request_tools=(request_data or {}).get("tools"),
-                )
-            )
-            response_metadata.update(self._called_tools_metadata(called_tools))
+        )
+        response_metadata.update(self._called_tools_metadata(called_tools))
         response_metadata.update(provider_metadata)
 
         for choice in giga_dict["choices"]:
-            self._process_choice(
-                choice, is_tool_call, is_structured_output=is_structured_output
-            )
+            self._process_choice(choice, is_tool_call)
         result = {
             "id": f"chatcmpl-{response_id}",
             "object": "chat.completion",
@@ -133,7 +92,7 @@ class ResponseProcessor:
             "model": gpt_model,
             "choices": giga_dict["choices"],
             "usage": self._build_usage(giga_dict["usage"]),
-            "system_fingerprint": f"fp_{response_id}",
+            "system_fingerprint": None,
         }
         if response_metadata:
             result["metadata"] = response_metadata
@@ -168,24 +127,20 @@ class ResponseProcessor:
         is_tool_call = giga_dict["choices"][0]["finish_reason"] == "function_call"
 
         text_param = data.get("text")
-        is_structured_output = self._is_responses_structured_output_function_call(data)
         provider_metadata = self._extract_provider_response_metadata(giga_dict)
-        if is_structured_output:
-            provider_metadata.pop("gigachat_called_tools", None)
-        else:
-            called_tools = self._extract_responses_input_called_tool_items(data)
-            called_tools.extend(
-                self._extract_called_tool_items_from_metadata(
-                    provider_metadata.pop("gigachat_called_tools", None)
-                )
+        called_tools = self._extract_responses_input_called_tool_items(data)
+        called_tools.extend(
+            self._extract_called_tool_items_from_metadata(
+                provider_metadata.pop("gigachat_called_tools", None)
             )
-            called_tools.extend(
-                self._extract_called_tool_items_from_response(
-                    giga_dict,
-                    request_tools=data.get("tools"),
-                )
+        )
+        called_tools.extend(
+            self._extract_called_tool_items_from_response(
+                giga_dict,
+                request_tools=data.get("tools"),
             )
-            response_metadata.update(self._called_tools_metadata(called_tools))
+        )
+        response_metadata.update(self._called_tools_metadata(called_tools))
         response_metadata.update(provider_metadata)
 
         for choice in giga_dict["choices"]:
@@ -207,7 +162,6 @@ class ResponseProcessor:
                 giga_dict,
                 is_tool_call,
                 response_id,
-                is_structured_output=is_structured_output,
                 request_data=data,
             ),
             usage=self._build_response_usage(giga_dict.get("usage")),
@@ -291,15 +245,15 @@ class ResponseProcessor:
             "max_output_tokens": request_data.get("max_output_tokens"),
             "model": gpt_model,
             "output": output,
-            "parallel_tool_calls": request_data.get("parallel_tool_calls", True),
+            "parallel_tool_calls": request_data.get("parallel_tool_calls") is True,
             "previous_response_id": request_data.get("previous_response_id"),
             "reasoning": cls._build_reasoning_config(request_data),
-            "store": request_data.get("store", True),
-            "temperature": request_data.get("temperature", 1),
+            "store": request_data.get("store", False),
+            "temperature": request_data.get("temperature"),
             "text": response_text,
             "tool_choice": request_data.get("tool_choice", "auto"),
             "tools": request_data.get("tools", []),
-            "top_p": request_data.get("top_p", 1),
+            "top_p": request_data.get("top_p"),
             "truncation": request_data.get("truncation", "disabled"),
             "usage": usage,
             "user": request_data.get("user"),
@@ -339,7 +293,6 @@ class ResponseProcessor:
         is_tool_call: bool = False,
         response_id: Optional[str] = None,
         message_key: Literal["message", "delta"] = "message",
-        is_structured_output: bool = False,
         request_data: Optional[dict] = None,
     ) -> list:
         response_id = str(uuid.uuid4()) if response_id is None else response_id
@@ -349,14 +302,11 @@ class ResponseProcessor:
             message.get("reasoning_content"), response_id
         )
         try:
-            if is_tool_call and not is_structured_output:
-                return reasoning_items + [message["output"]]
-            if is_tool_call and is_structured_output:
-                output_item = message["output"]
-                arguments = output_item.get("arguments", "{}")
-                return reasoning_items + [
-                    ResponseProcessor._create_message_item(arguments, response_id)
-                ]
+            if is_tool_call:
+                output = message["output"]
+                return reasoning_items + (
+                    output if isinstance(output, list) else [output]
+                )
             builtin_items = ResponseProcessor._create_builtin_tool_items(
                 message,
                 response_id,
@@ -676,23 +626,17 @@ class ResponseProcessor:
         provider_metadata = self._extract_provider_response_metadata(giga_dict)
         is_tool_call = giga_dict["choices"][0].get("finish_reason") == "function_call"
 
-        is_structured_output = self._is_chat_structured_output_function_call(
-            request_data
-        )
-        if is_structured_output:
-            provider_metadata.pop("gigachat_called_tools", None)
-        else:
-            called_tools: list[dict[str, Any]] = []
-            if self._is_terminal_stream_chunk(giga_dict):
-                called_tools = self._extract_chat_messages_called_tool_items(
-                    request_data or {}
-                )
-            called_tools.extend(
-                self._extract_called_tool_items_from_metadata(
-                    provider_metadata.pop("gigachat_called_tools", None)
-                )
+        called_tools: list[dict[str, Any]] = []
+        if self._is_terminal_stream_chunk(giga_dict):
+            called_tools = self._extract_chat_messages_called_tool_items(
+                request_data or {}
             )
-            response_metadata.update(self._called_tools_metadata(called_tools))
+        called_tools.extend(
+            self._extract_called_tool_items_from_metadata(
+                provider_metadata.pop("gigachat_called_tools", None)
+            )
+        )
+        response_metadata.update(self._called_tools_metadata(called_tools))
         response_metadata.update(provider_metadata)
 
         for choice in giga_dict["choices"]:
@@ -701,7 +645,6 @@ class ResponseProcessor:
                 is_tool_call,
                 is_stream=True,
                 response_id=response_id,
-                is_structured_output=is_structured_output,
             )
 
         result = {
@@ -711,7 +654,7 @@ class ResponseProcessor:
             "model": gpt_model,
             "choices": giga_dict["choices"],
             "usage": self._build_usage(giga_dict.get("usage")),
-            "system_fingerprint": f"fp_{response_id}",
+            "system_fingerprint": None,
         }
         if response_metadata:
             result["metadata"] = response_metadata
@@ -814,7 +757,6 @@ class ResponseProcessor:
         is_tool_call: bool,
         is_stream: bool = False,
         response_id: Optional[str] = None,
-        is_structured_output: bool = False,
     ):
         """Обрабатывает отдельный choice."""
         message_key = "delta" if is_stream else "message"
@@ -822,32 +764,16 @@ class ResponseProcessor:
         choice["index"] = 0
         choice["logprobs"] = None
 
-        if is_structured_output and is_tool_call:
-            choice["finish_reason"] = (
-                "stop" if not is_stream or choice.get("finish_reason") else None
-            )
-
-            if message_key in choice:
-                message = choice[message_key]
-                message["refusal"] = None
-                if message.get("function_call"):
-                    args = message["function_call"]["arguments"]
-                    if isinstance(args, (dict, list)):
-                        content = json.dumps(args, ensure_ascii=False)
-                    else:
-                        content = str(args)
-
-                    message["content"] = content
-                    message.pop("function_call", None)
-
-        elif is_tool_call:
+        if is_tool_call:
             choice["finish_reason"] = "tool_calls"
 
         if message_key in choice:
             message = choice[message_key]
             message["refusal"] = None
-            if message.get("function_call") and not is_structured_output:
-                self._process_function_call(message, is_tool_call)
+            if message.get("tool_calls"):
+                self._process_tool_calls(message)
+            elif message.get("function_call"):
+                self._process_function_call(message, is_tool_call or is_stream)
             self._extract_reasoning_from_message(
                 message,
                 is_stream=is_stream,
@@ -860,6 +786,24 @@ class ResponseProcessor:
                 renderer_key=f"chat:{response_id}" if response_id else None,
                 finish_reason=choice.get("finish_reason"),
             )
+            # Project the public message explicitly after consuming provider metadata.
+            for key in list(message):
+                if key not in {
+                    "role",
+                    "content",
+                    "refusal",
+                    "reasoning_content",
+                    "tool_calls",
+                    "function_call",
+                    "audio",
+                    "annotations",
+                    "inline_data",
+                    "tool_executions",
+                    "files",
+                }:
+                    message.pop(key)
+            if message.get("function_call") is None:
+                message.pop("function_call", None)
 
     def _render_sources_in_message(
         self,
@@ -957,16 +901,19 @@ class ResponseProcessor:
     def _process_function_call(self, message: Dict, is_tool_call: bool):
         """Обрабатывает function call."""
         try:
-            arguments = json.dumps(
-                message["function_call"]["arguments"],
-                ensure_ascii=False,
-            )
+            arguments = message["function_call"]["arguments"]
+            if not isinstance(arguments, str):
+                arguments = json.dumps(arguments, ensure_ascii=False)
             tool_name = map_tool_name_from_gigachat(message["function_call"]["name"])
-            tool_call_id = self._backend_state_id_from_message(message)
+            tool_call_id = self._normalize_metadata_string(
+                message["function_call"].get("id")
+                or message["function_call"].get("id_")
+            ) or self._backend_state_id_from_message(message)
             function_call = {
                 "name": tool_name,
                 "arguments": arguments,
             }
+            state_id = self._raw_backend_state_id_from_message(message)
             if is_tool_call:
                 message["tool_calls"] = [
                     {
@@ -974,6 +921,7 @@ class ResponseProcessor:
                         "id": tool_call_id or f"call_{uuid.uuid4()}",
                         "type": "function",
                         "function": function_call,
+                        **({"tools_state_id": state_id} if state_id else {}),
                     }
                 ]
                 message.pop("function_call", None)
@@ -982,6 +930,44 @@ class ResponseProcessor:
             message.pop("functions_state_id", None)
         except Exception as e:
             self.logger.error(f"Error processing function call: {e}")
+
+    def _process_tool_calls(self, message: Dict) -> None:
+        """Normalize every GigaChat v2 function call to OpenAI tool-call shape."""
+        normalized_tool_calls = []
+        message_state_id = self._backend_state_id_from_message(message)
+        for index, tool_call in enumerate(message.get("tool_calls") or []):
+            if not isinstance(tool_call, Mapping):
+                continue
+            function = tool_call.get("function")
+            if not isinstance(function, Mapping):
+                continue
+            name = function.get("name")
+            if not isinstance(name, str) or not name:
+                continue
+            arguments = function.get("arguments", {})
+            if not isinstance(arguments, str):
+                arguments = json.dumps(arguments, ensure_ascii=False)
+            tool_call_id = self._normalize_metadata_string(tool_call.get("id"))
+            state_id = self._raw_backend_state_id_from_message(
+                tool_call
+            ) or self._raw_backend_state_id_from_message(message)
+            if not tool_call_id and index == 0:
+                tool_call_id = message_state_id
+            normalized_tool_calls.append(
+                {
+                    "index": tool_call.get("index", index),
+                    "id": tool_call_id or f"call_{uuid.uuid4()}",
+                    "type": "function",
+                    **({"tools_state_id": state_id} if state_id else {}),
+                    "function": {
+                        "name": map_tool_name_from_gigachat(name),
+                        "arguments": arguments,
+                    },
+                }
+            )
+        message["tool_calls"] = normalized_tool_calls
+        message.pop("function_call", None)
+        message.pop("functions_state_id", None)
 
     @classmethod
     def _backend_state_id_from_message(
@@ -1006,7 +992,7 @@ class ResponseProcessor:
         state_id = value.strip()
         if not state_id:
             return None
-        for prefix in ("fc_", "call_"):
+        for prefix in ("fc_",):
             if state_id.startswith(prefix) and len(state_id) > len(prefix):
                 return state_id.removeprefix(prefix)
         return state_id
@@ -1034,7 +1020,28 @@ class ResponseProcessor:
                 finish_reason=choice.get("finish_reason"),
             )
 
-            if message.get("role") == "assistant" and message.get("function_call"):
+            if message.get("tool_calls"):
+                outputs = []
+                for tool_call in message["tool_calls"]:
+                    if not isinstance(tool_call, Mapping):
+                        continue
+                    function = tool_call.get("function")
+                    if not isinstance(function, Mapping):
+                        continue
+                    call_message = {
+                        **message,
+                        "function_call": {**function, "id": tool_call.get("id")},
+                    }
+                    state_id = self._raw_backend_state_id_from_message(tool_call)
+                    if state_id:
+                        call_message["tools_state_id"] = state_id
+                    self._process_function_call_responses(
+                        call_message, response_id, request_tools=request_tools
+                    )
+                    if call_message.get("output"):
+                        outputs.append(call_message["output"])
+                message["output"] = outputs
+            elif message.get("role") == "assistant" and message.get("function_call"):
                 self._process_function_call_responses(
                     message,
                     response_id,
@@ -1049,11 +1056,17 @@ class ResponseProcessor:
     ):
         """Обрабатывает function call (Responses API)."""
         try:
-            arguments = json.dumps(
-                message["function_call"]["arguments"],
-                ensure_ascii=False,
+            arguments = message["function_call"]["arguments"]
+            if not isinstance(arguments, str):
+                arguments = json.dumps(arguments, ensure_ascii=False)
+            state_id = (
+                self._normalize_metadata_string(
+                    message["function_call"].get("id")
+                    or message["function_call"].get("id_")
+                )
+                or self._backend_state_id_from_message(message)
+                or response_id
             )
-            state_id = self._backend_state_id_from_message(message) or response_id
             tool_name, namespace = split_gigachat_tool_name(
                 message["function_call"]["name"],
                 request_tools=request_tools,
@@ -1068,6 +1081,9 @@ class ResponseProcessor:
             ).model_dump()
             if namespace:
                 output["namespace"] = namespace
+            tools_state_id = self._raw_backend_state_id_from_message(message)
+            if tools_state_id:
+                output["tools_state_id"] = tools_state_id
             message["output"] = output
 
         except Exception as e:
@@ -1080,9 +1096,11 @@ class ResponseProcessor:
             return None
 
         return {
-            "prompt_tokens": usage_data["prompt_tokens"],
+            "prompt_tokens": usage_data["prompt_tokens"]
+            + (usage_data.get("precached_prompt_tokens") or 0),
             "completion_tokens": usage_data["completion_tokens"],
-            "total_tokens": usage_data["total_tokens"],
+            "total_tokens": usage_data["total_tokens"]
+            + (usage_data.get("precached_prompt_tokens") or 0),
             "prompt_tokens_details": {
                 "cached_tokens": usage_data.get("precached_prompt_tokens", 0)
             },
@@ -1094,14 +1112,16 @@ class ResponseProcessor:
         if not usage_data:
             return None
         return {
-            "input_tokens": usage_data.get("prompt_tokens", 0),
+            "input_tokens": usage_data.get("prompt_tokens", 0)
+            + (usage_data.get("precached_prompt_tokens") or 0),
             "output_tokens": usage_data.get("completion_tokens", 0),
-            "total_tokens": usage_data["total_tokens"],
+            "total_tokens": usage_data["total_tokens"]
+            + (usage_data.get("precached_prompt_tokens") or 0),
             "prompt_tokens_details": {
                 "cached_tokens": usage_data.get("precached_prompt_tokens", 0)
             },
             "input_tokens_details": {
-                "cached_tokens": 0,
+                "cached_tokens": usage_data.get("precached_prompt_tokens") or 0,
                 "cache_write_tokens": 0,
             },
             "output_tokens_details": {"reasoning_tokens": 0},
@@ -1111,12 +1131,18 @@ class ResponseProcessor:
     def _extract_provider_response_metadata(data: Mapping[str, Any]) -> dict[str, str]:
         raw_metadata = data.get(GIGACHAT_PROVIDER_METADATA_KEY)
         if not isinstance(raw_metadata, Mapping):
-            return {}
+            raw_metadata = {}
 
         metadata: dict[str, str] = {}
         for key, value in raw_metadata.items():
             if isinstance(key, str) and isinstance(value, str):
                 metadata[key] = value
+        for key in ("additional_data", "error_details"):
+            value = data.get(key)
+            if isinstance(value, (dict, list)):
+                metadata[f"gigachat_{key}"] = json.dumps(
+                    value, ensure_ascii=False, separators=(",", ":")
+                )
         return metadata
 
     @classmethod
@@ -1210,6 +1236,9 @@ class ResponseProcessor:
             if call_id:
                 item["call_id"] = call_id
                 item["tools_state_id"] = call_id
+            tools_state_id = cls._raw_backend_state_id_from_message(raw_item)
+            if tools_state_id:
+                item["tools_state_id"] = tools_state_id
             item_id = cls._normalize_metadata_string(raw_item.get("id"))
             if item_id:
                 item["id"] = item_id
@@ -1325,7 +1354,9 @@ class ResponseProcessor:
         if call_id:
             item["call_id"] = call_id
             item["tools_state_id"] = call_id
-        state_id = cls._raw_backend_state_id_from_message(message)
+        state_id = cls._raw_backend_state_id_from_message(
+            tool_call
+        ) or cls._raw_backend_state_id_from_message(message)
         if state_id:
             item["tools_state_id"] = state_id
         return item

@@ -12,10 +12,12 @@ from gpt2giga.protocol.response.gigachat_chat_completion_adapter import (
     adapt_chat_completion_usage,
     extract_chat_completion_assistant_text,
     extract_chat_completion_function_call,
+    extract_chat_completion_tool_calls,
     extract_chat_completion_reasoning_text,
     extract_chat_completion_thread_id,
     hydrate_chat_completion_image_files,
 )
+from gpt2giga.protocol.anthropic.response import _build_anthropic_response
 from gpt2giga.protocol.response.processor import ResponseProcessor
 
 
@@ -397,11 +399,86 @@ def test_adapt_chat_completion_function_call_to_chat_shape():
     assert adapted["choices"][0]["finish_reason"] == "function_call"
     assert message["content"] is None
     assert message["function_call"] == {
+        "id": "msg_1",
         "name": "__gpt2giga_user_search_web",
         "arguments": {"query": "cats"},
     }
-    assert message["functions_state_id"] == "msg_1"
+    assert "functions_state_id" not in message
     assert adapted["usage"]["total_tokens"] == 1
+
+
+def test_adapt_chat_completion_preserves_parallel_function_calls():
+    response = ChatCompletionResponse.model_validate(
+        {
+            "model": "GigaChat-2-Max",
+            "messages": [
+                {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "function_call": {
+                                "id": "weather-state",
+                                "name": "get_weather",
+                                "arguments": {"city": "Москва"},
+                            }
+                        },
+                        {
+                            "function_call": {
+                                "id": "rate-state",
+                                "name": "get_rate",
+                                "arguments": {"currency": "USD"},
+                            }
+                        },
+                    ],
+                }
+            ],
+            "finish_reason": "function_call",
+            "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
+        }
+    )
+
+    assert [call["id"] for call in extract_chat_completion_tool_calls(response)] == [
+        "weather-state",
+        "rate-state",
+    ]
+
+    adapted = adapt_chat_completion_to_chat_shape(response, default_model="fallback")
+    raw_tool_calls = adapted["choices"][0]["message"]["tool_calls"]
+    assert [call["id"] for call in raw_tool_calls] == [
+        "weather-state",
+        "rate-state",
+    ]
+
+    processed = ResponseProcessor(logger=logger).process_response(
+        SimpleNamespace(model_dump=lambda: adapted),
+        gpt_model="gpt-x",
+        response_id="v2",
+        request_data={"parallel_tool_calls": True},
+    )
+    tool_calls = processed["choices"][0]["message"]["tool_calls"]
+    assert [call["id"] for call in tool_calls] == [
+        "weather-state",
+        "rate-state",
+    ]
+    assert [call["function"]["name"] for call in tool_calls] == [
+        "get_weather",
+        "get_rate",
+    ]
+    assert [json.loads(call["function"]["arguments"]) for call in tool_calls] == [
+        {"city": "Москва"},
+        {"currency": "USD"},
+    ]
+
+    anthropic = _build_anthropic_response(
+        adapted,
+        "GigaChat-2-Max",
+        "v2",
+    )
+    tool_uses = [block for block in anthropic["content"] if block["type"] == "tool_use"]
+    assert [block["id"] for block in tool_uses] == [
+        "weather-state",
+        "rate-state",
+    ]
 
 
 def test_adapted_chat_completion_completion_can_flow_through_response_processor():
@@ -926,6 +1003,7 @@ def test_adapt_chat_completion_openai_style_final_chunk_keeps_stop_and_usage():
     assert adapted["choices"][0]["delta"] == {
         "content": "",
         "role": "assistant",
+        "tools_state_id": "019ebe32-089b-7bee-b7a2-0d924c288064",
     }
     assert adapted["choices"][0]["finish_reason"] == "stop"
     assert adapted["usage"] == {
@@ -968,6 +1046,7 @@ def test_adapt_chat_completion_named_done_event_keeps_stop_usage_and_state():
     assert adapted["choices"][0]["delta"] == {
         "content": "",
         "role": "assistant",
+        "tools_state_id": "019ec0e2-2bc1-7cf4-86fb-0280fd4c7cb9",
     }
     assert adapted["choices"][0]["finish_reason"] == "stop"
     assert adapted["usage"] == {

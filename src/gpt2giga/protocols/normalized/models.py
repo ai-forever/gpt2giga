@@ -79,6 +79,7 @@ class NormalizedMessage(NormalizedBaseModel):
 
     role: str
     content: Optional[str | list[NormalizedContentPart]] = None
+    reasoning_content: Optional[str] = None
     name: Optional[str] = None
     tool_call_id: Optional[str] = None
     tool_calls: list[NormalizedToolCall] = Field(default_factory=list)

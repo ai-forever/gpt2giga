@@ -124,7 +124,51 @@ def test_anthropic_adapter_maps_messages_tools_and_controls_to_normalized():
     }
 
 
-def test_anthropic_adapter_maps_provider_tools_only_when_enabled():
+def test_anthropic_adapter_preserves_native_tool_schema():
+    schema = {
+        "$defs": {"item": {"type": ["integer", "null"]}},
+        "type": "object",
+        "properties": {
+            "items": {
+                "type": "array",
+                "prefixItems": [{"$ref": "#/$defs/item"}],
+                "items": False,
+            },
+            "mode": {"enum": ["safe", None, 1]},
+        },
+    }
+
+    normalized = AnthropicProtocolAdapter().messages_to_normalized(
+        {
+            "model": "claude-x",
+            "messages": [{"role": "user", "content": "Run."}],
+            "tools": [{"name": "run", "input_schema": schema}],
+        }
+    )
+
+    assert normalized.tools[0].parameters == schema
+
+
+def test_anthropic_adapter_enables_parallel_tool_use_explicitly():
+    normalized = AnthropicProtocolAdapter().messages_to_normalized(
+        {
+            "model": "GigaChat-2-Max",
+            "messages": [{"role": "user", "content": "Call both."}],
+            "tools": [
+                {"name": "first", "input_schema": {"type": "object"}},
+                {"name": "second", "input_schema": {"type": "object"}},
+            ],
+            "tool_choice": {
+                "type": "auto",
+                "disable_parallel_tool_use": False,
+            },
+        }
+    )
+
+    assert normalized.parallel_tool_calls is True
+
+
+def test_anthropic_adapter_maps_provider_tools():
     payload = {
         "model": "claude-x",
         "messages": [{"role": "user", "content": "search"}],
@@ -139,21 +183,12 @@ def test_anthropic_adapter_maps_provider_tools_only_when_enabled():
     }
     adapter = AnthropicProtocolAdapter()
 
-    enabled = adapter.messages_to_normalized(payload)
-    disabled = adapter.messages_to_normalized(
-        payload,
-        builtin_tool_mapping_enabled=False,
-    )
+    normalized = adapter.messages_to_normalized(payload)
 
-    assert [(tool.type, tool.name) for tool in enabled.tools] == [
+    assert [(tool.type, tool.name) for tool in normalized.tools] == [
         ("web_search", "web_search")
     ]
-    assert enabled.tool_choice == {"type": "web_search"}
-    assert disabled.tools == []
-    assert disabled.tool_choice == {
-        "type": "function",
-        "function": {"name": "web_search"},
-    }
+    assert normalized.tool_choice == {"type": "web_search"}
 
 
 def test_anthropic_adapter_builds_normalized_count_tokens_request():
@@ -347,29 +382,3 @@ def test_anthropic_stream_projector_maps_tool_and_error_events():
     assert '"partial_json": "{\\"q\\":\\"ping\\"}"' in tool_frames[1]
     assert "event: error" in error_frames[0]
     assert '"type": "rate_limit_error"' in error_frames[0]
-
-
-def test_anthropic_stream_projector_renders_structured_tool_as_text():
-    projector = AnthropicStreamProjector(
-        requested_model="claude-test",
-        response_id="request-1",
-        structured_output=True,
-    )
-
-    frames = projector.project(
-        NormalizedStreamEvent(
-            type="tool_call_start",
-            tool_call=NormalizedToolCall(
-                id="toolu-1",
-                name="structured_output",
-                arguments={"answer": 42},
-            ),
-        )
-    )
-    terminal = projector.project(
-        NormalizedStreamEvent(type="message_end", finish_reason="tool_calls")
-    )
-
-    assert '"type": "text"' in frames[0]
-    assert '"text": "{\\"answer\\": 42}"' in frames[1]
-    assert '"stop_reason": "end_turn"' in terminal[-2]

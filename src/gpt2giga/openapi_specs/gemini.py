@@ -35,8 +35,7 @@ def gemini_generate_content_openapi_extra(*, streaming: bool) -> dict[str, Any]:
                 "type": "array",
                 "description": (
                     "Function declarations are mapped to executable tools; "
-                    "compatible provider tools map to GigaChat v2 built-ins "
-                    "unless GPT2GIGA_DISABLE_BUILTIN_TOOL_MAPPING=true."
+                    "compatible provider tools map to GigaChat v2 built-ins."
                 ),
                 "items": {"type": "object", "additionalProperties": True},
             },

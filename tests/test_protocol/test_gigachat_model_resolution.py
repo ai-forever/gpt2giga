@@ -58,21 +58,33 @@ def test_settings_model_is_used_after_blank_payload_model() -> None:
         ),
     ],
 )
-def test_v2_assistant_and_thread_paths_do_not_invent_model(
+@pytest.mark.parametrize("api_mode", ["v1", "v2"])
+@pytest.mark.parametrize("configured_model", [None, "configured-model"])
+def test_assistant_and_thread_paths_do_not_invent_model(
     payload: object,
     limiter_key: str,
     source: str,
+    api_mode: str,
+    configured_model: str | None,
 ) -> None:
-    resolved = resolve_upstream_model(payload, _config(), api_mode="v2")
+    resolved = resolve_upstream_model(
+        payload, _config(configured_model), api_mode=api_mode
+    )
 
     assert resolved.model is None
     assert resolved.limiter_key == limiter_key
     assert resolved.source == source
 
 
-def test_v1_does_not_accept_v2_assistant_without_model() -> None:
-    with pytest.raises(UpstreamModelRequiredError):
-        resolve_upstream_model({"assistant_id": "asst-1"}, _config(), api_mode="v1")
+def test_v1_legacy_storage_assistant_does_not_invent_model() -> None:
+    resolved = resolve_upstream_model(
+        {"storage": {"is_stateful": True, "assistant_id": "asst-1"}},
+        _config("configured-model"),
+        api_mode="v1",
+    )
+    assert resolved.model is None
+    assert resolved.limiter_key == "assistant:asst-1"
+    assert resolved.source == "assistant"
 
 
 @pytest.mark.parametrize("model", [None, "", " \t\n "])

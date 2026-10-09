@@ -6,15 +6,15 @@ gateway to GigaChat and verify each protocol with a first request.
 ## Requirements
 
 - Python 3.10–3.14 for a local run.
-- GigaChat Python SDK 0.2.3 or newer in the supported 0.2.x series; it is
-  installed with the gateway.
+- This checkout requires GigaChat Python SDK `>=0.2.4a1,<0.3.0`.
+  SDK `0.2.4a1` is available on PyPI and is installed automatically with the gateway.
 - `uv` for local development.
 - Docker with the Compose plugin for a container run.
 - GigaChat credentials and scope for the target account.
 
 ## Setting up credentials
 
-Create a local env file:
+Run repository commands from the root of this checkout. Create a local env file:
 
 ```sh
 cp .env.example .env
@@ -37,17 +37,21 @@ The GigaChat SDK settings use the `GIGACHAT_` prefix. The proxy settings use the
 
 ## Running via Docker Compose
 
-DEV profile:
+Build and run the current checkout with the DEV profile:
 
 ```sh
-docker compose --env-file .env -f deploy/base.yaml --profile DEV up -d
+docker compose --env-file .env -f deploy/base.yaml --profile DEV up -d --build --pull never
 ```
 
 PROD profile:
 
 ```sh
-docker compose --env-file .env -f deploy/base.yaml --profile PROD up -d
+docker compose --env-file .env -f deploy/base.yaml --profile PROD up -d --build --pull never
 ```
+
+The Docker build installs the GigaChat SDK from PyPI. Without
+`--build --pull never`, the Compose configuration pulls the published `latest`
+image, which may not include the changes in this checkout.
 
 In `PROD`, the Compose file binds the service to `127.0.0.1` only by default. For external access, put nginx, Traefik, Caddy, or another reverse proxy in front.
 
@@ -59,22 +63,38 @@ curl http://localhost:8090/health
 
 ## Install the gateway
 
-Install the compatibility gateway when you need the OpenAI-, Anthropic-, or
-Gemini-shaped HTTP API:
+The package-index command installs the published stable gateway release:
 
 ```sh
 uv tool install gpt2giga
 gpt2giga --help
 ```
 
+This checkout contains prerelease gateway features that may not be in that
+release. Install the checkout as described below to use them. Its GigaChat SDK
+dependency is available on PyPI; a separate local SDK wheel is no longer needed.
+
 ## Run from the repository
 
-Install the editable gateway project and development dependencies:
+Install the editable gateway project and development dependencies. `uv` installs
+the GigaChat SDK from PyPI using the version and hashes in `uv.lock`:
 
 ```sh
 uv sync --all-extras --dev
 uv run gpt2giga
 ```
+
+For a regular pip installation of the current checkout, install the gateway
+project. For example, in a new virtual environment on Linux or macOS:
+
+```sh
+python -m venv .venv
+.venv/bin/python -m pip install .
+.venv/bin/gpt2giga
+```
+
+For optional dependencies, replace `.` with `".[postgres]"`, `".[opensearch]"`,
+or `".[phoenix]"` in the pip command.
 
 In `DEV`, the FastAPI docs are available at `http://localhost:8090/docs`. In `PROD` they are disabled.
 

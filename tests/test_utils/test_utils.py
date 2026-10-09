@@ -42,7 +42,7 @@ async def test_exceptions_handler_converts_gigachat_response_error(monkeypatch):
     class FakeResponseError(gigachat.exceptions.ResponseError):
         pass
 
-    err = FakeResponseError("http://example.com", 400, '{"error":"bad"}', None)
+    err = FakeResponseError("http://example.com", 400, b'{"error":"bad"}', None)
 
     @exceptions_handler
     async def boom():

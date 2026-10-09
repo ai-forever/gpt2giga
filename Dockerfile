@@ -12,7 +12,7 @@ RUN pip install --no-cache-dir uv
 COPY pyproject.toml README.md ./
 COPY src/ src/
 
-RUN uv build --wheel
+RUN uv build --wheel --no-sources
 
 
 FROM python:${PYTHON_VERSION}-slim AS runtime
@@ -30,7 +30,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 COPY --from=builder /app/dist/*.whl /tmp/
 
 RUN python -m venv "$VIRTUAL_ENV" \
-    && wheel_path="$(find /tmp -maxdepth 1 -name '*.whl' -print -quit)" \
+    && wheel_path="$(find /tmp -maxdepth 1 -name 'gpt2giga-*.whl' -print -quit)" \
     && pip install --no-cache-dir "${wheel_path}${INSTALL_EXTRAS}" \
     && rm -rf /tmp/*.whl \
     && find "$VIRTUAL_ENV" -type d -name "__pycache__" -prune -exec rm -rf '{}' + \
