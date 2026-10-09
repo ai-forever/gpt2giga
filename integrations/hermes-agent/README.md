@@ -21,14 +21,17 @@ GIGACHAT_SCOPE=GIGACHAT_API_PERS
 GPT2GIGA_ENABLE_API_KEY_AUTH=True
 GPT2GIGA_API_KEY=<ваш_api_ключ>
 GPT2GIGA_GIGACHAT_API_MODE=v2
-GPT2GIGA_DISABLE_REASONING=True
 ```
 
 Рекомендуемые параметры для Hermes:
 
 - `GPT2GIGA_GIGACHAT_API_MODE=v2` - включает режим v2 с поддержкой встроенных инструментов GigaChat (web_search, image_generate).
-- `GPT2GIGA_DISABLE_REASONING=True` - удаляет `reasoning` и `reasoning_effort` из запроса к GigaChat, чтобы клиентские поля не мешали обработке.
 - `GPT2GIGA_API_KEY` - произвольный набор символов.
+
+Reasoning управляется параметрами клиентского запроса. Значение
+`reasoning_effort="none"` или `reasoning.effort="none"` исключает параметры
+reasoning из запроса к GigaChat.
+Глобальная настройка `GPT2GIGA_DISABLE_REASONING` удалена.
 
 Запустите прокси-сервер:
 
@@ -95,7 +98,7 @@ hermes chat --provider custom --model GigaChat-2-Max -q "Найди текущу
 
 - **Hermes получает 401/403** — проверьте, что `GPT2GIGA_API_KEY` в конфиге Hermes совпадает со значением на сервере `gpt2giga`.
 - **Hermes не может подключиться** — проверьте, что gpt2giga запущен и слушает на `localhost:8090`.
-- **Ошибки стриминга** — попробуйте `GPT2GIGA_DISABLE_REASONING=True` и `GPT2GIGA_PASS_MODEL=False`.
+- **Ошибки стриминга** — проверьте ошибку upstream в логах `gpt2giga` и доступность выбранной модели через `GET /v2/models`.
 - **Модель не отвечает** — проверьте, что `GIGACHAT_CREDENTIALS` корректен и не истёк срок действия.
 
 ---

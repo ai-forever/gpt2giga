@@ -5,29 +5,37 @@ All notable changes to the gpt2giga project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.3.1a1] - 2026-08-06
+## [0.3.1a1] - 2026-10-09
 
 ### Added
-- **Contract examples**: add session/cache usage, required parallel Responses SSE, and Anthropic any; update reasoning budgets and stateful Responses examples.
-- **Buffered Chat Completions streaming**: an OpenAI-compatible v3 profile can explicitly set `upstream_stream_mode: buffered`; the gateway sends `stream: false` upstream and synthesizes a delayed Responses, Anthropic Messages, or Gemini stream with text/tool-call events, a terminal event, and usage. Strict SSE remains the default.
-- **Reasoning through the Chat Completions bridge**: the reviewed `reasoning_controls_and_summaries` capability forwards Responses effort as `reasoning_effort`, projects `reasoning_content` into a Responses reasoning summary for SSE and buffered mode, and restores it on the next assistant tool-call message.
+
+- **Chat Completions bridge**: OpenAI Responses, Anthropic Messages, and Gemini GenerateContent can use an OpenAI-compatible upstream for text, local functions, tool-result continuation, and streaming. The route is a `technical_preview`; unsupported capabilities are rejected before upstream I/O.
+- **Provider profiles v3**: add explicit model capabilities and token limits, keyless upstream profiles, and static alias catalogs. Existing v1/v2 schemas remain loadable; executing the Chat Completions bridge requires a v3 profile.
+- **Buffered streaming**: the `upstream_stream_mode: buffered` profile setting retrieves a complete Chat Completions JSON response, then emits a Responses, Anthropic, or Gemini stream with text/tool-call events and usage. The first content event arrives after generation completes; strict SSE remains the default.
+- **Reasoning through the bridge**: the `reasoning_controls_and_summaries` capability forwards Responses effort as `reasoning_effort`, returns `reasoning_content` as a Responses reasoning summary, and preserves it during tool-loop continuation in SSE and buffered mode.
+- **Deployment and examples**: add a reverse-mode mitmproxy Compose configuration and guides for Codex, Claude Code, Gemini CLI, and Hermes Agent; expand examples for parallel/required tools, session/cache usage, reasoning budgets, and stateful Responses.
+
+### Changed
+
+- **GigaChat SDK from PyPI**: require `gigachat>=0.2.4a1,<0.3.0`. pip/uv installation, CI, and Docker builds use the published SDK; a local wheel is no longer needed.
+- **Native JSON Schema**: function schemas, including `$defs`/`$ref`, composition, union types, mixed `enum` values, and boolean subschemas, are preserved in the SDK payload without gateway workaround transformations. The upstream determines whether a particular schema is accepted.
+- **Dependencies**: update Python dependencies, CI tooling, and documentation-site dependencies, including `brace-expansion`, `joi`, and `dompurify`.
 
 ### Fixed
-- **Tool-call continuation**: preserve opaque GigaChat `tools_state_id` separately from each call ID in OpenAI Chat Completions, Responses, and Anthropic tool history, including SDK streaming accumulation and out-of-order parallel results.
-- **Responses parallel setting**: report the effective GigaChat `parallel_tool_calls` value in JSON and SSE, with `false` as the provider default and nested request overrides retained.
-- **Prerelease installation docs**: distinguish published releases from the current checkout and document installing the bundled SDK wheel alongside the gateway.
-- **SDK contract alignment**: refresh the bundled GigaChat wheel from SDK commit `6e9bb50`; preserve reasoning budgets, nested generation settings and distinct function/result IDs, use valid v2 forced/any modes, and reject required tools or stored Responses when the v1 route cannot execute them.
-- **Usage and response fidelity**: include cached tokens in OpenAI input totals, expose Anthropic cache reads, keep SDK fields out of public message objects, and report unknown Responses sampling settings and model fingerprints as null.
-- **Session and CLI settings**: support the SDK session-ID default with per-request overrides; resolve relative `--env-path` from the working directory and fail for a missing explicit file.
-- **Parallel function calls in GigaChat v2**: OpenAI Chat Completions, Anthropic Messages, and Gemini `generateContent` now map requests for two local functions to `model_options.parallel_tool_calls`, preserve every returned `function_call` and `id` in buffered responses, and replay both results on the next turn. Support is limited to `GigaChat-2-Max` on v2; the refreshed vendored `gigachat==0.2.4a1` wheel provides the required SDK contract, while legacy v1 remains unchanged.
-- **Tool loops with incompatible chat templates**: when the same OpenAI-compatible upstream returns a confirmed 5xx `chat_template_application_failed` for tool history, the gateway retries once before the first event with reasoning, function calls, and tool results represented as explicit text. Normal requests, other failures, and the current tool schema remain unchanged; successful fallback is reported in metadata.
-- **Native function-calling schemas**: OpenAI, Responses, Anthropic, and Gemini no longer pass function JSON Schemas through GigaChat-specific workaround transformations. Schemas using `$defs`/`$ref`, composition, union types, mixed `enum` values, boolean subschemas, and extension keywords are forwarded losslessly to GigaChat v1 and v2 through `gigachat>=0.2.4a1`.
-- **Request-scoped reasoning disable**: OpenAI `reasoning.effort="none"` and `reasoning_effort="none"`, including Codex `model_reasoning_effort=none`, now remove reasoning from the upstream payload.
+
+- **Parallel GigaChat v2 function calls**: requests forward `model_options.parallel_tool_calls`, responses retain every call and its ID, and the next turn sends the corresponding results. The capability is declared for `GigaChat-2-Max` on v2. OpenAI Chat Completions, Responses, Anthropic, and Gemini use the aligned SDK contract.
+- **Tool-call continuation**: retain `tools_state_id` separately from each call ID in OpenAI Chat Completions, Responses, and Anthropic history, including Python SDK streaming accumulation and out-of-order parallel results. Responses JSON and SSE report the effective `parallel_tool_calls` value, including nested overrides, with `false` as the GigaChat default.
+- **GigaChat parameters**: preserve reasoning budgets and nested generation settings; map forced/any tool selection to valid v2 modes. Reject required tool selection on v1; Responses v1 also rejects `store=true` and `previous_response_id`. Reasoning effort `none` removes reasoning parameters from that request's upstream payload.
+- **Model selection and Codex catalog**: stop overriding assistant/thread selectors with the configured default model; return the catalog shape expected by Codex for `/models?client_version=...`.
+- **Usage and responses**: include cached tokens in OpenAI input totals, expose Anthropic cache reads, and keep internal SDK fields out of public messages. Report unknown Responses sampling settings and model fingerprints as `null`.
+- **Session and CLI**: allow request headers to override the SDK session-ID default; resolve relative `--env-path` values from the working directory and fail when an explicitly selected file is missing.
+- **Incompatible chat templates**: on a confirmed 5xx `chat_template_application_failed` for tool history, retry once against the same upstream before the first event, representing reasoning, tool calls, and tool results as text. Report successful fallback in metadata.
 
 ### Removed
-- **Global reasoning workarounds**: removed `GPT2GIGA_ENABLE_REASONING` / `--proxy.enable-reasoning` and `GPT2GIGA_DISABLE_REASONING` / `--proxy.disable-reasoning`; reasoning is now controlled only by explicit client request parameters.
-- **Structured-output fallback**: removed `GPT2GIGA_STRUCTURED_OUTPUT_MODE` / `--proxy.structured-output-mode` and JSON Schema conversion into a synthetic function call; structured output now always uses native GigaChat `response_format`.
-- **Global built-in tool opt-out**: removed `GPT2GIGA_DISABLE_BUILTIN_TOOL_MAPPING` / `--proxy.disable-builtin-tool-mapping`; recognized provider built-in tools on GigaChat v2 routes are now always mapped when requested by the client.
+
+- **Global reasoning settings**: remove `GPT2GIGA_ENABLE_REASONING` / `--proxy.enable-reasoning` and `GPT2GIGA_DISABLE_REASONING` / `--proxy.disable-reasoning`. Send reasoning parameters in the client request; `reasoning.effort="none"` or `reasoning_effort="none"` excludes them from the upstream payload.
+- **Structured-output fallback**: remove `GPT2GIGA_STRUCTURED_OUTPUT_MODE` / `--proxy.structured-output-mode` and JSON Schema conversion into a synthetic function call. Structured output uses native GigaChat `response_format`.
+- **Global built-in tool opt-out**: remove `GPT2GIGA_DISABLE_BUILTIN_TOOL_MAPPING` / `--proxy.disable-builtin-tool-mapping`. Recognized built-in tools on GigaChat v2 routes are mapped when requested by the client.
 
 ## [0.3.0] - 2026-08-03
 

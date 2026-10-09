@@ -968,23 +968,15 @@ wheels = [
 [[package]]
 name = "gigachat"
 version = "0.2.4a1"
-source = { path = "gigachat-0.2.4a1-py3-none-any.whl" }
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
 ]
+sdist = { url = "https://files.pythonhosted.org/packages/ca/fd/847ccb6c155a8061dec3edfad3d4a72e3f9b74ce376d71bee4033eba2adc/gigachat-0.2.4a1.tar.gz", hash = "sha256:c81889e06c028d2ed295a54295b5443301589764b0de0925ae3f3b3ce1fe8a47", size = 52065, upload-time = "2026-10-09T13:58:38.845Z" }
 wheels = [
-    { filename = "gigachat-0.2.4a1-py3-none-any.whl", hash = "sha256:19b723a72676eac0c15c78e269e9c0068102cb02017980a626323cb350ba1d62" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "httpx", specifier = ">=0.24,<1" },
-    { name = "pydantic", specifier = ">=2.0,<3" },
-    { name = "pydantic-settings", marker = "python_full_version == '3.8.*'", specifier = ">=2.0,<2.9.0" },
-    { name = "pydantic-settings", marker = "python_full_version == '3.9.*'", specifier = ">=2.0,<2.12.0" },
-    { name = "pydantic-settings", marker = "python_full_version >= '3.10'", specifier = ">=2.0,<3" },
+    { url = "https://files.pythonhosted.org/packages/a2/15/99ad73e363759a737e775135d61c5f2e82dc11723a6103d25e849738d908/gigachat-0.2.4a1-py3-none-any.whl", hash = "sha256:04363a572e436f14832efdab7c035bad07c270d0dc19219072abac13f54ddcf6", size = 57303, upload-time = "2026-10-09T13:58:37.618Z" },
 ]
 
 [[package]]
@@ -1104,7 +1096,7 @@ requires-dist = [
     { name = "arize-phoenix-otel", marker = "extra == 'phoenix'", specifier = ">=0.16.1,<1" },
     { name = "asyncpg", marker = "extra == 'postgres'", specifier = ">=0.31.0,<1" },
     { name = "fastapi", specifier = ">=0.140.13,<1" },
-    { name = "gigachat", path = "gigachat-0.2.4a1-py3-none-any.whl" },
+    { name = "gigachat", specifier = ">=0.2.4a1,<0.3.0" },
     { name = "google-genai", specifier = ">=2.14.0,<3" },
     { name = "httpx", specifier = ">=0.28.1,<1" },
     { name = "loguru", specifier = ">=0.7.3,<0.8" },

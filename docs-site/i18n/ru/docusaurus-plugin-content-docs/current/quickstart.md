@@ -6,8 +6,8 @@ Anthropic и Gemini, и проверить каждый протокол пер�
 ## Требования
 
 - Python 3.10–3.14 для локального запуска.
-- Текущему checkout нужен GigaChat Python SDK `>=0.2.4a1,<0.3.0`;
-  для установки из репозитория в него включён `gigachat-0.2.4a1-py3-none-any.whl`.
+- Текущему checkout нужен GigaChat Python SDK `>=0.2.4a1,<0.3.0`.
+  SDK `0.2.4a1` опубликован в PyPI и устанавливается автоматически вместе со шлюзом.
 - `uv` для локальной разработки.
 - Docker с плагином Compose для контейнерного запуска.
 - Учётные данные и scope GigaChat для нужного аккаунта.
@@ -49,7 +49,7 @@ docker compose --env-file .env -f deploy/base.yaml --profile DEV up -d --build -
 docker compose --env-file .env -f deploy/base.yaml --profile PROD up -d --build --pull never
 ```
 
-Сборка Docker устанавливает SDK wheel из репозитория. Без `--build --pull never`
+Сборка Docker устанавливает GigaChat SDK из PyPI. Без `--build --pull never`
 конфигурация Compose скачивает опубликованный образ `latest`, который может
 ещё не включать изменения текущего checkout.
 
@@ -70,27 +70,26 @@ uv tool install gpt2giga
 gpt2giga --help
 ```
 
-Текущий checkout содержит prerelease-возможности, которых может ещё не быть в
-этом релизе. Пока требуемая версия GigaChat SDK не опубликована в PyPI,
-устанавливайте checkout с включённым SDK wheel по инструкции ниже. Установка
-только wheel или исходного дистрибутива gateway не предоставляет этот SDK wheel.
+Текущий checkout содержит prerelease-возможности gateway, которых может ещё не
+быть в этом релизе. Для доступа к ним установите checkout по инструкции ниже.
+Требуемый GigaChat SDK доступен в PyPI; отдельный локальный wheel SDK больше не нужен.
 
 ## Запуск из репозитория
 
 Установите gateway как editable-проект вместе с зависимостями разработки.
-`uv` берёт локальный SDK wheel из настройки источников в репозитории:
+`uv` устанавливает GigaChat SDK из PyPI по версии и контрольным суммам в `uv.lock`:
 
 ```sh
 uv sync --all-extras --dev
 uv run gpt2giga
 ```
 
-Для обычной установки текущего checkout через pip передайте SDK wheel и проект
-gateway в одной команде. Например, в новом виртуальном окружении Linux или macOS:
+Для обычной установки текущего checkout через pip установите проект gateway.
+Например, в новом виртуальном окружении Linux или macOS:
 
 ```sh
 python -m venv .venv
-.venv/bin/python -m pip install ./gigachat-0.2.4a1-py3-none-any.whl .
+.venv/bin/python -m pip install .
 .venv/bin/gpt2giga
 ```
 

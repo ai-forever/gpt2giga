@@ -60,11 +60,9 @@ def assert_code_workflows_target_root_project() -> None:
 def assert_production_dockerfile_installs_root_gateway() -> None:
     dockerfile = (REPO_ROOT / "Dockerfile").read_text(encoding="utf-8")
 
-    assert "uv build --wheel" in dockerfile
+    assert "uv build --wheel --no-sources" in dockerfile
     assert "COPY src/ src/" in dockerfile
     assert "COPY --from=builder /app/dist/*.whl /tmp/" in dockerfile
-    assert "COPY gigachat-0.2.4a1-py3-none-any.whl /tmp/" in dockerfile
-    assert (
-        'pip install --no-cache-dir "$sdk_wheel_path" "${wheel_path}${INSTALL_EXTRAS}"'
-    ) in dockerfile
+    assert 'pip install --no-cache-dir "${wheel_path}${INSTALL_EXTRAS}"' in dockerfile
+    assert "gigachat-" not in dockerfile
     assert "gpt2giga_harness" not in dockerfile

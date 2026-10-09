@@ -90,8 +90,6 @@ exclude_lines = [
     "@(abc\\.)?abstractmethod"
 ]
 
-[tool.uv.sources]
-gigachat = { path = "gigachat-0.2.4a1-py3-none-any.whl" }
 [dependency-groups]
 dev = [
     "black (>=26.3.1,<27.0.0)",

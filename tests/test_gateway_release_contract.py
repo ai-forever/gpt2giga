@@ -2,6 +2,11 @@
 
 from pathlib import Path
 
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility
+    import tomli as tomllib
+
 from artifact_contract_support import assert_lock_is_current
 from repository_boundary_support import (
     assert_code_workflows_target_root_project,
@@ -24,6 +29,23 @@ def test_source_lock_is_current():
     assert_lock_is_current()
 
 
+def test_gateway_resolves_sdk_from_pypi():
+    root = _WORKFLOW_ROOT.parents[1]
+    with (root / "pyproject.toml").open("rb") as file:
+        pyproject = tomllib.load(file)
+    with (root / "uv.lock").open("rb") as file:
+        lock = tomllib.load(file)
+
+    assert "gigachat" not in pyproject["tool"].get("uv", {}).get("sources", {})
+    sdk = next(package for package in lock["package"] if package["name"] == "gigachat")
+    assert sdk["version"] == "0.2.4a1"
+    assert sdk["source"] == {"registry": "https://pypi.org/simple"}
+    assert all(
+        wheel["url"].startswith("https://files.pythonhosted.org/")
+        for wheel in sdk["wheels"]
+    )
+
+
 def test_gateway_ci_has_stable_bounded_required_check_names():
     workflow = (_WORKFLOW_ROOT / "ci.yaml").read_text(encoding="utf-8")
 
@@ -33,13 +55,13 @@ def test_gateway_ci_has_stable_bounded_required_check_names():
     assert "uv build --wheel --sdist --no-sources" in workflow
 
 
-def test_gateway_ci_tests_minimum_sdk_from_wheel():
+def test_gateway_ci_tests_minimum_sdk_from_pypi():
     workflow = (_WORKFLOW_ROOT / "ci.yaml").read_text(encoding="utf-8")
 
     assert "Gateway minimum SDK / Python ${{ matrix.python-version }}" in workflow
     assert 'python-version: ["3.10", "3.14"]' in workflow
     assert "uv venv --python ${{ matrix.python-version }} .venv-min-sdk" in workflow
-    assert "gigachat-0.2.4a1-py3-none-any.whl" in workflow
+    assert '"gigachat==0.2.4a1" dist/min-sdk/gpt2giga-*.whl' in workflow
     assert "dist/min-sdk/gpt2giga-*.whl" in workflow
     assert "scripts/gateway_artifact_smoke.py" in workflow
     assert '--expected-gigachat-version "0.2.4a1"' in workflow
@@ -53,10 +75,7 @@ def test_gateway_ci_installs_artifact_dependencies_without_global_prerelease_fla
     assert (
         "uv pip install --python .venv-artifact/bin/python dist/smoke/gpt2giga-*.whl"
     ) in workflow
-    assert (
-        "uv pip install --python .venv-artifact/bin/python "
-        "gigachat-0.2.4a1-py3-none-any.whl"
-    ) in workflow
+    assert "gigachat-0.2.4a1-py3-none-any.whl" not in workflow
     assert "test ! -e gpt2giga" in workflow
     assert ".venv-artifact/bin/python -I scripts/gateway_artifact_smoke.py" in workflow
     assert ".venv-artifact/bin/gpt2giga --help" in workflow
@@ -107,6 +126,7 @@ def test_all_workflow_filters_use_standalone_gateway_paths():
     for path in ("'src/gpt2giga/**'", "'Dockerfile'", "'deploy/**'"):
         assert path in workflows["docker-smoke.yaml"]
     for workflow_name in ("docker-smoke.yaml", "docker_image.yaml", "publish-ghcr.yml"):
-        assert "'gigachat-0.2.4a1-py3-none-any.whl'" in workflows[workflow_name]
+        assert "'pyproject.toml'" in workflows[workflow_name]
+        assert "'gigachat-0.2.4a1-py3-none-any.whl'" not in workflows[workflow_name]
     for path in ("'docs/**'", "'docs-site/**'", "'scripts/check_docs.py'"):
         assert path in workflows["docs-pages.yaml"]

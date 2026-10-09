@@ -37,9 +37,8 @@ GigaChat не является drop-in заменой OpenAI или Anthropic AP
 ## Быстрый Старт
 
 Текущий checkout содержит prerelease gateway и требует GigaChat SDK
-`>=0.2.4a1,<0.3.0`. Пока эта версия SDK не опубликована в PyPI, запуск из
-репозитория через `uv` и сборка Docker используют включённый
-`gigachat-0.2.4a1-py3-none-any.whl`.
+`>=0.2.4a1,<0.3.0`. SDK `0.2.4a1` опубликован в PyPI и устанавливается
+автоматически вместе со шлюзом через `uv`, pip или при сборке Docker.
 
 Из корня репозитория создайте `.env` из шаблона и заполните GigaChat credentials:
 
@@ -60,11 +59,10 @@ uv sync --all-extras --dev
 uv run gpt2giga
 ```
 
-Для установки этого checkout через pip в существующее окружение укажите SDK
-wheel и gateway вместе:
+Для установки этого checkout через pip в существующее окружение:
 
 ```sh
-python -m pip install ./gigachat-0.2.4a1-py3-none-any.whl .
+python -m pip install .
 ```
 
 Установка из индекса выбирает опубликованный стабильный релиз, который может
@@ -88,8 +86,7 @@ python -m pip install gpt2giga
 python -m pip install "gpt2giga[postgres]"
 ```
 
-При установке из текущего checkout замените `.` на `".[postgres]"` в команде
-с локальным SDK wheel.
+При установке из текущего checkout используйте `python -m pip install ".[postgres]"`.
 
 Минимальный OpenAI SDK вызов:
 

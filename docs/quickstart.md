@@ -6,8 +6,8 @@ gateway to GigaChat and verify each protocol with a first request.
 ## Requirements
 
 - Python 3.10–3.14 for a local run.
-- This checkout requires GigaChat Python SDK `>=0.2.4a1,<0.3.0` and includes
-  `gigachat-0.2.4a1-py3-none-any.whl` for the repository installation below.
+- This checkout requires GigaChat Python SDK `>=0.2.4a1,<0.3.0`.
+  SDK `0.2.4a1` is available on PyPI and is installed automatically with the gateway.
 - `uv` for local development.
 - Docker with the Compose plugin for a container run.
 - GigaChat credentials and scope for the target account.
@@ -49,7 +49,7 @@ PROD profile:
 docker compose --env-file .env -f deploy/base.yaml --profile PROD up -d --build --pull never
 ```
 
-The Docker build installs the SDK wheel included in the repository. Without
+The Docker build installs the GigaChat SDK from PyPI. Without
 `--build --pull never`, the Compose configuration pulls the published `latest`
 image, which may not include the changes in this checkout.
 
@@ -70,28 +70,26 @@ uv tool install gpt2giga
 gpt2giga --help
 ```
 
-This checkout contains prerelease features that may not be in that release.
-Until the required GigaChat SDK version is published to PyPI, install this
-checkout using its included SDK wheel as described below. Installing only the
-gateway wheel or source distribution does not supply that SDK wheel.
+This checkout contains prerelease gateway features that may not be in that
+release. Install the checkout as described below to use them. Its GigaChat SDK
+dependency is available on PyPI; a separate local SDK wheel is no longer needed.
 
 ## Run from the repository
 
-Install the editable gateway project and development dependencies. `uv` reads
-the local SDK wheel from the repository's source configuration:
+Install the editable gateway project and development dependencies. `uv` installs
+the GigaChat SDK from PyPI using the version and hashes in `uv.lock`:
 
 ```sh
 uv sync --all-extras --dev
 uv run gpt2giga
 ```
 
-For a regular pip installation of the current checkout, pass both the SDK wheel
-and the gateway project in one command. For example, in a new virtual
-environment on Linux or macOS:
+For a regular pip installation of the current checkout, install the gateway
+project. For example, in a new virtual environment on Linux or macOS:
 
 ```sh
 python -m venv .venv
-.venv/bin/python -m pip install ./gigachat-0.2.4a1-py3-none-any.whl .
+.venv/bin/python -m pip install .
 .venv/bin/gpt2giga
 ```
 
