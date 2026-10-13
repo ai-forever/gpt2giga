@@ -82,7 +82,10 @@ Messages, and Gemini GenerateContent. It is skipped when:
   (short prompts gain little, so they are left untouched).
 
 Derivation never changes the generated answer. It only influences which upstream
-cache entry a request lands on.
+cache entry a request lands on. When GigaChat echoes the session identifier in
+the response headers, the gateway surfaces it as `metadata.gigachat_x_session_id`;
+for a derived session that value is the caller's own one-way hash, not raw
+prompt content.
 
 ## Where the cache helps
 

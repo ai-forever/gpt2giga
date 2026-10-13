@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
 from starlette.requests import Request
 
 from gpt2giga.common.cache_session import (
@@ -183,3 +184,167 @@ def test_apply_does_not_mutate_original_options() -> None:
     original = _options()
     apply_cache_session_derivation(request, _openai_payload(), original)
     assert "x-session-id" not in original.headers
+
+
+def test_apply_honors_system_scope() -> None:
+    request = _request(
+        settings=_settings(
+            cache_session_derivation_enabled=True,
+            cache_session_derivation_scope="system",
+        )
+    )
+    first = apply_cache_session_derivation(
+        request,
+        {
+            "messages": [
+                {"role": "system", "content": _LONG_SYSTEM},
+                {"role": "user", "content": "Question one"},
+            ]
+        },
+        _options(),
+    )
+    second = apply_cache_session_derivation(
+        request,
+        {
+            "messages": [
+                {"role": "system", "content": _LONG_SYSTEM},
+                {"role": "user", "content": "Question two"},
+            ]
+        },
+        _options(),
+    )
+    assert first.headers["x-session-id"] == second.headers["x-session-id"]
+
+
+def test_apply_skips_short_prefix() -> None:
+    request = _request(settings=_settings(cache_session_derivation_enabled=True))
+    options = apply_cache_session_derivation(
+        request,
+        {"messages": [{"role": "user", "content": "hi"}]},
+        _options(),
+    )
+    assert "x-session-id" not in options.headers
+
+
+def test_apply_handles_none_payload() -> None:
+    request = _request(settings=_settings(cache_session_derivation_enabled=True))
+    options = apply_cache_session_derivation(request, None, _options())
+    assert "x-session-id" not in options.headers
+
+
+def test_apply_without_config_is_safe() -> None:
+    request = _request(settings=_settings(cache_session_derivation_enabled=True))
+    request.scope["app"] = SimpleNamespace(state=SimpleNamespace(config=None))
+    options = apply_cache_session_derivation(request, _openai_payload(), _options())
+    assert "x-session-id" not in options.headers
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/v1/chat/completions",
+        "/v2/chat/completions",
+        "/chat/completions",
+        "/v1/messages",
+        "/v2/messages",
+        "/messages",
+        "/v1/responses",
+        "/responses",
+        "/v1beta/models/gemini-pro:generateContent",
+        "/v1beta/models/gemini-pro:streamGenerateContent",
+        "/v1/chat/completions/",
+    ],
+)
+def test_apply_covers_chat_like_routes(path: str) -> None:
+    request = _request(
+        settings=_settings(cache_session_derivation_enabled=True),
+        path=path,
+    )
+    options = apply_cache_session_derivation(request, _openai_payload(), _options())
+    assert options.headers["x-session-id"].startswith("gpt2giga-cache-")
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/v1/embeddings",
+        "/v1/models",
+        "/v1/messages/count_tokens",
+        "/v1beta/models/gemini-pro:countTokens",
+        "/health",
+    ],
+)
+def test_apply_skips_non_chat_routes_by_path(path: str) -> None:
+    request = _request(
+        settings=_settings(cache_session_derivation_enabled=True),
+        path=path,
+    )
+    options = apply_cache_session_derivation(request, _openai_payload(), _options())
+    assert "x-session-id" not in options.headers
+
+
+def test_derive_differs_by_model() -> None:
+    payload = _openai_payload()
+    first = derive_cache_session_id(payload, model="GigaChat-2-Max")
+    second = derive_cache_session_id(payload, model="GigaChat-2-Pro")
+    assert first is not None
+    assert first != second
+
+
+def test_apply_mixes_payload_model_into_session() -> None:
+    request = _request(settings=_settings(cache_session_derivation_enabled=True))
+    max_options = apply_cache_session_derivation(
+        request, {**_openai_payload(), "model": "GigaChat-2-Max"}, _options()
+    )
+    pro_options = apply_cache_session_derivation(
+        request, {**_openai_payload(), "model": "GigaChat-2-Pro"}, _options()
+    )
+    assert max_options.headers["x-session-id"] != pro_options.headers["x-session-id"]
+
+
+def test_derive_responses_excludes_non_leading_items() -> None:
+    # Only the stable `instructions` prefix is hashed; the leading assistant or
+    # tool-result item is not part of the prefix and must not change the id.
+    assistant_first = {
+        "instructions": _LONG_SYSTEM,
+        "input": [{"role": "assistant", "content": "already answered"}],
+    }
+    tool_first = {
+        "instructions": _LONG_SYSTEM,
+        "input": [{"type": "function_call_output", "output": "result"}],
+    }
+    first = derive_cache_session_id(assistant_first)
+    second = derive_cache_session_id(tool_first)
+    assert first is not None
+    assert first == second
+
+
+def test_derive_responses_without_instructions_needs_leading_user() -> None:
+    payload = {
+        "input": [{"type": "function_call_output", "output": "result"}],
+    }
+    assert derive_cache_session_id(payload) is None
+
+
+def test_derive_responses_leading_user_turn() -> None:
+    payload = {
+        "instructions": _LONG_SYSTEM,
+        "input": [{"role": "user", "content": "Answer with one word: ok"}],
+    }
+    assert (derive_cache_session_id(payload) or "").startswith("gpt2giga-cache-")
+
+
+def test_derive_gemini_snake_case_system_instruction() -> None:
+    payload = {
+        "system_instruction": {"parts": [{"text": _LONG_SYSTEM}]},
+        "contents": [{"role": "user", "parts": [{"text": "Answer: ok"}]}],
+    }
+    assert (derive_cache_session_id(payload) or "").startswith("gpt2giga-cache-")
+
+
+def test_derive_anthropic_system_block_list() -> None:
+    payload = {
+        "system": [{"type": "text", "text": _LONG_SYSTEM}],
+        "messages": [{"role": "user", "content": "Answer: ok"}],
+    }
+    assert (derive_cache_session_id(payload) or "").startswith("gpt2giga-cache-")

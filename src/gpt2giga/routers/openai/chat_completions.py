@@ -11,12 +11,12 @@ from fastapi.responses import StreamingResponse
 
 from gpt2giga.app_state import get_gigachat_client, get_model_concurrency_limiter
 from gpt2giga.common.api_mode import resolve_gigachat_api_mode
+from gpt2giga.common.cache_session import apply_cache_session_derivation
 from gpt2giga.common.conversation import (
     commit_chat_completion_response,
     stitch_chat_completion_stream,
     stitch_chat_payload,
 )
-from gpt2giga.common.cache_session import apply_cache_session_derivation
 from gpt2giga.common.exceptions import exceptions_handler
 from gpt2giga.common.gigachat_options import (
     extract_gigachat_request_options,

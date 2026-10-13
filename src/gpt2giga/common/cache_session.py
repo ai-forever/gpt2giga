@@ -9,7 +9,8 @@ Many OpenAI/Anthropic/Gemini clients cannot send custom headers, so the gateway
 can derive a session identifier from the request's own stable prefix. The value
 is a one-way hash of the caller's own prompt text; it is deterministic so the
 same prefix maps to the same identifier across requests, workers, and restarts.
-This module never inspects or stores prompt content beyond hashing it.
+The module materializes the prefix text transiently only to hash it and never
+logs, stores, or returns it.
 """
 
 from __future__ import annotations
@@ -51,9 +52,7 @@ def apply_cache_session_derivation(
     and no global default session is configured.
     """
     settings = _proxy_settings(request)
-    if settings is None or not getattr(
-        settings, "cache_session_derivation_enabled", False
-    ):
+    if settings is None or not settings.cache_session_derivation_enabled:
         return options
     if not _is_chat_like_path(request.url.path):
         return options
@@ -64,12 +63,9 @@ def apply_cache_session_derivation(
 
     session_id = derive_cache_session_id(
         payload,
-        min_prefix_tokens=getattr(
-            settings,
-            "cache_session_derivation_min_prefix_tokens",
-            _DEFAULT_MIN_PREFIX_TOKENS,
-        ),
-        scope=getattr(settings, "cache_session_derivation_scope", "prefix"),
+        min_prefix_tokens=settings.cache_session_derivation_min_prefix_tokens,
+        scope=settings.cache_session_derivation_scope,
+        model=_payload_model(payload),
     )
     if session_id is None:
         return options
@@ -83,12 +79,15 @@ def derive_cache_session_id(
     *,
     min_prefix_tokens: int = _DEFAULT_MIN_PREFIX_TOKENS,
     scope: CacheSessionScope = "prefix",
+    model: str | None = None,
 ) -> str | None:
     """Return a stable session identifier for a request's stable prefix.
 
-    Returns ``None`` when the payload carries no usable prefix or the prefix is
-    shorter than ``min_prefix_tokens`` (the GigaChat cache only helps for long
-    prompts, so short ones are left untouched).
+    ``model`` is mixed into the digest so an identical prefix sent to different
+    models does not share one upstream cache entry. Returns ``None`` when the
+    payload carries no usable prefix or the prefix is shorter than
+    ``min_prefix_tokens`` (the GigaChat cache only helps for long prompts, so
+    short ones are left untouched).
     """
     if not isinstance(payload, Mapping):
         return None
@@ -97,8 +96,16 @@ def derive_cache_session_id(
         return None
     if _estimate_tokens(prefix_text) < min_prefix_tokens:
         return None
-    digest = hashlib.sha256(prefix_text.strip().encode("utf-8")).hexdigest()
+    material = f"{model or ''}\x00{prefix_text.strip()}"
+    digest = hashlib.sha256(material.encode("utf-8")).hexdigest()
     return f"{_SESSION_ID_PREFIX}{digest[:32]}"
+
+
+def _payload_model(payload: Mapping[str, Any] | None) -> str | None:
+    if not isinstance(payload, Mapping):
+        return None
+    model = payload.get("model")
+    return model if isinstance(model, str) and model.strip() else None
 
 
 def _stable_prefix_text(
@@ -186,6 +193,13 @@ def _contents_prefix_text(
 
 
 def _input_prefix_text(input_value: Any) -> str | None:
+    """Return the leading stable text of a Responses ``input``.
+
+    The input is a list of role-tagged items (``message`` with a ``role``, or
+    items such as ``function_call_output`` that carry no role). Only the leading
+    user turn is stable, so the walk stops at the first non-user item — the same
+    rule the chat-shaped prefix uses.
+    """
     direct = _content_text(input_value)
     if direct:
         return direct
@@ -193,10 +207,14 @@ def _input_prefix_text(input_value: Any) -> str | None:
         return None
     for item in input_value:
         if not isinstance(item, Mapping):
-            continue
+            return None
+        role = str(item.get("role") or "").lower()
+        if role != "user":
+            return None
         text = _content_text(item.get("content"))
         if text:
             return text
+        return None
     return None
 
 
