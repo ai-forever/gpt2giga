@@ -13,6 +13,7 @@ from gpt2giga.app_state import (
     record_gigachat_model_catalog_snapshot,
 )
 from gpt2giga.common.api_mode import resolve_gigachat_api_mode
+from gpt2giga.common.cache_session import apply_cache_session_derivation
 from gpt2giga.common.client_params import ClientCompatibilityError
 from gpt2giga.common.conversation import (
     commit_responses_response,
@@ -59,7 +60,11 @@ class NativeGigaChatResponsesExecutor:
         stream = data.get("stream", False)
         state = request.app.state
 
-        request_options = extract_gigachat_request_options(request, data)
+        request_options = apply_cache_session_derivation(
+            request,
+            data,
+            extract_gigachat_request_options(request, data),
+        )
         current_rquid = rquid_context.get()
         giga_client = get_gigachat_client(request)
         model_limiter = get_model_concurrency_limiter(request)
@@ -260,7 +265,11 @@ class NormalizedBridgeResponsesExecutor:
             data,
             mode=resolve_gigachat_api_mode(request),
         )
-        request_options = extract_gigachat_request_options(request, data)
+        request_options = apply_cache_session_derivation(
+            request,
+            data,
+            extract_gigachat_request_options(request, data),
+        )
         provider_adapter = await _normalized_provider_adapter(
             request,
             normalized_request=normalized_request,
@@ -315,7 +324,11 @@ class NormalizedBridgeResponsesExecutor:
             data,
             mode=resolve_gigachat_api_mode(request),
         )
-        request_options = extract_gigachat_request_options(request, data)
+        request_options = apply_cache_session_derivation(
+            request,
+            data,
+            extract_gigachat_request_options(request, data),
+        )
         provider_adapter = await _normalized_provider_adapter(
             request,
             normalized_request=normalized_request,

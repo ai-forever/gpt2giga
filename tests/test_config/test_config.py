@@ -67,6 +67,9 @@ def test_proxy_settings_defaults(monkeypatch):
     assert s.conversation_max_messages == 40
     assert s.conversation_use_session_id is False
     assert s.conversation_on_divergence == "client_wins"
+    assert s.cache_session_derivation_enabled is False
+    assert s.cache_session_derivation_scope == "prefix"
+    assert s.cache_session_derivation_min_prefix_tokens == 1024
     assert s.traffic_log_enabled is False
     assert s.traffic_log_sink == "noop"
     assert s.traffic_log_sinks == []
@@ -221,6 +224,9 @@ def test_proxy_settings_modular_feature_flags_from_env(monkeypatch):
     monkeypatch.setenv("GPT2GIGA_CONVERSATION_MAX_MESSAGES", "8")
     monkeypatch.setenv("GPT2GIGA_CONVERSATION_USE_SESSION_ID", "true")
     monkeypatch.setenv("GPT2GIGA_CONVERSATION_ON_DIVERGENCE", " FORK ")
+    monkeypatch.setenv("GPT2GIGA_CACHE_SESSION_DERIVATION_ENABLED", "true")
+    monkeypatch.setenv("GPT2GIGA_CACHE_SESSION_DERIVATION_SCOPE", " SYSTEM ")
+    monkeypatch.setenv("GPT2GIGA_CACHE_SESSION_DERIVATION_MIN_PREFIX_TOKENS", "2048")
     monkeypatch.setenv("GPT2GIGA_TRAFFIC_LOG_ENABLED", "true")
     monkeypatch.setenv("GPT2GIGA_TRAFFIC_LOG_SINK", " JSONL ")
     monkeypatch.setenv("GPT2GIGA_TRAFFIC_LOG_SINKS", "postgres, opensearch")
@@ -276,6 +282,9 @@ def test_proxy_settings_modular_feature_flags_from_env(monkeypatch):
     assert s.conversation_max_messages == 8
     assert s.conversation_use_session_id is True
     assert s.conversation_on_divergence == "fork"
+    assert s.cache_session_derivation_enabled is True
+    assert s.cache_session_derivation_scope == "system"
+    assert s.cache_session_derivation_min_prefix_tokens == 2048
     assert s.traffic_log_enabled is True
     assert s.traffic_log_sink == "jsonl"
     assert s.traffic_log_sinks == ["postgres", "opensearch"]

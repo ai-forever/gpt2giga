@@ -16,6 +16,7 @@ from gpt2giga.common.conversation import (
     stitch_chat_completion_stream,
     stitch_chat_payload,
 )
+from gpt2giga.common.cache_session import apply_cache_session_derivation
 from gpt2giga.common.exceptions import exceptions_handler
 from gpt2giga.common.gigachat_options import (
     extract_gigachat_request_options,
@@ -66,7 +67,11 @@ async def chat_completions(request: Request):
     data = await read_request_json(request)
     conversation_turn = await stitch_chat_payload(request, data, protocol="openai")
     request_data = deepcopy(data)
-    request_options = extract_gigachat_request_options(request, data)
+    request_options = apply_cache_session_derivation(
+        request,
+        data,
+        extract_gigachat_request_options(request, data),
+    )
     stream = data.get("stream", False)
     current_rquid = rquid_context.get()
     state = request.app.state
