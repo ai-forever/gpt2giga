@@ -68,7 +68,7 @@ def test_proxy_settings_defaults(monkeypatch):
     assert s.conversation_use_session_id is False
     assert s.conversation_on_divergence == "client_wins"
     assert s.cache_session_enabled is False
-    assert s.cache_session_scope == "prefix"
+    assert s.cache_session_scope == "system"
     assert s.cache_session_min_prefix_tokens == 1024
     assert s.traffic_log_enabled is False
     assert s.traffic_log_sink == "noop"

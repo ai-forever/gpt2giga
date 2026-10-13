@@ -216,6 +216,62 @@ def test_apply_honors_system_scope() -> None:
     assert first.headers["x-session-id"] == second.headers["x-session-id"]
 
 
+def test_apply_defaults_to_system_scope() -> None:
+    # The default scope must stay stable across user turns of one conversation.
+    request = _request(settings=_settings(cache_session_enabled=True))
+    first = apply_cache_session_id(
+        request,
+        {
+            "messages": [
+                {"role": "system", "content": _LONG_SYSTEM},
+                {"role": "user", "content": "Question one"},
+            ]
+        },
+        _options(),
+    )
+    second = apply_cache_session_id(
+        request,
+        {
+            "messages": [
+                {"role": "system", "content": _LONG_SYSTEM},
+                {"role": "user", "content": "Question two"},
+            ]
+        },
+        _options(),
+    )
+    assert first.headers["x-session-id"] == second.headers["x-session-id"]
+
+
+def test_apply_prefix_scope_varies_with_user_turn() -> None:
+    request = _request(
+        settings=_settings(
+            cache_session_enabled=True,
+            cache_session_scope="prefix",
+        )
+    )
+    first = apply_cache_session_id(
+        request,
+        {
+            "messages": [
+                {"role": "system", "content": _LONG_SYSTEM},
+                {"role": "user", "content": "Question one"},
+            ]
+        },
+        _options(),
+    )
+    second = apply_cache_session_id(
+        request,
+        {
+            "messages": [
+                {"role": "system", "content": _LONG_SYSTEM},
+                {"role": "user", "content": "Question two"},
+            ]
+        },
+        _options(),
+    )
+    assert first.headers["x-session-id"] != second.headers["x-session-id"]
+
+
 def test_apply_skips_short_prefix() -> None:
     request = _request(settings=_settings(cache_session_enabled=True))
     options = apply_cache_session_id(

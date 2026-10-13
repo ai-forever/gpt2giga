@@ -156,11 +156,12 @@ class ProxySettings(BaseSettings):
         ),
     )
     cache_session_scope: Literal["prefix", "system"] = Field(
-        default="prefix",
+        default="system",
         description=(
-            "Stable prefix used for built cache sessions: 'prefix' covers the "
-            "system prompt plus the leading user turn, 'system' covers only the "
-            "system prompt."
+            "Stable prefix used for built cache sessions: 'system' covers only "
+            "the system prompt, 'prefix' also includes the leading user turn. "
+            "'system' is the default because it stays stable across turns of the "
+            "same conversation."
         ),
     )
     cache_session_min_prefix_tokens: PositiveInt = Field(

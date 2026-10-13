@@ -344,14 +344,14 @@ Two independent mechanisms enable this:
 
 ```dotenv
 GPT2GIGA_CACHE_SESSION_ENABLED=False
-GPT2GIGA_CACHE_SESSION_SCOPE=prefix
+GPT2GIGA_CACHE_SESSION_SCOPE=system
 GPT2GIGA_CACHE_SESSION_MIN_PREFIX_TOKENS=1024
 ```
 
 | Variable | Default | Purpose |
 |---|---:|---|
 | `GPT2GIGA_CACHE_SESSION_ENABLED` | `False` | Build an upstream `X-Session-ID` from the request's stable prefix. |
-| `GPT2GIGA_CACHE_SESSION_SCOPE` | `prefix` | `prefix` hashes the system prompt plus the leading user turn; `system` hashes only the system prompt. |
+| `GPT2GIGA_CACHE_SESSION_SCOPE` | `system` | `system` hashes only the system prompt; `prefix` also includes the leading user turn. `system` is the default because it stays stable across turns. |
 | `GPT2GIGA_CACHE_SESSION_MIN_PREFIX_TOKENS` | `1024` | Minimum estimated prefix tokens before a built session id is applied. |
 
 The built session id applies to chat-like routes (OpenAI Chat Completions,

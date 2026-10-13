@@ -348,14 +348,14 @@ OpenAI `usage.prompt_tokens_details.cached_tokens` (и Anthropic
 
 ```dotenv
 GPT2GIGA_CACHE_SESSION_ENABLED=False
-GPT2GIGA_CACHE_SESSION_SCOPE=prefix
+GPT2GIGA_CACHE_SESSION_SCOPE=system
 GPT2GIGA_CACHE_SESSION_MIN_PREFIX_TOKENS=1024
 ```
 
 | Переменная | По умолчанию | Назначение |
 |---|---:|---|
 | `GPT2GIGA_CACHE_SESSION_ENABLED` | `False` | Собирать `X-Session-ID` из стабильного префикса запроса. |
-| `GPT2GIGA_CACHE_SESSION_SCOPE` | `prefix` | `prefix` — хэш системного промпта и ведущего пользовательского хода; `system` — только системного промпта. |
+| `GPT2GIGA_CACHE_SESSION_SCOPE` | `system` | `system` — хэш только системного промпта; `prefix` дополнительно включает ведущий пользовательский ход. `system` стоит по умолчанию, потому что остается стабильным между ходами диалога. |
 | `GPT2GIGA_CACHE_SESSION_MIN_PREFIX_TOKENS` | `1024` | Минимальная оценка токенов префикса, при которой идентификатор сессии применяется. |
 
 Идентификатор сессии из префикса работает на chat-like маршрутах (OpenAI Chat
