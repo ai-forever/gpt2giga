@@ -11,6 +11,7 @@ from fastapi.responses import StreamingResponse
 
 from gpt2giga.app_state import get_gigachat_client, get_model_concurrency_limiter
 from gpt2giga.common.api_mode import resolve_gigachat_api_mode
+from gpt2giga.common.cache_session import apply_cache_session_id
 from gpt2giga.common.conversation import (
     commit_chat_completion_response,
     stitch_chat_completion_stream,
@@ -66,7 +67,11 @@ async def chat_completions(request: Request):
     data = await read_request_json(request)
     conversation_turn = await stitch_chat_payload(request, data, protocol="openai")
     request_data = deepcopy(data)
-    request_options = extract_gigachat_request_options(request, data)
+    request_options = apply_cache_session_id(
+        request,
+        data,
+        extract_gigachat_request_options(request, data),
+    )
     stream = data.get("stream", False)
     current_rquid = rquid_context.get()
     state = request.app.state
