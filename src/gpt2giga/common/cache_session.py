@@ -1,4 +1,4 @@
-"""Derive a stable upstream ``X-Session-ID`` for GigaChat prompt-cache affinity.
+"""Reuse the GigaChat prompt cache by reusing an upstream ``X-Session-ID``.
 
 GigaChat keeps a prefix key-value cache for a short window (observed ~30s) and
 exposes cache hits as ``precached_prompt_tokens``. Requests that carry a stable
@@ -6,8 +6,8 @@ exposes cache hits as ``precached_prompt_tokens``. Requests that carry a stable
 share a long, unchanged prefix reuse it instead of reprocessing the tokens.
 
 Many OpenAI/Anthropic/Gemini clients cannot send custom headers, so the gateway
-can derive a session identifier from the request's own stable prefix. The value
-is a one-way hash of the caller's own prompt text; it is deterministic so the
+can build a session identifier from the request's own stable prefix. The value
+is a one-way hash of the caller's own prompt text; it is deterministic, so the
 same prefix maps to the same identifier across requests, workers, and restarts.
 The module materializes the prefix text transiently only to hash it and never
 logs, stores, or returns it.
@@ -40,19 +40,19 @@ _CHAT_PATH_SUFFIXES = (
 )
 
 
-def apply_cache_session_derivation(
+def apply_cache_session_id(
     request: Request,
     payload: Mapping[str, Any] | None,
     options: GigaRequestOptions,
 ) -> GigaRequestOptions:
-    """Return options carrying a derived ``X-Session-ID`` when derivation applies.
+    """Return options carrying a built ``X-Session-ID`` when reuse applies.
 
-    Derivation is skipped unless it is explicitly enabled, the route is a
+    The session id is skipped unless it is explicitly enabled, the route is a
     chat-like endpoint, no session identifier is already supplied by the client,
     and no global default session is configured.
     """
     settings = _proxy_settings(request)
-    if settings is None or not settings.cache_session_derivation_enabled:
+    if settings is None or not settings.cache_session_enabled:
         return options
     if not _is_chat_like_path(request.url.path):
         return options
@@ -61,10 +61,10 @@ def apply_cache_session_derivation(
     if _configured_default_session(request) is not None:
         return options
 
-    session_id = derive_cache_session_id(
+    session_id = build_cache_session_id(
         payload,
-        min_prefix_tokens=settings.cache_session_derivation_min_prefix_tokens,
-        scope=settings.cache_session_derivation_scope,
+        min_prefix_tokens=settings.cache_session_min_prefix_tokens,
+        scope=settings.cache_session_scope,
         model=_payload_model(payload),
     )
     if session_id is None:
@@ -74,7 +74,7 @@ def apply_cache_session_derivation(
     return replace(options, headers=headers)
 
 
-def derive_cache_session_id(
+def build_cache_session_id(
     payload: Mapping[str, Any] | None,
     *,
     min_prefix_tokens: int = _DEFAULT_MIN_PREFIX_TOKENS,
@@ -83,7 +83,7 @@ def derive_cache_session_id(
 ) -> str | None:
     """Return a stable session identifier for a request's stable prefix.
 
-    ``model`` is mixed into the digest so an identical prefix sent to different
+    ``model`` is mixed into the hash so an identical prefix sent to different
     models does not share one upstream cache entry. Returns ``None`` when the
     payload carries no usable prefix or the prefix is shorter than
     ``min_prefix_tokens`` (the GigaChat cache only helps for long prompts, so

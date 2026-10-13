@@ -53,42 +53,43 @@ curl http://localhost:8090/v1/chat/completions \
   -d '{"model": "GigaChat-2-Max", "messages": [{"role": "user", "content": "..."}]}'
 ```
 
-Используйте один идентификатор на логический диалог и разные — для несвязанных
+Используйте один идентификатор на логический диалог и разные для несвязанных
 диалогов. `GIGACHAT_SESSION_ID` задаёт глобальное значение по умолчанию, которое
-перекрывается заголовком запроса.
+перекрывается заголовком запроса. Рабочий пример лежит в
+[`examples/openai/chat_completions/basic/session_cache_usage.py`](https://github.com/ai-forever/gpt2giga/blob/main/examples/openai/chat_completions/basic/session_cache_usage.py).
 
-### 2. Деривация аффинности сессии
+### 2. Идентификатор сессии из префикса
 
 Многие OpenAI/Anthropic/Gemini-клиенты не умеют передавать свои заголовки. Если
-включено, шлюз выводит детерминированный `X-Session-ID` из собственного
-стабильного префикса запроса — односторонний хэш текста промпта, а не сам текст:
+включено, шлюз собирает стабильный `X-Session-ID` из собственного стабильного
+префикса запроса (односторонний хэш текста промпта, а не сам текст):
 
 ```dotenv
-GPT2GIGA_CACHE_SESSION_DERIVATION_ENABLED=True
-GPT2GIGA_CACHE_SESSION_DERIVATION_SCOPE=prefix
-GPT2GIGA_CACHE_SESSION_DERIVATION_MIN_PREFIX_TOKENS=1024
+GPT2GIGA_CACHE_SESSION_ENABLED=True
+GPT2GIGA_CACHE_SESSION_SCOPE=prefix
+GPT2GIGA_CACHE_SESSION_MIN_PREFIX_TOKENS=1024
 ```
 
 | Переменная | По умолчанию | Назначение |
 |---|---:|---|
-| `GPT2GIGA_CACHE_SESSION_DERIVATION_ENABLED` | `False` | Выводить `X-Session-ID` из стабильного префикса запроса. |
-| `GPT2GIGA_CACHE_SESSION_DERIVATION_SCOPE` | `prefix` | `prefix` — хэш системного промпта и ведущего пользовательского хода; `system` — только системного промпта. |
-| `GPT2GIGA_CACHE_SESSION_DERIVATION_MIN_PREFIX_TOKENS` | `1024` | Минимальная оценка токенов префикса для применения выведенной сессии. |
+| `GPT2GIGA_CACHE_SESSION_ENABLED` | `False` | Собирать `X-Session-ID` из стабильного префикса запроса. |
+| `GPT2GIGA_CACHE_SESSION_SCOPE` | `prefix` | `prefix` — хэш системного промпта и ведущего пользовательского хода; `system` — только системного промпта. |
+| `GPT2GIGA_CACHE_SESSION_MIN_PREFIX_TOKENS` | `1024` | Минимальная оценка токенов префикса, при которой идентификатор сессии применяется. |
 
-Деривация работает для OpenAI Chat Completions, OpenAI Responses, Anthropic
-Messages и Gemini GenerateContent. Она пропускается, если:
+Идентификатор сессии из префикса работает для OpenAI Chat Completions, OpenAI
+Responses, Anthropic Messages и Gemini GenerateContent. Он не применяется, если:
 
 - клиент уже передал `X-Session-ID`;
 - задан `GIGACHAT_SESSION_ID` (приоритет у значения оператора);
 - в запросе нет пригодного префикса;
-- префикс короче `GPT2GIGA_CACHE_SESSION_DERIVATION_MIN_PREFIX_TOKENS`
+- префикс короче `GPT2GIGA_CACHE_SESSION_MIN_PREFIX_TOKENS`
   (короткие промпты дают мало выгоды, поэтому их не трогают).
 
-Деривация никогда не меняет сгенерированный ответ. Она влияет только на то, в
-какую запись кэша наверху попадёт запрос. Когда GigaChat возвращает идентификатор
-сессии в заголовках ответа, шлюз отдаёт его как `metadata.gigachat_x_session_id`;
-для выведенной сессии это собственный односторонний хэш вызывающего, а не сырой
-текст промпта.
+Такой идентификатор сессии никогда не меняет сгенерированный ответ. Он влияет
+только на то, какую запись кэша наверху переиспользует запрос. Когда GigaChat
+возвращает идентификатор сессии в заголовках ответа, шлюз отдаёт его как
+`metadata.gigachat_x_session_id`; для собранной сессии это односторонний хэш
+самого вызывающего, а не сырой текст промпта.
 
 ## Где кэш помогает
 

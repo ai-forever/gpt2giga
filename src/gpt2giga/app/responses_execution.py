@@ -13,7 +13,7 @@ from gpt2giga.app_state import (
     record_gigachat_model_catalog_snapshot,
 )
 from gpt2giga.common.api_mode import resolve_gigachat_api_mode
-from gpt2giga.common.cache_session import apply_cache_session_derivation
+from gpt2giga.common.cache_session import apply_cache_session_id
 from gpt2giga.common.client_params import ClientCompatibilityError
 from gpt2giga.common.conversation import (
     commit_responses_response,
@@ -60,7 +60,7 @@ class NativeGigaChatResponsesExecutor:
         stream = data.get("stream", False)
         state = request.app.state
 
-        request_options = apply_cache_session_derivation(
+        request_options = apply_cache_session_id(
             request,
             data,
             extract_gigachat_request_options(request, data),
@@ -265,7 +265,7 @@ class NormalizedBridgeResponsesExecutor:
             data,
             mode=resolve_gigachat_api_mode(request),
         )
-        request_options = apply_cache_session_derivation(
+        request_options = apply_cache_session_id(
             request,
             data,
             extract_gigachat_request_options(request, data),
@@ -324,7 +324,7 @@ class NormalizedBridgeResponsesExecutor:
             data,
             mode=resolve_gigachat_api_mode(request),
         )
-        request_options = apply_cache_session_derivation(
+        request_options = apply_cache_session_id(
             request,
             data,
             extract_gigachat_request_options(request, data),

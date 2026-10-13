@@ -52,40 +52,41 @@ curl http://localhost:8090/v1/chat/completions \
 
 Use one identifier per logical conversation and a different one for unrelated
 dialogues. `GIGACHAT_SESSION_ID` sets a global default that the request header
-overrides.
+overrides. A runnable example lives in
+[`examples/openai/chat_completions/basic/session_cache_usage.py`](https://github.com/ai-forever/gpt2giga/blob/main/examples/openai/chat_completions/basic/session_cache_usage.py).
 
-### 2. Derived session affinity
+### 2. Built session id
 
 Many OpenAI/Anthropic/Gemini clients cannot send custom headers. When enabled,
-the gateway derives a deterministic `X-Session-ID` from the request's own stable
-prefix — a one-way hash of the prompt text, never the raw content:
+the gateway builds a stable `X-Session-ID` from the request's own stable prefix
+(a one-way hash of the prompt text, never the raw content):
 
 ```dotenv
-GPT2GIGA_CACHE_SESSION_DERIVATION_ENABLED=True
-GPT2GIGA_CACHE_SESSION_DERIVATION_SCOPE=prefix
-GPT2GIGA_CACHE_SESSION_DERIVATION_MIN_PREFIX_TOKENS=1024
+GPT2GIGA_CACHE_SESSION_ENABLED=True
+GPT2GIGA_CACHE_SESSION_SCOPE=prefix
+GPT2GIGA_CACHE_SESSION_MIN_PREFIX_TOKENS=1024
 ```
 
 | Variable | Default | Purpose |
 |---|---:|---|
-| `GPT2GIGA_CACHE_SESSION_DERIVATION_ENABLED` | `False` | Derive an upstream `X-Session-ID` from the request's stable prefix. |
-| `GPT2GIGA_CACHE_SESSION_DERIVATION_SCOPE` | `prefix` | `prefix` hashes the system prompt plus the leading user turn; `system` hashes only the system prompt. |
-| `GPT2GIGA_CACHE_SESSION_DERIVATION_MIN_PREFIX_TOKENS` | `1024` | Minimum estimated prefix tokens before a derived session is applied. |
+| `GPT2GIGA_CACHE_SESSION_ENABLED` | `False` | Build an upstream `X-Session-ID` from the request's stable prefix. |
+| `GPT2GIGA_CACHE_SESSION_SCOPE` | `prefix` | `prefix` hashes the system prompt plus the leading user turn; `system` hashes only the system prompt. |
+| `GPT2GIGA_CACHE_SESSION_MIN_PREFIX_TOKENS` | `1024` | Minimum estimated prefix tokens before a built session id is applied. |
 
-Derivation applies to OpenAI Chat Completions, OpenAI Responses, Anthropic
-Messages, and Gemini GenerateContent. It is skipped when:
+The built session id applies to OpenAI Chat Completions, OpenAI Responses,
+Anthropic Messages, and Gemini GenerateContent. It is skipped when:
 
 - the client already supplies `X-Session-ID`;
 - `GIGACHAT_SESSION_ID` is configured (the operator's default wins);
 - the request has no usable prefix;
-- the prefix is shorter than `GPT2GIGA_CACHE_SESSION_DERIVATION_MIN_PREFIX_TOKENS`
+- the prefix is shorter than `GPT2GIGA_CACHE_SESSION_MIN_PREFIX_TOKENS`
   (short prompts gain little, so they are left untouched).
 
-Derivation never changes the generated answer. It only influences which upstream
-cache entry a request lands on. When GigaChat echoes the session identifier in
+The built session id never changes the generated answer. It only affects which
+upstream cache entry a request reuses. When GigaChat echoes the session id in
 the response headers, the gateway surfaces it as `metadata.gigachat_x_session_id`;
-for a derived session that value is the caller's own one-way hash, not raw
-prompt content.
+for a built session that value is the caller's own one-way hash, not raw prompt
+content.
 
 ## Where the cache helps
 

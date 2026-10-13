@@ -324,7 +324,7 @@ GPT2GIGA_CONVERSATION_ON_DIVERGENCE=client_wins
 The state is kept in the process memory. With several workers/pods, use sticky
 routing or do not enable stitching.
 
-## Prompt-cache session affinity
+## Prompt-cache reuse with X-Session-ID
 
 GigaChat keeps a prefix key-value cache for a short window and reports reused
 tokens as `precached_prompt_tokens`, which the gateway surfaces as OpenAI
@@ -337,29 +337,30 @@ Two independent mechanisms enable this:
 1. **Client header pass-through.** Any client can send `X-Session-ID`; the
    gateway forwards it upstream without changes. `GIGACHAT_SESSION_ID` sets a
    global default that the request header overrides.
-2. **Derived session affinity.** For clients that cannot send custom headers,
-   the gateway can derive a deterministic identifier from the request's own
-   stable prefix (a one-way hash of the prompt text, never the raw content).
-   Identical prefixes map to the same identifier across workers and restarts.
+2. **Built session id.** For clients that cannot send custom headers, the
+   gateway can build a stable session id from the request's own stable prefix (a
+   one-way hash of the prompt text, never the raw content). Identical prefixes
+   map to the same id across workers and restarts.
 
 ```dotenv
-GPT2GIGA_CACHE_SESSION_DERIVATION_ENABLED=False
-GPT2GIGA_CACHE_SESSION_DERIVATION_SCOPE=prefix
-GPT2GIGA_CACHE_SESSION_DERIVATION_MIN_PREFIX_TOKENS=1024
+GPT2GIGA_CACHE_SESSION_ENABLED=False
+GPT2GIGA_CACHE_SESSION_SCOPE=prefix
+GPT2GIGA_CACHE_SESSION_MIN_PREFIX_TOKENS=1024
 ```
 
 | Variable | Default | Purpose |
 |---|---:|---|
-| `GPT2GIGA_CACHE_SESSION_DERIVATION_ENABLED` | `False` | Derive an upstream `X-Session-ID` from the request's stable prefix. |
-| `GPT2GIGA_CACHE_SESSION_DERIVATION_SCOPE` | `prefix` | `prefix` hashes the system prompt plus the leading user turn; `system` hashes only the system prompt. |
-| `GPT2GIGA_CACHE_SESSION_DERIVATION_MIN_PREFIX_TOKENS` | `1024` | Minimum estimated prefix tokens before a derived session is applied. |
+| `GPT2GIGA_CACHE_SESSION_ENABLED` | `False` | Build an upstream `X-Session-ID` from the request's stable prefix. |
+| `GPT2GIGA_CACHE_SESSION_SCOPE` | `prefix` | `prefix` hashes the system prompt plus the leading user turn; `system` hashes only the system prompt. |
+| `GPT2GIGA_CACHE_SESSION_MIN_PREFIX_TOKENS` | `1024` | Minimum estimated prefix tokens before a built session id is applied. |
 
-Derivation applies to chat-like routes (OpenAI Chat Completions, OpenAI
-Responses, Anthropic Messages, Gemini GenerateContent) and is skipped when the
-client already supplies `X-Session-ID`, when `GIGACHAT_SESSION_ID` is set, or
-when the prefix is shorter than the configured minimum. It never changes the
-generated answer: it only influences upstream cache affinity. See
-[Prompt caching](prompt-caching.md) for the measured cache behaviour.
+The built session id applies to chat-like routes (OpenAI Chat Completions,
+OpenAI Responses, Anthropic Messages, Gemini GenerateContent) and is skipped
+when the client already supplies `X-Session-ID`, when `GIGACHAT_SESSION_ID` is
+set, or when the prefix is shorter than the configured minimum. It never changes
+the generated answer: it only affects which upstream cache entry a request
+reuses. See [Prompt caching](prompt-caching.md) for the measured cache
+behaviour.
 
 ## Per-model concurrency
 

@@ -326,7 +326,7 @@ GPT2GIGA_CONVERSATION_ON_DIVERGENCE=client_wins
 Состояние хранится в памяти процесса. При нескольких воркерах/подах используйте привязку
 сессий (sticky routing) или не включайте склейку.
 
-## Аффинность сессии для кэша промпта
+## Переиспользование кэша промпта через X-Session-ID
 
 GigaChat хранит префиксный key-value кэш в течение короткого окна и сообщает
 переиспользованные токены как `precached_prompt_tokens`; шлюз отдаёт их как
@@ -340,29 +340,30 @@ OpenAI `usage.prompt_tokens_details.cached_tokens` (и Anthropic
 1. **Проброс заголовка клиентом.** Любой клиент может передать `X-Session-ID`;
    шлюз пересылает его наверх без изменений. `GIGACHAT_SESSION_ID` задаёт
    глобальное значение по умолчанию, которое перекрывается заголовком запроса.
-2. **Деривация аффинности сессии.** Для клиентов, которые не могут передать
-   свои заголовки, шлюз может вывести детерминированный идентификатор из
+2. **Идентификатор сессии из префикса.** Для клиентов, которые не могут передать
+   свои заголовки, шлюз может собрать стабильный идентификатор сессии из
    собственного стабильного префикса запроса (односторонний хэш текста промпта,
    а не сам текст). Одинаковые префиксы дают один и тот же идентификатор на всех
    воркерах и после перезапусков.
 
 ```dotenv
-GPT2GIGA_CACHE_SESSION_DERIVATION_ENABLED=False
-GPT2GIGA_CACHE_SESSION_DERIVATION_SCOPE=prefix
-GPT2GIGA_CACHE_SESSION_DERIVATION_MIN_PREFIX_TOKENS=1024
+GPT2GIGA_CACHE_SESSION_ENABLED=False
+GPT2GIGA_CACHE_SESSION_SCOPE=prefix
+GPT2GIGA_CACHE_SESSION_MIN_PREFIX_TOKENS=1024
 ```
 
 | Переменная | По умолчанию | Назначение |
 |---|---:|---|
-| `GPT2GIGA_CACHE_SESSION_DERIVATION_ENABLED` | `False` | Выводить `X-Session-ID` из стабильного префикса запроса. |
-| `GPT2GIGA_CACHE_SESSION_DERIVATION_SCOPE` | `prefix` | `prefix` — хэш системного промпта и ведущего пользовательского хода; `system` — только системного промпта. |
-| `GPT2GIGA_CACHE_SESSION_DERIVATION_MIN_PREFIX_TOKENS` | `1024` | Минимальная оценка токенов префикса для применения выведенной сессии. |
+| `GPT2GIGA_CACHE_SESSION_ENABLED` | `False` | Собирать `X-Session-ID` из стабильного префикса запроса. |
+| `GPT2GIGA_CACHE_SESSION_SCOPE` | `prefix` | `prefix` — хэш системного промпта и ведущего пользовательского хода; `system` — только системного промпта. |
+| `GPT2GIGA_CACHE_SESSION_MIN_PREFIX_TOKENS` | `1024` | Минимальная оценка токенов префикса, при которой идентификатор сессии применяется. |
 
-Деривация работает на chat-like маршрутах (OpenAI Chat Completions, OpenAI
-Responses, Anthropic Messages, Gemini GenerateContent) и пропускается, если
-клиент уже передал `X-Session-ID`, если задан `GIGACHAT_SESSION_ID` или если
-префикс короче заданного минимума. Она не меняет сгенерированный ответ — только
-влияет на аффинность кэша наверху. Измеренное поведение кэша см. в
+Идентификатор сессии из префикса работает на chat-like маршрутах (OpenAI Chat
+Completions, OpenAI Responses, Anthropic Messages, Gemini GenerateContent) и
+пропускается, если клиент уже передал `X-Session-ID`, если задан
+`GIGACHAT_SESSION_ID` или если префикс короче заданного минимума. Он не меняет
+сгенерированный ответ, а только определяет, какую запись кэша наверху
+переиспользует запрос. Измеренное поведение кэша см. в
 [Кэширование промпта](prompt-caching.md).
 
 ## Параллелизм по моделям

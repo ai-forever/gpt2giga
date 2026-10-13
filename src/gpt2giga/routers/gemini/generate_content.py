@@ -11,7 +11,7 @@ from fastapi.responses import StreamingResponse
 
 from gpt2giga.app_state import get_gigachat_client, get_model_concurrency_limiter
 from gpt2giga.common.api_mode import resolve_gigachat_api_mode
-from gpt2giga.common.cache_session import apply_cache_session_derivation
+from gpt2giga.common.cache_session import apply_cache_session_id
 from gpt2giga.common.conversation import (
     commit_conversation_turn,
     stitch_message_list,
@@ -95,7 +95,7 @@ async def generate_content(model: str, request: Request):
         data,
         normalized_request,
     )
-    request_options = apply_cache_session_derivation(
+    request_options = apply_cache_session_id(
         request,
         data,
         extract_gigachat_request_options(request, data),
@@ -161,7 +161,7 @@ async def stream_generate_content(model: str, request: Request):
         data,
         normalized_request,
     )
-    request_options = apply_cache_session_derivation(
+    request_options = apply_cache_session_id(
         request,
         data,
         extract_gigachat_request_options(request, data),

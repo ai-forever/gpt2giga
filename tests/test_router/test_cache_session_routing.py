@@ -1,8 +1,8 @@
-"""Route-level proof that derived cache sessions reach the upstream SDK call.
+"""Route-level proof that built cache sessions reach the upstream SDK call.
 
 The router wraps the upstream call in ``gigachat_request_options``, which sets
 the SDK's ``session_id_cvar``. Reading ``build_headers()`` from inside the fake
-upstream client therefore proves the derived ``X-Session-ID`` actually reaches
+upstream client therefore proves the built ``X-Session-ID`` actually reaches
 the real request headers, not just the local options object.
 """
 
@@ -52,7 +52,7 @@ class _MockResponse:
         return self.data
 
 
-def _make_app(*, derivation_enabled: bool) -> tuple[FastAPI, _RecordingGigachat]:
+def _make_app(*, session_enabled: bool) -> tuple[FastAPI, _RecordingGigachat]:
     app = FastAPI()
     app.include_router(router)
     client = _RecordingGigachat()
@@ -61,7 +61,7 @@ def _make_app(*, derivation_enabled: bool) -> tuple[FastAPI, _RecordingGigachat]
     app.state.config = ProxyConfig(
         proxy=ProxySettings(
             gigachat_api_mode="v1",
-            cache_session_derivation_enabled=derivation_enabled,
+            cache_session_enabled=session_enabled,
         )
     )
     app.state.request_transformer = RequestTransformer(app.state.config, logger=logger)
@@ -78,8 +78,8 @@ def _payload() -> dict:
     }
 
 
-def test_route_forwards_derived_session_to_upstream() -> None:
-    app, client = _make_app(derivation_enabled=True)
+def test_route_forwards_built_session_to_upstream() -> None:
+    app, client = _make_app(session_enabled=True)
     response = TestClient(app).post("/chat/completions", json=_payload())
 
     assert response.status_code == 200
@@ -87,8 +87,8 @@ def test_route_forwards_derived_session_to_upstream() -> None:
     assert (client.session_headers[0] or "").startswith("gpt2giga-cache-")
 
 
-def test_route_is_unchanged_when_derivation_disabled() -> None:
-    app, client = _make_app(derivation_enabled=False)
+def test_route_is_unchanged_when_session_disabled() -> None:
+    app, client = _make_app(session_enabled=False)
     response = TestClient(app).post("/chat/completions", json=_payload())
 
     assert response.status_code == 200
@@ -97,7 +97,7 @@ def test_route_is_unchanged_when_derivation_disabled() -> None:
 
 
 def test_route_keeps_client_supplied_session() -> None:
-    app, client = _make_app(derivation_enabled=True)
+    app, client = _make_app(session_enabled=True)
     response = TestClient(app).post(
         "/chat/completions",
         json=_payload(),
