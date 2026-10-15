@@ -9,7 +9,9 @@ from types import SimpleNamespace
 from typing import Any, Literal
 
 import gigachat
+from starlette.requests import Request
 
+from gpt2giga.common.cache_session import apply_cache_session_id
 from gpt2giga.common.gigachat_options import gigachat_request_options
 from gpt2giga.common.model_concurrency import (
     ModelConcurrencyLimiter,
@@ -48,6 +50,7 @@ from gpt2giga.providers.gigachat.model_resolution import (
     ResolvedUpstreamModel,
     resolve_upstream_model,
 )
+from gpt2giga.providers.gigachat.request_options import GigaRequestOptions
 
 
 class GigaChatProviderAdapter:
@@ -63,6 +66,7 @@ class GigaChatProviderAdapter:
         giga_client: Any,
         model_limiter: ModelConcurrencyLimiter,
         request_options: Any = None,
+        cache_session_request: Request | None = None,
         response_processor: Any = None,
         api_mode: Literal["v1", "v2"] | None = None,
         provider_label: ProviderName = "openai",
@@ -73,6 +77,7 @@ class GigaChatProviderAdapter:
         self.giga_client = giga_client
         self.model_limiter = model_limiter
         self.request_options = request_options
+        self.cache_session_request = cache_session_request
         self.response_processor = response_processor
         self.api_mode = api_mode
         self.provider_label = provider_label
@@ -186,6 +191,19 @@ class GigaChatProviderAdapter:
             provider=self.provider_label,
         )
 
+    def _cache_session_options(
+        self, payload: Any, resolution: ResolvedUpstreamModel
+    ) -> GigaRequestOptions | None:
+        """Derive per-call options from the actual upstream prefix and model."""
+        if self.cache_session_request is None:
+            return self.request_options
+        return apply_cache_session_id(
+            self.cache_session_request,
+            payload,
+            self.request_options or GigaRequestOptions(headers={}, query=(), body={}),
+            model=resolution.limiter_key,
+        )
+
     @staticmethod
     def _record_model_resolution(
         resolution: ResolvedUpstreamModel,
@@ -224,12 +242,13 @@ class GigaChatProviderAdapter:
             chat_payload,
             resolution.model if resolution.source == "forced" else None,
         )
+        request_options = self._cache_session_options(chat_payload, resolution)
         self._record_model_resolution(resolution, context)
         async with self.model_limiter.limit(
             resolution.limiter_key,
             provider=self.provider_label,
         ):
-            async with gigachat_request_options(self.giga_client, self.request_options):
+            async with gigachat_request_options(self.giga_client, request_options):
                 response = await self.giga_client.achat(chat_payload)
         return gigachat_response_to_normalized(
             response,
@@ -255,18 +274,19 @@ class GigaChatProviderAdapter:
             chat_payload,
             resolution.model if resolution.source == "forced" else None,
         )
+        request_options = self._cache_session_options(chat_payload, resolution)
         self._record_model_resolution(resolution, context)
         async with self.model_limiter.limit(
             resolution.limiter_key,
             provider=self.provider_label,
         ):
-            async with gigachat_request_options(self.giga_client, self.request_options):
+            async with gigachat_request_options(self.giga_client, request_options):
                 response = await self.giga_client.achat.create(chat_payload)
         adapted = adapt_chat_completion_to_chat_shape(
             response,
             default_model=request.model or resolution.model or "",
         )
-        async with gigachat_request_options(self.giga_client, self.request_options):
+        async with gigachat_request_options(self.giga_client, request_options):
             await hydrate_chat_completion_image_files(adapted, self.giga_client)
         return gigachat_response_to_normalized(
             _ModelDumpWrapper(adapted),
@@ -294,6 +314,7 @@ class GigaChatProviderAdapter:
             chat_payload,
             resolution.model if resolution.source == "forced" else None,
         )
+        request_options = self._cache_session_options(chat_payload, resolution)
         self._record_model_resolution(resolution, context)
         mapper = self._stream_mapper(
             request,
@@ -309,7 +330,7 @@ class GigaChatProviderAdapter:
             ):
                 async with gigachat_request_options(
                     self.giga_client,
-                    self.request_options,
+                    request_options,
                 ):
                     async for chunk in self.giga_client.astream(chat_payload):
                         if await _is_disconnected(is_disconnected):
@@ -365,6 +386,7 @@ class GigaChatProviderAdapter:
             chat_payload,
             resolution.model if resolution.source == "forced" else None,
         )
+        request_options = self._cache_session_options(chat_payload, resolution)
         self._record_model_resolution(resolution, context)
         mapper = self._stream_mapper(
             request,
@@ -380,7 +402,7 @@ class GigaChatProviderAdapter:
             ):
                 async with gigachat_request_options(
                     self.giga_client,
-                    self.request_options,
+                    request_options,
                 ):
                     async for chunk in self.giga_client.achat.stream(chat_payload):
                         if await _is_disconnected(is_disconnected):

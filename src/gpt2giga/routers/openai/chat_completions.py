@@ -11,6 +11,7 @@ from fastapi.responses import StreamingResponse
 
 from gpt2giga.app_state import get_gigachat_client, get_model_concurrency_limiter
 from gpt2giga.common.api_mode import resolve_gigachat_api_mode
+from gpt2giga.common.cache_session import apply_cache_session_id
 from gpt2giga.common.conversation import (
     commit_chat_completion_response,
     stitch_chat_completion_stream,
@@ -107,6 +108,9 @@ async def chat_completions(request: Request):
             state.config,
             api_mode="v2",
         )
+        request_options = apply_cache_session_id(
+            request, chat_request, request_options, model=model_resolution.limiter_key
+        )
         update_request_context(
             model_effective=model_resolution.model,
             metadata={"model_source": model_resolution.source},
@@ -169,6 +173,9 @@ async def chat_completions(request: Request):
         chat_messages,
         state.config,
         api_mode="v1",
+    )
+    request_options = apply_cache_session_id(
+        request, chat_messages, request_options, model=model_resolution.limiter_key
     )
     update_request_context(
         model_effective=model_resolution.model,
@@ -251,6 +258,7 @@ async def _try_normalized_non_stream_chat(
             giga_client=giga_client,
             model_limiter=model_limiter,
             request_options=request_options,
+            cache_session_request=request,
             api_mode=resolve_gigachat_api_mode(request),
         )
         normalized_response = await provider_adapter.chat(
@@ -318,6 +326,7 @@ async def _try_normalized_stream_chat(
             giga_client=giga_client,
             model_limiter=model_limiter,
             request_options=request_options,
+            cache_session_request=request,
             response_processor=state.response_processor,
             api_mode=resolve_gigachat_api_mode(request),
         )

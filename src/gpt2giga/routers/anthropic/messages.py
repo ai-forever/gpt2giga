@@ -8,6 +8,7 @@ from fastapi.responses import StreamingResponse
 
 from gpt2giga.app_state import get_gigachat_client, get_model_concurrency_limiter
 from gpt2giga.common.api_mode import resolve_gigachat_api_mode
+from gpt2giga.common.cache_session import apply_cache_session_id
 from gpt2giga.common.client_params import ClientCompatibilityError
 from gpt2giga.common.conversation import (
     commit_anthropic_response,
@@ -198,6 +199,9 @@ async def messages(request: Request):
             chat_request,
             resolution.model if resolution.source == "forced" else None,
         )
+        request_options = apply_cache_session_id(
+            request, chat_request, request_options, model=resolution.limiter_key
+        )
         effective_model = resolution.limiter_key
         update_request_context(
             model_effective=resolution.model,
@@ -269,6 +273,9 @@ async def messages(request: Request):
     chat_messages = apply_model_override(
         chat_messages,
         resolution.model if resolution.source == "forced" else None,
+    )
+    request_options = apply_cache_session_id(
+        request, chat_messages, request_options, model=resolution.limiter_key
     )
     effective_model = resolution.limiter_key
     update_request_context(
@@ -524,6 +531,7 @@ def _provider_adapter(
         giga_client=get_gigachat_client(request),
         model_limiter=get_model_concurrency_limiter(request),
         request_options=request_options,
+        cache_session_request=request,
         response_processor=state.response_processor if require_streaming else None,
         api_mode=resolve_gigachat_api_mode(request),
         provider_label="anthropic",

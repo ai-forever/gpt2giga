@@ -13,6 +13,7 @@ from gpt2giga.app_state import (
     record_gigachat_model_catalog_snapshot,
 )
 from gpt2giga.common.api_mode import resolve_gigachat_api_mode
+from gpt2giga.common.cache_session import apply_cache_session_id
 from gpt2giga.common.client_params import ClientCompatibilityError
 from gpt2giga.common.conversation import (
     commit_responses_response,
@@ -81,6 +82,12 @@ class NativeGigaChatResponsesExecutor:
                 chat_request,
                 state.config,
                 api_mode="v2",
+            )
+            request_options = apply_cache_session_id(
+                request,
+                chat_request,
+                request_options,
+                model=model_resolution.limiter_key,
             )
             update_request_context(
                 model_effective=model_resolution.model,
@@ -156,6 +163,9 @@ class NativeGigaChatResponsesExecutor:
             chat_messages,
             state.config,
             api_mode="v1",
+        )
+        request_options = apply_cache_session_id(
+            request, chat_messages, request_options, model=model_resolution.limiter_key
         )
         update_request_context(
             model_effective=model_resolution.model,
@@ -427,6 +437,7 @@ async def _normalized_provider_adapter(
         giga_client=get_gigachat_client(request),
         model_limiter=get_model_concurrency_limiter(request),
         request_options=request_options,
+        cache_session_request=request,
         response_processor=state.response_processor if require_streaming else None,
         api_mode=resolve_gigachat_api_mode(request),
         forced_model=configured_model,

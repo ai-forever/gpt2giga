@@ -5,6 +5,24 @@ All notable changes to the gpt2giga project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1a2] - 2026-10-15
+
+### Added
+
+- **GigaChat prompt cache**: optional generation of a stable `X-Session-ID` from the system prompt or leading request prefix for OpenAI Chat Completions, Responses, Anthropic Messages, and Gemini GenerateContent. Disabled by default; explicit client headers and `GIGACHAT_SESSION_ID` retain priority. Based on [PR #236](https://github.com/ai-forever/gpt2giga/pull/236) by [@sabinich](https://github.com/sabinich).
+- **Python 3.15**: experimental support (alpha) with a separate non-blocking CI job for tests, wheel/sdist builds, and installed-package checks.
+
+### Changed
+
+- **Dependencies**: updated native dependencies and related packages in `uv.lock` for installation on Python 3.15.
+- **Release branch CI**: checks run for `release/**`; every Python job explicitly selects its advertised interpreter version.
+
+### Fixed
+
+- **Responses prefixes**: leading `system` and `developer` messages inside `input` participate in cache-session generation.
+- **Cache-session model identity**: identifiers include the actual upstream model, including Gemini route models and trusted overrides, for regular and streaming requests.
+- **Conversation continuity**: cache sessions are computed after restoring conversation history so the retained system prefix continues to participate in the hash.
+
 ## [0.3.1a1] - 2026-10-09
 
 ### Added

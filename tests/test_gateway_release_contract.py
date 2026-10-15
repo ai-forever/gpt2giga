@@ -2,6 +2,9 @@
 
 from pathlib import Path
 
+from packaging.specifiers import SpecifierSet
+import yaml
+
 try:
     import tomllib
 except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility
@@ -53,6 +56,57 @@ def test_gateway_ci_has_stable_bounded_required_check_names():
     assert "Gateway package / wheel and sdist" in workflow
     assert "Gateway artifact / Python ${{ matrix.python-version }}" in workflow
     assert "uv build --wheel --sdist --no-sources" in workflow
+
+
+def test_gateway_ci_selects_the_python_version_it_advertises():
+    workflow = yaml.safe_load((_WORKFLOW_ROOT / "ci.yaml").read_text(encoding="utf-8"))
+    jobs = workflow["jobs"]
+
+    for job_name in ("test", "minimum-sdk", "artifact-smoke"):
+        job = jobs[job_name]
+        assert job["env"]["UV_PYTHON"] == "${{ matrix.python-version }}"
+        assert not job.get("continue-on-error", False)
+    assert jobs["build"]["env"]["UV_PYTHON"] == "3.13"
+
+
+def test_gateway_ci_checks_release_branches_without_updating_their_badges():
+    workflow = yaml.load(
+        (_WORKFLOW_ROOT / "ci.yaml").read_text(encoding="utf-8"),
+        Loader=yaml.BaseLoader,
+    )
+    for event in ("push", "pull_request"):
+        assert workflow["on"][event]["branches"] == ["main", "release/**"]
+    badge_commit = next(
+        step
+        for step in workflow["jobs"]["coverage-badge"]["steps"]
+        if step["name"] == "Commit coverage badge on main"
+    )
+    assert badge_commit["if"] == (
+        "github.event_name == 'push' && github.ref == 'refs/heads/main'"
+    )
+
+
+def test_gateway_python315_is_installable_and_tested_as_experimental():
+    root = _WORKFLOW_ROOT.parents[1]
+    with (root / "pyproject.toml").open("rb") as file:
+        project = tomllib.load(file)["project"]
+    supported = SpecifierSet(project["requires-python"])
+    assert "3.10" in supported
+    assert "3.15" in supported
+    assert "3.16" not in supported
+
+    workflow = yaml.safe_load((_WORKFLOW_ROOT / "ci.yaml").read_text(encoding="utf-8"))
+    job = workflow["jobs"]["python315-alpha"]
+    assert job["env"]["UV_PYTHON"] == "3.15"
+    assert job["continue-on-error"] is True
+    commands = "\n".join(step.get("run", "") for step in job["steps"])
+    assert "uv sync --locked --all-extras --dev" in commands
+    assert "uv run --locked pytest tests/" in commands
+    assert "uv build --wheel --sdist --no-sources" in commands
+    assert "uv venv --python 3.15 .venv-artifact" in commands
+    assert "uv pip install --python .venv-artifact/bin/python" in commands
+    assert ".venv-artifact/bin/python -I scripts/gateway_artifact_smoke.py" in commands
+    assert ".venv-artifact/bin/gpt2giga --help" in commands
 
 
 def test_gateway_ci_tests_minimum_sdk_from_pypi():
