@@ -130,10 +130,83 @@ def test_derive_handles_responses_shape() -> None:
     assert session_id is not None
 
 
+@pytest.mark.parametrize("scope", ["system", "prefix"])
+@pytest.mark.parametrize("role", ["system", "developer"])
+def test_derive_responses_input_includes_leading_system_roles(scope, role) -> None:
+    messages = [
+        {"role": role, "content": [{"type": "input_text", "text": _LONG_SYSTEM}]},
+        {"role": "user", "content": "Question one"},
+        {"role": "assistant", "content": "Previous answer"},
+        {"role": "user", "content": "Question two"},
+    ]
+    session_id = build_cache_session_id({"input": messages}, scope=scope)
+
+    assert session_id is not None
+    assert session_id == build_cache_session_id({"messages": messages}, scope=scope)
+
+
+@pytest.mark.parametrize("scope", ["system", "prefix"])
+def test_derive_responses_combines_instructions_and_leading_system_input(scope) -> None:
+    payload = {
+        "instructions": _LONG_SYSTEM,
+        "input": [
+            {"role": "system", "content": "First rule"},
+            {"role": "developer", "content": "Second rule"},
+            {"role": "user", "content": "Question one"},
+        ],
+    }
+    first = build_cache_session_id(payload, scope=scope)
+    payload["input"][1]["content"] = "Changed second rule"
+
+    assert first != build_cache_session_id(payload, scope=scope)
+    changed = build_cache_session_id(payload, scope=scope)
+    payload["input"][2]["content"] = "Question two"
+    assert (changed == build_cache_session_id(payload, scope=scope)) == (
+        scope == "system"
+    )
+
+
+@pytest.mark.parametrize("scope", ["system", "prefix"])
+@pytest.mark.parametrize(
+    "boundary",
+    [
+        {"role": "assistant", "content": "Previous answer"},
+        {"type": "function_call_output", "output": "Tool result"},
+    ],
+)
+def test_derive_responses_stops_before_later_system_messages(scope, boundary) -> None:
+    payload = {
+        "input": [
+            {"role": "developer", "content": _LONG_SYSTEM},
+            boundary,
+            {"role": "system", "content": "Later rule"},
+        ]
+    }
+
+    expected = build_cache_session_id({"instructions": _LONG_SYSTEM}, scope=scope)
+    assert expected is not None
+    assert build_cache_session_id(payload, scope=scope) == expected
+
+
 def test_apply_is_disabled_by_default() -> None:
     request = _request()
     options = apply_cache_session_id(request, _openai_payload(), _options())
     assert "x-session-id" not in options.headers
+
+
+@pytest.mark.parametrize("guard", ["disabled", "client", "global"])
+def test_apply_skips_payload_serialization_when_session_not_generated(guard) -> None:
+    class UnusedPayload:
+        def model_dump(self, **_kwargs):
+            raise AssertionError("The skipped cache payload must not be serialized")
+
+    request = _request(
+        settings=_settings(cache_session_enabled=guard != "disabled"),
+        session_id="client-session" if guard == "client" else None,
+        gigachat_session_id="global-session" if guard == "global" else None,
+    )
+    options = _options()
+    assert apply_cache_session_id(request, UnusedPayload(), options) is options
 
 
 def test_apply_adds_built_session_when_enabled() -> None:

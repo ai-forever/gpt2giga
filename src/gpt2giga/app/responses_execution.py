@@ -60,11 +60,7 @@ class NativeGigaChatResponsesExecutor:
         stream = data.get("stream", False)
         state = request.app.state
 
-        request_options = apply_cache_session_id(
-            request,
-            data,
-            extract_gigachat_request_options(request, data),
-        )
+        request_options = extract_gigachat_request_options(request, data)
         current_rquid = rquid_context.get()
         giga_client = get_gigachat_client(request)
         model_limiter = get_model_concurrency_limiter(request)
@@ -86,6 +82,12 @@ class NativeGigaChatResponsesExecutor:
                 chat_request,
                 state.config,
                 api_mode="v2",
+            )
+            request_options = apply_cache_session_id(
+                request,
+                chat_request,
+                request_options,
+                model=model_resolution.limiter_key,
             )
             update_request_context(
                 model_effective=model_resolution.model,
@@ -161,6 +163,9 @@ class NativeGigaChatResponsesExecutor:
             chat_messages,
             state.config,
             api_mode="v1",
+        )
+        request_options = apply_cache_session_id(
+            request, chat_messages, request_options, model=model_resolution.limiter_key
         )
         update_request_context(
             model_effective=model_resolution.model,
@@ -265,11 +270,7 @@ class NormalizedBridgeResponsesExecutor:
             data,
             mode=resolve_gigachat_api_mode(request),
         )
-        request_options = apply_cache_session_id(
-            request,
-            data,
-            extract_gigachat_request_options(request, data),
-        )
+        request_options = extract_gigachat_request_options(request, data)
         provider_adapter = await _normalized_provider_adapter(
             request,
             normalized_request=normalized_request,
@@ -324,11 +325,7 @@ class NormalizedBridgeResponsesExecutor:
             data,
             mode=resolve_gigachat_api_mode(request),
         )
-        request_options = apply_cache_session_id(
-            request,
-            data,
-            extract_gigachat_request_options(request, data),
-        )
+        request_options = extract_gigachat_request_options(request, data)
         provider_adapter = await _normalized_provider_adapter(
             request,
             normalized_request=normalized_request,
@@ -440,6 +437,7 @@ async def _normalized_provider_adapter(
         giga_client=get_gigachat_client(request),
         model_limiter=get_model_concurrency_limiter(request),
         request_options=request_options,
+        cache_session_request=request,
         response_processor=state.response_processor if require_streaming else None,
         api_mode=resolve_gigachat_api_mode(request),
         forced_model=configured_model,

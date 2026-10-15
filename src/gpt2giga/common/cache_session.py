@@ -18,11 +18,12 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import replace
 import hashlib
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from starlette.requests import Request
 
-from gpt2giga.providers.gigachat.request_options import GigaRequestOptions
+if TYPE_CHECKING:
+    from gpt2giga.providers.gigachat.request_options import GigaRequestOptions
 
 CacheSessionScope = Literal["prefix", "system"]
 
@@ -42,14 +43,17 @@ _CHAT_PATH_SUFFIXES = (
 
 def apply_cache_session_id(
     request: Request,
-    payload: Mapping[str, Any] | None,
+    payload: Any,
     options: GigaRequestOptions,
+    *,
+    model: str | None = None,
 ) -> GigaRequestOptions:
     """Return options carrying a built ``X-Session-ID`` when reuse applies.
 
     The session id is skipped unless it is explicitly enabled, the route is a
     chat-like endpoint, no session identifier is already supplied by the client,
-    and no global default session is configured.
+    and no global default session is configured. Execution owners pass the
+    prepared upstream payload and resolved model or assistant/thread identity.
     """
     settings = _proxy_settings(request)
     if settings is None or not settings.cache_session_enabled:
@@ -61,11 +65,16 @@ def apply_cache_session_id(
     if _configured_default_session(request) is not None:
         return options
 
+    if not isinstance(payload, Mapping):
+        model_dump = getattr(payload, "model_dump", None)
+        payload = (
+            model_dump(mode="json", exclude_none=True) if callable(model_dump) else None
+        )
     session_id = build_cache_session_id(
         payload,
         min_prefix_tokens=settings.cache_session_min_prefix_tokens,
         scope=settings.cache_session_scope,
-        model=_payload_model(payload),
+        model=model if model is not None else _payload_model(payload),
     )
     if session_id is None:
         return options
@@ -134,10 +143,9 @@ def _stable_prefix_text(
             instructions = _content_text(payload.get("instructions"))
             if instructions:
                 parts.append(instructions)
-            if scope != "system":
-                text = _input_prefix_text(payload.get("input"))
-                if text:
-                    parts.append(text)
+            text = _input_prefix_text(payload.get("input"), scope)
+            if text:
+                parts.append(text)
 
     if not parts:
         return None
@@ -152,7 +160,8 @@ def _messages_prefix_text(
     for message in messages:
         if not isinstance(message, Mapping):
             continue
-        role = str(message.get("role") or "").lower()
+        role = message.get("role")
+        role = role.lower() if isinstance(role, str) else ""
         if role in _SYSTEM_ROLES:
             text = _content_text(message.get("content"))
             if text:
@@ -192,30 +201,36 @@ def _contents_prefix_text(
     return "\n\n".join(parts) or None
 
 
-def _input_prefix_text(input_value: Any) -> str | None:
+def _input_prefix_text(input_value: Any, scope: CacheSessionScope) -> str | None:
     """Return the leading stable text of a Responses ``input``.
 
     The input is a list of role-tagged items (``message`` with a ``role``, or
-    items such as ``function_call_output`` that carry no role). Only the leading
-    user turn is stable, so the walk stops at the first non-user item — the same
-    rule the chat-shaped prefix uses.
+    items such as ``function_call_output`` that carry no role). Include leading
+    system/developer messages and, in prefix scope, the first user turn. Stop
+    before assistant/tool items or later turns, as with chat-shaped messages.
     """
-    direct = _content_text(input_value)
-    if direct:
-        return direct
+    if scope != "system":
+        direct = _content_text(input_value)
+        if direct:
+            return direct
     if not isinstance(input_value, list):
         return None
+    parts: list[str] = []
     for item in input_value:
         if not isinstance(item, Mapping):
-            return None
+            break
         role = str(item.get("role") or "").lower()
-        if role != "user":
-            return None
-        text = _content_text(item.get("content"))
-        if text:
-            return text
-        return None
-    return None
+        if role in _SYSTEM_ROLES:
+            text = _content_text(item.get("content"))
+            if text:
+                parts.append(text)
+            continue
+        if scope != "system" and role == "user":
+            text = _content_text(item.get("content"))
+            if text:
+                parts.append(text)
+        break
+    return "\n\n".join(parts) or None
 
 
 def _content_text(value: Any) -> str | None:

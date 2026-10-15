@@ -74,7 +74,17 @@ GPT2GIGA_CACHE_SESSION_MIN_PREFIX_TOKENS=1024
 | `GPT2GIGA_CACHE_SESSION_MIN_PREFIX_TOKENS` | `1024` | Minimum estimated prefix tokens before a built session id is applied. |
 
 The built session id applies to OpenAI Chat Completions, OpenAI Responses,
-Anthropic Messages, and Gemini GenerateContent. It is skipped when:
+Anthropic Messages, and Gemini GenerateContent, including streaming requests.
+For Responses, the system prefix includes `instructions` and leading `system`
+or `developer` messages in `input`. The `prefix` scope also includes the first
+user turn. If the gateway restores conversation history, it uses the assembled
+prefix, so follow-up requests can reuse the session without resending it.
+
+The hash includes the actual upstream model after gateway defaults, route models,
+and trusted model overrides are resolved. Different upstream models therefore
+receive different built session ids for the same prefix. When the upstream
+selects the model through an assistant or thread, that reference identifies the
+session instead. Session generation is skipped when:
 
 - the client already supplies `X-Session-ID`;
 - `GIGACHAT_SESSION_ID` is configured (the operator's default wins);
@@ -82,8 +92,8 @@ Anthropic Messages, and Gemini GenerateContent. It is skipped when:
 - the prefix is shorter than `GPT2GIGA_CACHE_SESSION_MIN_PREFIX_TOKENS`
   (short prompts gain little, so they are left untouched).
 
-The built session id never changes the generated answer. It only affects which
-upstream cache entry a request reuses. When GigaChat echoes the session id in
+The built session id does not modify the prompt or generation settings. It
+affects upstream cache routing. When GigaChat echoes the session id in
 the response headers, the gateway surfaces it as `metadata.gigachat_x_session_id`;
 for a built session that value is the caller's own one-way hash, not raw prompt
 content.

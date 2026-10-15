@@ -67,11 +67,7 @@ async def chat_completions(request: Request):
     data = await read_request_json(request)
     conversation_turn = await stitch_chat_payload(request, data, protocol="openai")
     request_data = deepcopy(data)
-    request_options = apply_cache_session_id(
-        request,
-        data,
-        extract_gigachat_request_options(request, data),
-    )
+    request_options = extract_gigachat_request_options(request, data)
     stream = data.get("stream", False)
     current_rquid = rquid_context.get()
     state = request.app.state
@@ -111,6 +107,9 @@ async def chat_completions(request: Request):
             chat_request,
             state.config,
             api_mode="v2",
+        )
+        request_options = apply_cache_session_id(
+            request, chat_request, request_options, model=model_resolution.limiter_key
         )
         update_request_context(
             model_effective=model_resolution.model,
@@ -174,6 +173,9 @@ async def chat_completions(request: Request):
         chat_messages,
         state.config,
         api_mode="v1",
+    )
+    request_options = apply_cache_session_id(
+        request, chat_messages, request_options, model=model_resolution.limiter_key
     )
     update_request_context(
         model_effective=model_resolution.model,
@@ -256,6 +258,7 @@ async def _try_normalized_non_stream_chat(
             giga_client=giga_client,
             model_limiter=model_limiter,
             request_options=request_options,
+            cache_session_request=request,
             api_mode=resolve_gigachat_api_mode(request),
         )
         normalized_response = await provider_adapter.chat(
@@ -323,6 +326,7 @@ async def _try_normalized_stream_chat(
             giga_client=giga_client,
             model_limiter=model_limiter,
             request_options=request_options,
+            cache_session_request=request,
             response_processor=state.response_processor,
             api_mode=resolve_gigachat_api_mode(request),
         )

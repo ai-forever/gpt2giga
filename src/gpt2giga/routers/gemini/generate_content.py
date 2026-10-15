@@ -11,7 +11,6 @@ from fastapi.responses import StreamingResponse
 
 from gpt2giga.app_state import get_gigachat_client, get_model_concurrency_limiter
 from gpt2giga.common.api_mode import resolve_gigachat_api_mode
-from gpt2giga.common.cache_session import apply_cache_session_id
 from gpt2giga.common.conversation import (
     commit_conversation_turn,
     stitch_message_list,
@@ -95,11 +94,7 @@ async def generate_content(model: str, request: Request):
         data,
         normalized_request,
     )
-    request_options = apply_cache_session_id(
-        request,
-        data,
-        extract_gigachat_request_options(request, data),
-    )
+    request_options = extract_gigachat_request_options(request, data)
     provider_adapter = _provider_adapter(
         request,
         normalized_request=normalized_request,
@@ -161,11 +156,7 @@ async def stream_generate_content(model: str, request: Request):
         data,
         normalized_request,
     )
-    request_options = apply_cache_session_id(
-        request,
-        data,
-        extract_gigachat_request_options(request, data),
-    )
+    request_options = extract_gigachat_request_options(request, data)
     provider_adapter = _provider_adapter(
         request,
         normalized_request=normalized_request,
@@ -470,6 +461,7 @@ def _provider_adapter(
         giga_client=get_gigachat_client(request),
         model_limiter=get_model_concurrency_limiter(request),
         request_options=request_options,
+        cache_session_request=request,
         response_processor=state.response_processor if require_streaming else None,
         api_mode=resolve_gigachat_api_mode(request),
         provider_label="gemini",
