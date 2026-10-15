@@ -841,7 +841,7 @@ class RequestTransformer:
             last_function_name: Optional[str] = None
             last_tools_state_id: Optional[str] = None
             tool_state_by_call_id: dict[str, tuple[Optional[str], Optional[str]]] = {}
-            for message in input_:
+            for input_index, message in enumerate(input_):
                 message_type = message.get("type")
                 if message_type == "function_call_output":
                     call_state_id = None
@@ -859,7 +859,16 @@ class RequestTransformer:
                     )
                     fn_name = message.get("name") or call_function_name
                     fn_name = fn_name or last_function_name
-                    fn_name = map_tool_name_to_gigachat(fn_name) if fn_name else fn_name
+                    if not isinstance(fn_name, str) or not fn_name.strip():
+                        raise ClientCompatibilityError(
+                            "GigaChat requires the function name for a tool result. "
+                            "Include the matching `function_call` item in `input`, "
+                            "or provide `name` on the `function_call_output` item.",
+                            provider="openai",
+                            param=f"input[{input_index}].name",
+                            code="unsupported_semantic",
+                        )
+                    fn_name = map_tool_name_to_gigachat(fn_name)
                     payload = {
                         "role": "function",
                         "name": fn_name,

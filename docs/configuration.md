@@ -145,7 +145,7 @@ can be visible to other processes.
 | `GPT2GIGA_EMBEDDINGS` | `EmbeddingsGigaR` | Default embeddings model when the model from the request is not used. |
 | `GPT2GIGA_ENABLE_IMAGES` | `True` | Accept and translate supported image inputs. Disable when the deployment must reject image processing. |
 | `GPT2GIGA_DEFAULT_MAX_TOKENS` | empty | Add this positive `max_tokens` value only when the client did not provide `max_tokens`, `max_completion_tokens`, or `max_output_tokens`. Empty means no injected limit. |
-| `GPT2GIGA_MAX_REQUEST_BODY_BYTES` | `10485760` | Maximum HTTP request body size. |
+| `GPT2GIGA_MAX_REQUEST_BODY_BYTES` | `10485760` | Maximum received body size for POST/PUT/PATCH, including chunked requests without `Content-Length`. Oversized bodies return HTTP 413 before the handler runs. |
 | `GPT2GIGA_LOG_LEVEL` | `INFO` | Runtime log level. Avoid `DEBUG` in production. |
 | `GPT2GIGA_LOG_FILENAME` | `gpt2giga.log` | Runtime log file. |
 | `GPT2GIGA_LOG_MAX_SIZE` | `10485760` | Maximum log file size before rotation. |
@@ -323,6 +323,12 @@ GPT2GIGA_CONVERSATION_ON_DIVERGENCE=client_wins
 
 The state is kept in the process memory. With several workers/pods, use sticky
 routing or do not enable stitching.
+
+Anthropic stitching also applies in normalized mode and retains tool-call IDs
+and `tools_state_id`. A batch of tool results, optionally followed by user text,
+extends the saved history as one new turn. Gemini saves a streamed assistant
+turn only after successful completion; failed or interrupted streams do not
+replace the previous history.
 
 ## Prompt-cache reuse with X-Session-ID
 

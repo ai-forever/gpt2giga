@@ -21,6 +21,15 @@ class GeminiStreamProjector:
         """Project one event, buffering partial function-call arguments."""
         if event.type in {"tool_call_start", "tool_call_delta"}:
             self._collect_tool_call(event)
+            if event.finish_reason is not None:
+                return [self._complete_tool_calls(event)]
+            if event.content_delta:
+                frame = normalized_stream_event_to_gemini_sse(
+                    event.model_copy(update={"type": "content_delta"}),
+                    requested_model=self.requested_model,
+                    response_id=self.response_id,
+                )
+                return [frame] if frame is not None else []
             return []
         if event.type == "message_end" and self._tool_calls:
             return [self._complete_tool_calls(event)]

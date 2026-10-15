@@ -22,6 +22,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Responses prefixes**: leading `system` and `developer` messages inside `input` participate in cache-session generation.
 - **Cache-session model identity**: identifiers include the actual upstream model, including Gemini route models and trusted overrides, for regular and streaming requests.
 - **Conversation continuity**: cache sessions are computed after restoring conversation history so the retained system prefix continues to participate in the hash.
+- **Anthropic history**: normalized mode uses restored history; streaming and regular responses retain tool-call IDs and `tools_state_id`. Multiple tool results and subsequent user text extend the saved conversation.
+- **Stream content**: Anthropic retains text and reasoning from the terminal event; Gemini retains terminal function calls and text arriving with a call. Failed or interrupted Gemini streams no longer save partial responses in history.
+- **Stream cleanup**: client disconnects from native Chat Completions / Responses close the upstream stream and release the model slot, including failures while sending HTTP headers or body chunks.
+- **Native Responses**: omitting `model` with a configured default no longer causes a 500. Token-limit and content-filter stops return `incomplete` with a reason, including the `response.incomplete` SSE event.
+- **Responses tool results**: an unresolved function name produces a clear 400 before upstream I/O instead of losing the result. An explicit `name` or matching `function_call` in `input` is supported.
+- **Incoming request bodies**: the size limit checks received bytes, including chunked requests without `Content-Length`; invalid JSON encoding returns 400 instead of 500.
 
 ## [0.3.1a1] - 2026-10-09
 

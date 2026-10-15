@@ -6,6 +6,7 @@ import json
 from collections.abc import AsyncIterator, Mapping
 from typing import Any
 
+from gpt2giga.common.streaming_response import closing_stream
 from gpt2giga.core.context import RequestContext
 from gpt2giga.models.config import ProxySettings
 from gpt2giga.protocols.normalized import (
@@ -87,45 +88,46 @@ async def observe_openai_response_stream(
     context: RequestContext | None,
 ) -> AsyncIterator[str]:
     """Observe Responses SSE chunks and emit one final LLM span."""
-    sink = getattr(state, "observability_sink", None)
-    if not is_sink_active(sink):
-        async for chunk in body_iterator:
-            yield chunk
-        return
+    async with closing_stream(body_iterator):
+        sink = getattr(state, "observability_sink", None)
+        if not is_sink_active(sink):
+            async for chunk in body_iterator:
+                yield chunk
+            return
 
-    settings = getattr(getattr(state, "config", None), "proxy_settings", None)
-    observer = OpenAIResponseStreamObserver(settings=settings)
-    async for chunk in body_iterator:
+        settings = getattr(getattr(state, "config", None), "proxy_settings", None)
+        observer = OpenAIResponseStreamObserver(settings=settings)
+        async for chunk in body_iterator:
+            try:
+                observer.observe_chunk(chunk)
+            except Exception as exc:
+                logger = getattr(state, "logger", None)
+                if logger is not None:
+                    logger.warning(
+                        "OpenAI Responses stream observability observe failed: {}",
+                        exc,
+                    )
+            yield chunk
+
+        if not observer.has_observed_payload:
+            return
         try:
-            observer.observe_chunk(chunk)
+            response_payload = observer.to_response_payload(request_payload)
         except Exception as exc:
             logger = getattr(state, "logger", None)
             if logger is not None:
                 logger.warning(
-                    "OpenAI Responses stream observability observe failed: {}",
+                    "OpenAI Responses stream observability response build failed: {}",
                     exc,
                 )
-        yield chunk
-
-    if not observer.has_observed_payload:
-        return
-    try:
-        response_payload = observer.to_response_payload(request_payload)
-    except Exception as exc:
-        logger = getattr(state, "logger", None)
-        if logger is not None:
-            logger.warning(
-                "OpenAI Responses stream observability response build failed: {}",
-                exc,
-            )
-        return
-    await emit_openai_response_observability(
-        state,
-        request_payload,
-        response_payload,
-        context=context,
-        events=observer.events,
-    )
+            return
+        await emit_openai_response_observability(
+            state,
+            request_payload,
+            response_payload,
+            context=context,
+            events=observer.events,
+        )
 
 
 def responses_request_to_normalized(

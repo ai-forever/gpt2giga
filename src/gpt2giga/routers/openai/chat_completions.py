@@ -2,6 +2,7 @@
 
 import json
 from collections.abc import AsyncIterator, Mapping
+from contextlib import AsyncExitStack
 from copy import deepcopy
 from types import SimpleNamespace
 from typing import Any
@@ -26,6 +27,10 @@ from gpt2giga.common.request_json import read_request_json
 from gpt2giga.common.streaming import (
     stream_chat_completion_generator,
     stream_chat_generator,
+)
+from gpt2giga.common.streaming_response import (
+    ModelLimitedStreamingResponse,
+    closing_stream,
 )
 from gpt2giga.core.context import get_request_context, update_request_context
 from gpt2giga.logger import rquid_context
@@ -116,11 +121,10 @@ async def chat_completions(request: Request):
             metadata={"model_source": model_resolution.source},
         )
         if stream:
-            acquired_model_limit = model_limiter.limit(
-                model_resolution.limiter_key,
-                provider="openai",
+            acquired_model_limit = AsyncExitStack()
+            await acquired_model_limit.enter_async_context(
+                model_limiter.limit(model_resolution.limiter_key, provider="openai")
             )
-            await acquired_model_limit.__aenter__()
             stream = stream_chat_completion_generator(
                 request,
                 data["model"],
@@ -133,7 +137,7 @@ async def chat_completions(request: Request):
                 effective_model=model_resolution.limiter_key,
                 acquired_model_limit=acquired_model_limit,
             )
-            return StreamingResponse(
+            return ModelLimitedStreamingResponse(
                 _observe_chat_completion_stream(
                     state,
                     stitch_chat_completion_stream(request, conversation_turn, stream),
@@ -141,6 +145,7 @@ async def chat_completions(request: Request):
                     context=get_request_context(),
                 ),
                 media_type="text/event-stream",
+                acquired_model_limit=acquired_model_limit,
             )
         async with model_limiter.limit(
             model_resolution.limiter_key,
@@ -200,11 +205,10 @@ async def chat_completions(request: Request):
         )
         return result
 
-    acquired_model_limit = model_limiter.limit(
-        model_resolution.limiter_key,
-        provider="openai",
+    acquired_model_limit = AsyncExitStack()
+    await acquired_model_limit.enter_async_context(
+        model_limiter.limit(model_resolution.limiter_key, provider="openai")
     )
-    await acquired_model_limit.__aenter__()
     stream = stream_chat_generator(
         request,
         data["model"],
@@ -217,7 +221,7 @@ async def chat_completions(request: Request):
         effective_model=model_resolution.limiter_key,
         acquired_model_limit=acquired_model_limit,
     )
-    return StreamingResponse(
+    return ModelLimitedStreamingResponse(
         _observe_chat_completion_stream(
             state,
             stitch_chat_completion_stream(request, conversation_turn, stream),
@@ -225,6 +229,7 @@ async def chat_completions(request: Request):
             context=get_request_context(),
         ),
         media_type="text/event-stream",
+        acquired_model_limit=acquired_model_limit,
     )
 
 
@@ -411,62 +416,63 @@ async def _observe_chat_completion_stream(
     normalized_request=None,
     stream_span_events: list[dict[str, Any]] | None = None,
 ) -> AsyncIterator[str]:
-    sink = getattr(state, "observability_sink", None)
-    if not is_sink_active(sink):
+    async with closing_stream(body_iterator):
+        sink = getattr(state, "observability_sink", None)
+        if not is_sink_active(sink):
+            async for chunk in body_iterator:
+                yield chunk
+            return
+
+        if normalized_request is None:
+            try:
+                protocol_adapter = getattr(state, "openai_protocol_adapter", None)
+                if protocol_adapter is not None:
+                    normalized_request = await protocol_adapter.to_normalized(
+                        request_payload,
+                        context=context,
+                    )
+            except Exception as exc:
+                logger = getattr(state, "logger", None)
+                if logger is not None:
+                    logger.warning(
+                        "Chat completion stream observability normalization failed: {}",
+                        exc,
+                    )
+
+        observer = _ChatCompletionStreamObserver()
         async for chunk in body_iterator:
+            try:
+                observer.observe_chunk(chunk)
+            except Exception as exc:
+                logger = getattr(state, "logger", None)
+                if logger is not None:
+                    logger.warning(
+                        "Chat completion stream observability observe failed: {}",
+                        exc,
+                    )
             yield chunk
-        return
 
-    if normalized_request is None:
+        if normalized_request is None or not observer.has_observed_payload:
+            return
+
         try:
-            protocol_adapter = getattr(state, "openai_protocol_adapter", None)
-            if protocol_adapter is not None:
-                normalized_request = await protocol_adapter.to_normalized(
-                    request_payload,
-                    context=context,
-                )
+            normalized_response = observer.to_normalized_response()
         except Exception as exc:
             logger = getattr(state, "logger", None)
             if logger is not None:
                 logger.warning(
-                    "Chat completion stream observability normalization failed: {}",
+                    "Chat completion stream observability response build failed: {}",
                     exc,
                 )
+            return
 
-    observer = _ChatCompletionStreamObserver()
-    async for chunk in body_iterator:
-        try:
-            observer.observe_chunk(chunk)
-        except Exception as exc:
-            logger = getattr(state, "logger", None)
-            if logger is not None:
-                logger.warning(
-                    "Chat completion stream observability observe failed: {}",
-                    exc,
-                )
-        yield chunk
-
-    if normalized_request is None or not observer.has_observed_payload:
-        return
-
-    try:
-        normalized_response = observer.to_normalized_response()
-    except Exception as exc:
-        logger = getattr(state, "logger", None)
-        if logger is not None:
-            logger.warning(
-                "Chat completion stream observability response build failed: {}",
-                exc,
-            )
-        return
-
-    await _emit_chat_completion_observability(
-        state,
-        normalized_request,
-        normalized_response,
-        context=context,
-        events=stream_span_events,
-    )
+        await _emit_chat_completion_observability(
+            state,
+            normalized_request,
+            normalized_response,
+            context=context,
+            events=stream_span_events,
+        )
 
 
 async def _emit_legacy_chat_completion_observability(

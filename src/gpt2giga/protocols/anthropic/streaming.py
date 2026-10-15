@@ -185,7 +185,12 @@ class AnthropicStreamProjector:
         ]
 
     def _message_end(self, event: NormalizedStreamEvent) -> list[str]:
-        frames = self._stop_block()
+        frames = []
+        if event.reasoning_delta:
+            frames.extend(self._thinking_delta(event.reasoning_delta))
+        if event.content_delta:
+            frames.extend(self._text_delta(event.content_delta))
+        frames.extend(self._stop_block())
         stop_reason = {
             "length": "max_tokens",
             "max_tokens": "max_tokens",

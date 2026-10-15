@@ -77,6 +77,8 @@ SDK OpenAI и Anthropic обычно объединяют `extra_body` с исх
 `mcp_servers`. `previous_response_id` поддерживается для OpenAI Responses в
 режиме GigaChat v2 и сопоставляется с `storage.thread_id`; в режиме Responses v1 он
 отклоняется при значении, отличном от `null`; `store=true` в v1 также отклоняется.
+Для результатов инструментов native Responses также требуется восстановимое имя
+функции; см. [повторную отправку вызовов](api-compatibility.md#повторная-отправка-вызовов-инструментов).
 Если такой же ключ явно положить внутрь буквального `extra_body`, gpt2giga передаст
 его в `additional_fields`, а итоговую поддержку определит вышестоящий GigaChat.
 

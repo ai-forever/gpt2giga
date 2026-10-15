@@ -32,12 +32,13 @@ async def read_request_json(request: Request) -> dict:
         )
     try:
         data = json.loads(body)
-    except json.JSONDecodeError as e:
+    except (json.JSONDecodeError, UnicodeDecodeError) as e:
+        message = e.msg if isinstance(e, json.JSONDecodeError) else "invalid encoding"
         raise HTTPException(
             status_code=400,
             detail={
                 "error": {
-                    "message": f"Invalid JSON body: {e.msg}",
+                    "message": f"Invalid JSON body: {message}",
                     "type": "invalid_request_error",
                     "param": None,
                     "code": "invalid_json",
