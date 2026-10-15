@@ -79,7 +79,9 @@ gpt2giga --help
 python -m pip install gpt2giga
 ```
 
-Поддерживается Python 3.10–3.14. Для Postgres, OpenSearch или Phoenix добавьте
+Поддерживается Python 3.10–3.14. Поддержка Python 3.15 пока экспериментальная
+(alpha): отдельный неблокирующий CI-job проверяет тесты, сборку wheel/sdist
+и запуск установленного пакета. Для Postgres, OpenSearch или Phoenix добавьте
 соответствующую extra-зависимость. Например, для опубликованного релиза:
 
 ```sh

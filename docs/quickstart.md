@@ -6,6 +6,8 @@ gateway to GigaChat and verify each protocol with a first request.
 ## Requirements
 
 - Python 3.10–3.14 for a local run.
+- Python 3.15 support is experimental (alpha). A separate non-blocking CI job
+  runs the tests, builds the wheel/sdist, and checks the installed package.
 - This checkout requires GigaChat Python SDK `>=0.2.4a1,<0.3.0`.
   SDK `0.2.4a1` is available on PyPI and is installed automatically with the gateway.
 - `uv` for local development.
