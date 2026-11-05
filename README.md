@@ -224,6 +224,17 @@ GIGACHAT_VERIFY_SSL_CERTS=True
 
 Compose profiles, reverse proxies, TLS и hardening описаны в [Deployment](https://ai-forever.github.io/gpt2giga/deployment).
 
+Для GigaChat встроен публичный Russian Trusted Root CA: при
+`GIGACHAT_VERIFY_SSL_CERTS=True` вручную устанавливать его не нужно.
+Явный CA bundle или SSL context имеет приоритет; отключить добавление можно через
+`GIGACHAT_USE_BUNDLED_CA=False`. Для клиентов с union-схемами инструментов
+(например, Hermes Agent) доступна опция `GPT2GIGA_NORMALIZE_TOOL_SCHEMAS=True`.
+Она применяется только к моделям GigaChat-2 на `https://api.giga.chat/v1`
+и преобразует схемы с потерей части ограничений; по умолчанию выключена.
+На других адресах, включая `staging.example.com` и
+`gateway.example.com`, а также для GigaChat-3 схемы не меняются.
+Подробнее — [Configuration](https://ai-forever.github.io/gpt2giga/configuration).
+
 ## Структура Репозитория
 
 | Path | Назначение |

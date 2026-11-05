@@ -197,11 +197,20 @@ x-api-key: <GPT2GIGA_API_KEY>
 | `GIGACHAT_SESSION_ID` | пусто | Значение `X-Session-ID` по умолчанию; заголовок входящего запроса имеет приоритет. Используйте отдельный идентификатор на диалог. Попадание в кэш не гарантируется. |
 | `GIGACHAT_PROFANITY_CHECK` | SDK default | Флаг проверки на нецензурную лексику в вышестоящем сервисе. |
 | `GIGACHAT_VERIFY_SSL_CERTS` | SDK default | В production держите `True`. |
+| `GIGACHAT_USE_BUNDLED_CA` | `True` | Добавлять встроенный Russian Trusted Root CA в контекст клиента GigaChat. |
 | `GIGACHAT_TIMEOUT` | SDK default | Таймаут запроса к вышестоящему сервису. |
 | `GIGACHAT_MAX_CONNECTIONS` | SDK default | Глобальное ограничение числа соединений SDK/HTTP. |
 | `GIGACHAT_MAX_RETRIES` | SDK default | Число повторных попыток SDK для временных ошибок вышестоящего сервиса. |
 
 GigaChat также поддерживает настройки клиентского TLS-сертификата: `GIGACHAT_CA_BUNDLE_FILE`, `GIGACHAT_CERT_FILE`, `GIGACHAT_KEY_FILE`, `GIGACHAT_KEY_FILE_PASSWORD`.
+
+При включённой проверке TLS gateway добавляет публичный Russian Trusted Root CA
+из пакета к certifi (или `SSL_CERT_FILE` / `SSL_CERT_DIR`) в клиенте GigaChat.
+Это действует для API, OAuth и клиентов pass-token. Явно заданные
+`GIGACHAT_CA_BUNDLE_FILE` или SDK `ssl_context` имеют приоритет.
+`GIGACHAT_USE_BUNDLED_CA=False` отключает добавление. Системное хранилище не
+меняется, загрузок сертификатов во время работы нет.
+[Официальная инструкция](https://developers.sber.ru/docs/ru/gigachat/certificates).
 
 Явно задавайте `GIGACHAT_MODEL` для предсказуемой маршрутизации. При
 `GPT2GIGA_PASS_MODEL=True` gateway может принять непустую модель из запроса;
@@ -211,6 +220,30 @@ GigaChat также поддерживает настройки клиентск
 `GPT2GIGA_PASS_MODEL=False` часто полезен для OpenAI-совместимых клиентов,
 которые отправляют public alias вместо модели GigaChat. В этом режиме alias не
 считается upstream-моделью, поэтому `GIGACHAT_MODEL` должна быть задана.
+
+### Совместимость схем инструментов
+
+`GPT2GIGA_NORMALIZE_TOOL_SCHEMAS=True` включает преобразование параметров функций
+только для **моделей GigaChat-2** (включая Pro/Max) через API v1/v2, включая `tools`
+и старое поле `functions`, **только при
+`GIGACHAT_BASE_URL=https://api.giga.chat/v1`** (допускается завершающий `/`).
+На других адресах, включая `https://staging.example.com/v1/` и
+`https://gateway.example.com/v1`, схемы сохраняются даже при включённом флаге.
+Схемы для GigaChat-3 и неизвестных моделей сохраняются
+даже при включённом флаге. Учитывается фактическая upstream-модель, включая
+настройку модели и принудительные подмены; версия API не определяет поколение модели.
+По умолчанию —
+`False`: исходные схемы сохраняются. Настройка полезна, например, для Hermes Agent
+при ответах 422 на объединения типов.
+
+Вложенные объектные ветки `anyOf`/`oneOf` объединяются: свойства и enum одноимённых
+свойств суммируются, `required` пересекаются. Объекты имеют приоритет над скалярами;
+иначе выбирается первая ветка кроме `null`. В списке `type` выбирается первый тип
+кроме `null`. Объектам без `properties` добавляется пустой словарь.
+Преобразование может сузить типы и ослабить ограничения — эквивалентность JSON Schema
+не гарантируется. Ссылки не раскрываются, пустые объединения и объединения только
+из `null` сохраняются; другие неподдерживаемые конструкции всё ещё могут вызвать
+ошибку upstream. Значения default/examples и схемы structured output не меняются.
 
 ## Рассуждения и структурированный вывод
 

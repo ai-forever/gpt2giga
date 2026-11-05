@@ -106,6 +106,10 @@ class ProxySettings(BaseSettings):
             "legacy chat methods, v2 uses chat completion resource methods"
         ),
     )
+    normalize_tool_schemas: bool = Field(
+        default=False,
+        description="Lossily collapse tool-schema unions only for GigaChat-2 at https://api.giga.chat/v1; preserve other endpoints and models.",
+    )
     normalization_mode: Literal["off", "shadow", "on"] = Field(
         default="off",
         description=(
@@ -518,6 +522,10 @@ class ProxySettings(BaseSettings):
 
 
 class GigaChatCLI(GigachatSettings):
+    use_bundled_ca: bool = Field(
+        default=True,
+        description="Add the bundled Russian Trusted Root CA when verifying GigaChat TLS unless a custom CA bundle or SSL context is set.",
+    )
     model_config = SettingsConfigDict(env_prefix="gigachat_", case_sensitive=False)
 
 

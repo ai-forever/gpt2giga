@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+import ssl
 from unittest.mock import MagicMock
 
 import pytest
@@ -63,6 +64,43 @@ class FakeSettings:
                 key: value for key, value in self.values.items() if value is not None
             }
         return dict(self.values)
+
+
+def test_bundled_ca_is_loaded_for_verified_sdk_clients(monkeypatch):
+    constructor = MagicMock()
+    monkeypatch.setattr(client_module, "GigaChat", constructor)
+    settings = FakeSettings({"verify_ssl_certs": True})
+    build_gigachat_client(settings, request_auth={"access_token": "test"})
+    context = constructor.call_args.kwargs["ssl_context"]
+    assert context.verify_mode == ssl.CERT_REQUIRED
+    assert context.check_hostname is True
+    names = [str(cert["subject"]) for cert in context.get_ca_certs()]
+    assert any("Russian Trusted Root CA" in name for name in names)
+    assert len(names) > 1
+    assert settings.values == {"verify_ssl_certs": True}
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        {"verify_ssl_certs": False},
+        {"ca_bundle_file": "/custom/ca.pem"},
+        {"ssl_context": ssl.create_default_context()},
+        {"use_bundled_ca": False},
+    ],
+)
+def test_explicit_tls_configuration_takes_precedence(monkeypatch, override):
+    constructor = MagicMock()
+    monkeypatch.setattr(client_module, "GigaChat", constructor)
+    values = {"verify_ssl_certs": True, "use_bundled_ca": True, **override}
+    build_gigachat_client(FakeSettings(values))
+    expected = {key: value for key, value in values.items() if key != "use_bundled_ca"}
+    constructor.assert_called_once_with(**expected)
+
+
+def test_bundled_ca_setting_from_environment(monkeypatch):
+    monkeypatch.setenv("GIGACHAT_USE_BUNDLED_CA", "false")
+    assert GigaChatCLI().use_bundled_ca is False
 
 
 def test_create_gigachat_client_excludes_none_settings(monkeypatch):
