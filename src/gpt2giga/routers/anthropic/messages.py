@@ -184,7 +184,14 @@ async def messages(request: Request):
         async with gigachat_request_options(giga_client, request_options):
             try:
                 chat_request = await state.request_transformer.prepare_chat_completion(
-                    openai_data, giga_client
+                    openai_data,
+                    giga_client,
+                    **(
+                        {"forced_model": pinned_model}
+                        if pinned_model is not None
+                        and state.config.proxy_settings.normalize_tool_schemas
+                        else {}
+                    ),
                 )
             except ClientCompatibilityError as exc:
                 exc.provider = "anthropic"
@@ -259,7 +266,14 @@ async def messages(request: Request):
     async with gigachat_request_options(giga_client, request_options):
         try:
             chat_messages = await state.request_transformer.prepare_chat(
-                openai_data, giga_client
+                openai_data,
+                giga_client,
+                **(
+                    {"forced_model": pinned_model}
+                    if pinned_model is not None
+                    and state.config.proxy_settings.normalize_tool_schemas
+                    else {}
+                ),
             )
         except ClientCompatibilityError as exc:
             exc.provider = "anthropic"

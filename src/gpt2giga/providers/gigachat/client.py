@@ -1,6 +1,11 @@
 """GigaChat provider client construction and lifecycle helpers."""
 
 from typing import Any, Mapping, Protocol, TypedDict
+import os
+import ssl
+from importlib.resources import files
+
+import certifi
 
 from gigachat import GigaChat
 from gigachat.settings import BASE_URL
@@ -51,6 +56,23 @@ def build_gigachat_client(
         client_kwargs.update(request_auth)
 
     _validate_username_password_base_url(settings, client_kwargs)
+    use_bundled_ca = client_kwargs.pop("use_bundled_ca", True)
+    if (
+        use_bundled_ca
+        and client_kwargs.get("verify_ssl_certs", False)
+        and not client_kwargs.get("ssl_context")
+        and not client_kwargs.get("ca_bundle_file")
+    ):
+        context = ssl.create_default_context(
+            cafile=os.environ.get("SSL_CERT_FILE") or certifi.where(),
+            capath=os.environ.get("SSL_CERT_DIR"),
+        )
+        context.load_verify_locations(
+            cadata=files("gpt2giga.providers.gigachat")
+            .joinpath("certs/russian_trusted_root_ca.pem")
+            .read_text(encoding="ascii")
+        )
+        client_kwargs["ssl_context"] = context
     return GigaChat(**client_kwargs)
 
 

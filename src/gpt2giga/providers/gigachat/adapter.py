@@ -236,6 +236,12 @@ class GigaChatProviderAdapter:
             chat_payload = await self.request_transformer.prepare_chat(
                 payload,
                 self.giga_client,
+                **(
+                    {"forced_model": self.forced_model}
+                    if self.forced_model is not None
+                    and self.config.proxy_settings.normalize_tool_schemas
+                    else {}
+                ),
             )
         resolution = self._resolve_model(chat_payload)
         chat_payload = apply_model_override(
@@ -268,6 +274,12 @@ class GigaChatProviderAdapter:
             chat_payload = await self.request_transformer.prepare_chat_completion(
                 payload,
                 self.giga_client,
+                **(
+                    {"forced_model": self.forced_model}
+                    if self.forced_model is not None
+                    and self.config.proxy_settings.normalize_tool_schemas
+                    else {}
+                ),
             )
         resolution = self._resolve_model(chat_payload)
         chat_payload = apply_model_override(
@@ -308,6 +320,12 @@ class GigaChatProviderAdapter:
             chat_payload = await self.request_transformer.prepare_chat(
                 payload,
                 self.giga_client,
+                **(
+                    {"forced_model": self.forced_model}
+                    if self.forced_model is not None
+                    and self.config.proxy_settings.normalize_tool_schemas
+                    else {}
+                ),
             )
         resolution = self._resolve_model(chat_payload)
         chat_payload = apply_model_override(
@@ -380,6 +398,12 @@ class GigaChatProviderAdapter:
             chat_payload = await self.request_transformer.prepare_chat_completion(
                 payload,
                 self.giga_client,
+                **(
+                    {"forced_model": self.forced_model}
+                    if self.forced_model is not None
+                    and self.config.proxy_settings.normalize_tool_schemas
+                    else {}
+                ),
             )
         resolution = self._resolve_model(chat_payload)
         chat_payload = apply_model_override(

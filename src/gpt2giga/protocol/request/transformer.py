@@ -30,8 +30,13 @@ from gpt2giga.common.tools import (
     iter_function_tool_payloads,
     map_tool_name_to_gigachat,
 )
+from gpt2giga.common.tool_schema import normalize_tool_schema
 from gpt2giga.constants import DEFAULT_MAX_AUDIO_IMAGE_TOTAL_SIZE_BYTES
 from gpt2giga.models.config import ProxyConfig
+from gpt2giga.providers.gigachat.model_resolution import (
+    resolve_upstream_model,
+    UpstreamModelRequiredError,
+)
 from gpt2giga.protocol.attachment.attachments import AttachmentProcessor
 from gpt2giga.protocol.request.params import (
     sanitize_openai_chat_parameters,
@@ -994,8 +999,39 @@ class RequestTransformer:
 
         return None
 
+    def _normalize_function_schemas(
+        self, payload: dict, *, api_mode: str, forced_model: str | None = None
+    ) -> None:
+        """Adapt schemas only for an explicitly resolved GigaChat-2 model."""
+        if not self.config.proxy_settings.normalize_tool_schemas:
+            return
+        try:
+            resolution = resolve_upstream_model(
+                payload, self.config, forced_model=forced_model, api_mode=api_mode
+            )
+        except UpstreamModelRequiredError:
+            return
+        model = resolution.model
+        if not isinstance(model, str) or not (
+            model == "GigaChat-2" or model.startswith("GigaChat-2-")
+        ):
+            return
+        functions = payload.get("functions")
+        if isinstance(functions, list):
+            functions = [self._dump_mapping(fn) for fn in functions]
+            for function in functions:
+                if "parameters" in function:
+                    function["parameters"] = normalize_tool_schema(
+                        function["parameters"]
+                    )
+            payload["functions"] = functions
+
     async def _finalize_chat_transformation(
-        self, transformed_data: dict, giga_client: Optional[GigaChat] = None
+        self,
+        transformed_data: dict,
+        giga_client: Optional[GigaChat] = None,
+        *,
+        forced_model: str | None = None,
     ) -> Dict[str, Any]:
         """Common logic for message transformation and logging."""
         reasoning_max_tokens = transformed_data.pop(
@@ -1023,6 +1059,9 @@ class RequestTransformer:
             transformed_data.pop("model", None)
             if isinstance(additional_fields, dict):
                 additional_fields.pop("model", None)
+        self._normalize_function_schemas(
+            transformed_data, api_mode="v1", forced_model=forced_model
+        )
         functions = transformed_data.get("functions")
         if isinstance(functions, list):
             transformed_data["functions"] = [
@@ -1069,9 +1108,16 @@ class RequestTransformer:
             message.pop("tools_state_id", None)
 
     async def _finalize_chat_completion_transformation(
-        self, transformed_data: dict, giga_client: Optional[GigaChat] = None
+        self,
+        transformed_data: dict,
+        giga_client: Optional[GigaChat] = None,
+        *,
+        forced_model: str | None = None,
     ) -> ChatCompletionRequest:
         """Build a GigaChat chat completion request."""
+        self._normalize_function_schemas(
+            transformed_data, api_mode="v2", forced_model=forced_model
+        )
         transformed_data["messages"] = await self.transform_messages(
             transformed_data.get("messages", []),
             giga_client,
@@ -1502,7 +1548,11 @@ class RequestTransformer:
         }
 
     async def prepare_chat(
-        self, data: dict, giga_client: Optional[GigaChat] = None
+        self,
+        data: dict,
+        giga_client: Optional[GigaChat] = None,
+        *,
+        forced_model: str | None = None,
     ) -> Dict[str, Any]:
         """Prepare a legacy GigaChat chat request."""
         transformed_data = self.transform_chat_parameters(
@@ -1510,10 +1560,16 @@ class RequestTransformer:
             allow_builtin_tools=False,
             allow_parallel_tool_calls=False,
         )
-        return await self._finalize_chat_transformation(transformed_data, giga_client)
+        return await self._finalize_chat_transformation(
+            transformed_data, giga_client, forced_model=forced_model
+        )
 
     async def prepare_chat_completion(
-        self, data: dict, giga_client: Optional[GigaChat] = None
+        self,
+        data: dict,
+        giga_client: Optional[GigaChat] = None,
+        *,
+        forced_model: str | None = None,
     ) -> ChatCompletionRequest:
         """Prepare a GigaChat chat completion request."""
         transformed_data = self.transform_chat_parameters(
@@ -1524,6 +1580,7 @@ class RequestTransformer:
         return await self._finalize_chat_completion_transformation(
             transformed_data,
             giga_client,
+            forced_model=forced_model,
         )
 
     async def prepare_response_chat(

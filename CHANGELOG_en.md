@@ -5,6 +5,13 @@ All notable changes to the gpt2giga project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.2] - 2026-11-05
+
+### Fixed
+
+- **GigaChat TLS (#243)**: bundle the public Russian Trusted Root CA and add it to the client SSL context when TLS verification is enabled. Explicit CA bundles and SSL contexts retain priority; `GIGACHAT_USE_BUNDLED_CA=False` disables the addition. System trust stores are unchanged.
+- **GigaChat-2 tool schemas (#249)**: opt-in `GPT2GIGA_NORMALIZE_TOOL_SCHEMAS=True` adapts `anyOf`/`oneOf`, type lists, and objects without `properties`. Use the effective upstream model for both API v1/v2; preserve GigaChat-3 and unknown-model schemas. The conversion is disabled by default and may change schema constraints.
+
 ## [0.3.1] - 2026-11-05
 
 ### Changed

@@ -197,11 +197,20 @@ Common upstream settings:
 | `GIGACHAT_SESSION_ID` | empty | Default upstream `X-Session-ID`; an incoming request header overrides it. Use a distinct identifier per conversation. Cache hits are not guaranteed. |
 | `GIGACHAT_PROFANITY_CHECK` | SDK default | Upstream profanity check flag. |
 | `GIGACHAT_VERIFY_SSL_CERTS` | SDK default | Keep `True` in production. |
+| `GIGACHAT_USE_BUNDLED_CA` | `True` | Add the packaged Russian Trusted Root CA to the GigaChat client trust store. |
 | `GIGACHAT_TIMEOUT` | SDK default | Upstream request timeout. |
 | `GIGACHAT_MAX_CONNECTIONS` | SDK default | Global SDK/HTTP connection cap. |
 | `GIGACHAT_MAX_RETRIES` | SDK default | SDK retry count for transient upstream errors. |
 
 GigaChat also supports TLS client certificate settings: `GIGACHAT_CA_BUNDLE_FILE`, `GIGACHAT_CERT_FILE`, `GIGACHAT_KEY_FILE`, `GIGACHAT_KEY_FILE_PASSWORD`.
+
+With TLS verification enabled, the gateway adds the bundled public Russian Trusted
+Root CA to its GigaChat client context, alongside certifi (or `SSL_CERT_FILE` /
+`SSL_CERT_DIR`). This applies to API and OAuth requests, including pass-token clients.
+An explicit `GIGACHAT_CA_BUNDLE_FILE` or SDK `ssl_context` takes precedence.
+`GIGACHAT_USE_BUNDLED_CA=False` disables the addition. No system trust store is
+modified and no certificates are downloaded at runtime. See the
+[official certificate guidance](https://developers.sber.ru/docs/ru/gigachat/certificates).
 
 Set `GIGACHAT_MODEL` explicitly for predictable routing. With
 `GPT2GIGA_PASS_MODEL=True`, the gateway can accept a non-empty request model;
@@ -211,6 +220,26 @@ model, the gateway returns a validation error before upstream I/O.
 `GPT2GIGA_PASS_MODEL=False` is often useful for OpenAI-compatible clients that
 send a public alias instead of a GigaChat model. In that mode the alias is not
 treated as an upstream model, so `GIGACHAT_MODEL` must be configured.
+
+### Tool schema compatibility
+
+`GPT2GIGA_NORMALIZE_TOOL_SCHEMAS=True` enables lossy compatibility conversion for
+function parameters sent to **GigaChat-2 models** (including Pro/Max) over either
+backend API v1/v2, including `tools` and legacy `functions`. GigaChat-3 and unknown
+models retain their original schemas even when this flag is enabled. Selection
+uses the effective upstream model, including the configured model and forced overrides;
+the API version does not determine the model generation.
+It defaults to `False`, preserving native schemas. Enable it for clients such as
+Hermes Agent whose union schemas cause upstream 422 responses.
+
+Nested `anyOf`/`oneOf` object branches are merged: properties and duplicate-property
+enums are combined, and required fields are intersected. Objects are preferred over
+scalar alternatives; otherwise the first non-null branch is selected. Type lists
+use the first non-null type. Objects without `properties` get an empty map.
+This can narrow accepted types and relax constraints; it is not equivalent JSON
+Schema validation. References are not expanded, all-null/empty unions are retained,
+and other unsupported keywords can still be rejected upstream. Literal defaults,
+examples, and structured-output response schemas are unchanged.
 
 ## Reasoning and structured output
 
