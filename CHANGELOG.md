@@ -5,6 +5,17 @@
 Формат основан на [Keep a Changelog](https://keepachangelog.com/ru/1.0.0/),
 и проект придерживается [Семантического версионирования](https://semver.org/lang/ru/).
 
+## [0.3.1] - 2026-11-05
+
+### Изменено
+
+- **GigaChat SDK**: минимальная версия — стабильный PyPI-релиз `gigachat>=0.2.4,<0.3.0`; CI проверяет минимальный SDK 0.2.4.
+
+- **Стабильный релиз**: изменения prerelease-версий 0.3.1, включая кэширование промптов из [PR #236](https://github.com/ai-forever/gpt2giga/pull/236), [PR #237](https://github.com/ai-forever/gpt2giga/pull/237) и перечисленные ниже исправления протоколов, истории и streaming.
+- **Зависимости**: интегрированы ожидающие обновления Dependabot для Python, документации и GitHub Actions. Разрешён OpenAI SDK 3.x; aiohttp сохранён на 3.14.5 вместо отката на 3.14.4.
+- **Preview-контейнеры**: сборка Python 3.15 для amd64 и arm64 в Docker Hub и GHCR. В обоих реестрах доступны теги `preview` и `0.3.1-preview`; версионные теги — `0.3.1-python3.15-preview` в Docker Hub и `0.3.1-py3.15-preview` в GHCR. Стабильный `latest` остаётся на Python 3.13.
+- **Проверки контейнеров**: CI собирает и запускает Python 3.13 и 3.15 preview; Docker Hub публикует образы по релизным тегам и push в main.
+
 ## [0.3.1a2] - 2026-10-15
 
 ### Добавлено

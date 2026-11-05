@@ -5,6 +5,17 @@ All notable changes to the gpt2giga project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-11-05
+
+### Changed
+
+- **GigaChat SDK**: require the stable PyPI release `gigachat>=0.2.4,<0.3.0` and check 0.2.4 in minimum-SDK CI.
+
+- **Stable release**: promote the 0.3.1 prereleases, including prompt caching from [PR #236](https://github.com/ai-forever/gpt2giga/pull/236), [PR #237](https://github.com/ai-forever/gpt2giga/pull/237), and the protocol/history/stream fixes listed below.
+- **Dependencies**: integrate the pending Dependabot updates for Python, documentation, and GitHub Actions. Allow OpenAI SDK 3.x; retain aiohttp 3.14.5 instead of downgrading to 3.14.4.
+- **Container preview**: build Python 3.15 images for amd64 and arm64 in Docker Hub and GHCR. Both registries provide `preview` and `0.3.1-preview`; version-specific tags are `0.3.1-python3.15-preview` on Docker Hub and `0.3.1-py3.15-preview` on GHCR. Stable `latest` remains on Python 3.13.
+- **Container checks**: build and boot both Python 3.13 and 3.15 preview images in CI; publish Docker Hub images on release tags as well as main pushes.
+
 ## [0.3.1a2] - 2026-10-15
 
 ### Added

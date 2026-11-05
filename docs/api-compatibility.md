@@ -258,7 +258,7 @@ need them can point to `http://localhost:8090/v2`.
 
 ## SDK contract alignment
 
-The gateway installs `gigachat>=0.2.4a1,<0.3.0` from PyPI; `uv.lock` pins the
+The gateway installs `gigachat>=0.2.4,<0.3.0` from PyPI; `uv.lock` pins the
 resolved version and artifact hashes. The gateway and SDK are tested together
 with synthetic HTTP responses; these checks do not establish live model quality,
 feature permissions, cache savings, or deterministic generation.

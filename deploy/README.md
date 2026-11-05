@@ -136,3 +136,11 @@ rollback и диагностика описаны в
 ## Подробнее
 
 Production hardening, TLS, reverse proxy и optional storage/observability settings описаны в [docs/deployment.md](../docs/deployment.md).
+
+## Python 3.15 preview
+
+Для экспериментальной сборки Python 3.15 используйте
+`gigateam/gpt2giga:0.3.1-preview` или
+`ghcr.io/ai-forever/gpt2giga:0.3.1-preview` (amd64/arm64).
+Подвижный тег — `preview`; `latest` остаётся на Python 3.13.
+Для локальной сборки передайте `--build-arg PYTHON_VERSION=3.15-rc` в `docker build`.

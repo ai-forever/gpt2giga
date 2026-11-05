@@ -4,7 +4,7 @@ import httpx
 from anthropic import Anthropic
 from fastapi import FastAPI
 from gigachat.api.utils import build_headers
-from fastapi.testclient import TestClient
+from sdk_client_support import make_httpx_client
 from loguru import logger
 
 from gpt2giga.middlewares.rquid_context import RquidMiddleware
@@ -112,7 +112,7 @@ def _make_app():
 
 
 def _make_anthropic_client(app):
-    test_client = TestClient(app)
+    test_client = make_httpx_client(app)
     return Anthropic(
         api_key="test",
         base_url=str(test_client.base_url),

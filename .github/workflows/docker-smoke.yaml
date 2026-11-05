@@ -12,6 +12,13 @@ on:
       - 'README.md'
       - 'pyproject.toml'
       - '.github/workflows/docker-smoke.yaml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'Dockerfile'
+      - 'pyproject.toml'
+      - '.github/workflows/docker*.yaml'
+      - '.github/workflows/publish-ghcr.yml'
   workflow_dispatch:
 
 permissions:
@@ -19,16 +26,21 @@ permissions:
 
 jobs:
   docker-smoke:
-    name: Gateway image / build and boot
+    name: Gateway image / Python ${{ matrix.python }} / build and boot
     runs-on: ubuntu-latest
     timeout-minutes: 20
+
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.13", "3.15-rc"]
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
 
       - name: Build Docker image
-        run: docker build --build-arg PYTHON_VERSION=3.13 -t gpt2giga:smoke .
+        run: docker build --build-arg PYTHON_VERSION=${{ matrix.python }} -t gpt2giga:smoke .
 
       - name: Start container and verify health
         run: |

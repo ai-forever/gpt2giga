@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from sdk_client_support import make_httpx_client
 from pydantic import BaseModel, Field
 
 from anthropic import Anthropic
@@ -40,7 +41,7 @@ def _make_app():
 
 
 def _make_anthropic_client(app):
-    test_client = TestClient(app)
+    test_client = make_httpx_client(app)
     return Anthropic(
         api_key="test",
         base_url=str(test_client.base_url),

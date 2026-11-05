@@ -28,11 +28,11 @@
     },
     {
       "path": "openai_sdk_chat_request.json",
-      "sha256": "4b93ad271f1b46babc56284c9fe12ecd78da5cc6368ee0f8406f9c5773620893"
+      "sha256": "8ee5f72353e126b10ea31c37df32b4b3d4a9fd8cda86c0d6f06a40a00932d8a3"
     },
     {
       "path": "openai_sdk_responses_request.json",
-      "sha256": "5a2e1c5a5566b5359e144393033ac404b6712ca0c36a39400687ea4d913c29d5"
+      "sha256": "efe64bfdc6c374c006b121c5c44076afb461b42dfd71ffeeb5a9a8ca23bd4563"
     },
     {
       "path": "provider_conformance_cases.json",

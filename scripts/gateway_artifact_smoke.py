@@ -76,10 +76,8 @@ def verify_installed_gateway(
             f"installed gigachat version {gigachat_version!r} does not match "
             f"{expected_gigachat_version!r}"
         )
-    if _gigachat_specifiers(distribution.requires) != {">=0.2.4a1", "<0.3.0"}:
-        raise ArtifactSmokeError(
-            "gateway metadata must require gigachat>=0.2.4a1,<0.3.0"
-        )
+    if _gigachat_specifiers(distribution.requires) != {">=0.2.4", "<0.3.0"}:
+        raise ArtifactSmokeError("gateway metadata must require gigachat>=0.2.4,<0.3.0")
 
     scripts = {
         entry.name: entry.value

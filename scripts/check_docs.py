@@ -263,9 +263,7 @@ def check_gigachat_dependency_floor(root: Path) -> list[Issue]:
         if isinstance(dependency, str)
         and re.match(r"^gigachat(?:\s|[<>=!~])", dependency, re.IGNORECASE)
     ]
-    expected = re.compile(
-        r"^gigachat\s*>=\s*0\.2\.4a1\s*,\s*<\s*0\.3\.0$", re.IGNORECASE
-    )
+    expected = re.compile(r"^gigachat\s*>=\s*0\.2\.4\s*,\s*<\s*0\.3\.0$", re.IGNORECASE)
     if len(requirements) == 1 and expected.fullmatch(requirements[0]):
         return []
     actual = ", ".join(requirements) if requirements else "missing"
@@ -273,7 +271,7 @@ def check_gigachat_dependency_floor(root: Path) -> list[Issue]:
         Issue(
             path,
             "gigachat dependency must use the native-schema range "
-            f"'>=0.2.4a1,<0.3.0'; found {actual!r}",
+            f"'>=0.2.4,<0.3.0'; found {actual!r}",
         )
     ]
 

@@ -41,7 +41,7 @@ def test_gateway_resolves_sdk_from_pypi():
 
     assert "gigachat" not in pyproject["tool"].get("uv", {}).get("sources", {})
     sdk = next(package for package in lock["package"] if package["name"] == "gigachat")
-    assert sdk["version"] == "0.2.4a1"
+    assert sdk["version"] == "0.2.4"
     assert sdk["source"] == {"registry": "https://pypi.org/simple"}
     assert all(
         wheel["url"].startswith("https://files.pythonhosted.org/")
@@ -115,10 +115,10 @@ def test_gateway_ci_tests_minimum_sdk_from_pypi():
     assert "Gateway minimum SDK / Python ${{ matrix.python-version }}" in workflow
     assert 'python-version: ["3.10", "3.14"]' in workflow
     assert "uv venv --python ${{ matrix.python-version }} .venv-min-sdk" in workflow
-    assert '"gigachat==0.2.4a1" dist/min-sdk/gpt2giga-*.whl' in workflow
+    assert '"gigachat==0.2.4" dist/min-sdk/gpt2giga-*.whl' in workflow
     assert "dist/min-sdk/gpt2giga-*.whl" in workflow
     assert "scripts/gateway_artifact_smoke.py" in workflow
-    assert '--expected-gigachat-version "0.2.4a1"' in workflow
+    assert '--expected-gigachat-version "0.2.4"' in workflow
     assert ".venv-min-sdk/bin/gpt2giga --help" in workflow
 
 
@@ -129,7 +129,7 @@ def test_gateway_ci_installs_artifact_dependencies_without_global_prerelease_fla
     assert (
         "uv pip install --python .venv-artifact/bin/python dist/smoke/gpt2giga-*.whl"
     ) in workflow
-    assert "gigachat-0.2.4a1-py3-none-any.whl" not in workflow
+    assert "gigachat-0.2.4-py3-none-any.whl" not in workflow
     assert "test ! -e gpt2giga" in workflow
     assert ".venv-artifact/bin/python -I scripts/gateway_artifact_smoke.py" in workflow
     assert ".venv-artifact/bin/gpt2giga --help" in workflow
@@ -181,6 +181,71 @@ def test_all_workflow_filters_use_standalone_gateway_paths():
         assert path in workflows["docker-smoke.yaml"]
     for workflow_name in ("docker-smoke.yaml", "docker_image.yaml", "publish-ghcr.yml"):
         assert "'pyproject.toml'" in workflows[workflow_name]
-        assert "'gigachat-0.2.4a1-py3-none-any.whl'" not in workflows[workflow_name]
+        assert "'gigachat-0.2.4-py3-none-any.whl'" not in workflows[workflow_name]
     for path in ("'docs/**'", "'docs-site/**'", "'scripts/check_docs.py'"):
         assert path in workflows["docs-pages.yaml"]
+
+
+def test_container_preview_is_separate_from_stable_tags(tmp_path):
+    import os
+    import subprocess
+
+    workflow = yaml.safe_load(
+        (_WORKFLOW_ROOT / "docker_image.yaml").read_text(encoding="utf-8")
+    )
+    job = workflow["jobs"]["build-and-push"]
+    preview = job["strategy"]["matrix"]["include"][0]
+    assert preview == {
+        "python-version": "3.15",
+        "python-image": "3.15-rc",
+        "preview": True,
+    }
+    script = next(s["run"] for s in job["steps"] if s.get("id") == "docker_tags")
+    for python, is_preview in (("3.13", False), ("3.14", False), ("3.15", True)):
+        output = tmp_path / python
+        command = (
+            script.replace("${{ matrix.python-version }}", python)
+            .replace("${{ matrix.preview }}", "true" if is_preview else "")
+            .replace("${{ steps.get_version.outputs.VERSION }}", "0.3.1")
+        )
+        subprocess.run(
+            ["bash", "-eu", "-c", command],
+            check=True,
+            env={
+                **os.environ,
+                "GITHUB_OUTPUT": str(output),
+                "IMAGE_NAME": "gigateam/gpt2giga",
+                "GITHUB_SHA": "abc123",
+            },
+        )
+        tags = output.read_text().splitlines()[1:-1]
+        assert ("gigateam/gpt2giga:latest" in tags) == (python == "3.13")
+        assert ("gigateam/gpt2giga:0.3.1" in tags) == (python == "3.13")
+        assert ("gigateam/gpt2giga:preview" in tags) == is_preview
+        assert ("gigateam/gpt2giga:0.3.1-preview" in tags) == is_preview
+        if is_preview:
+            assert "gigateam/gpt2giga:0.3.1-python3.15-preview" in tags
+
+    ghcr = yaml.safe_load((_WORKFLOW_ROOT / "publish-ghcr.yml").read_text())
+    ghcr_job = ghcr["jobs"]["build-and-push"]
+    assert ghcr_job["strategy"]["matrix"]["include"][0] == {
+        "python": "3.15",
+        "python-image": "3.15-rc",
+        "preview": True,
+    }
+    metadata = next(s for s in ghcr_job["steps"] if s.get("id") == "meta")
+    assert metadata["with"]["flavor"] == "latest=false\n"
+    tags = metadata["with"]["tags"]
+    assert "value=latest,enable=${{ matrix.python == '3.13' }}" in tags
+    assert "value=preview,enable=${{ matrix.preview == true }}" in tags
+    assert "VERSION }}-preview,enable=${{ matrix.preview == true }}" in tags
+
+
+def test_container_preview_is_built_and_booted_in_ci():
+    workflow = yaml.safe_load((_WORKFLOW_ROOT / "docker-smoke.yaml").read_text())
+    job = workflow["jobs"]["docker-smoke"]
+    assert job["strategy"]["matrix"]["python"] == ["3.13", "3.15-rc"]
+    assert not job.get("continue-on-error", False)
+    commands = "\n".join(step.get("run", "") for step in job["steps"])
+    assert "PYTHON_VERSION=${{ matrix.python }}" in commands
+    assert "http://127.0.0.1:18090/health" in commands
