@@ -1002,8 +1002,14 @@ class RequestTransformer:
     def _normalize_function_schemas(
         self, payload: dict, *, api_mode: str, forced_model: str | None = None
     ) -> None:
-        """Adapt schemas only for an explicitly resolved GigaChat-2 model."""
+        """Adapt GigaChat-2 schemas only on the affected public endpoint."""
         if not self.config.proxy_settings.normalize_tool_schemas:
+            return
+        base_url = self.config.gigachat_settings.base_url
+        if (
+            not isinstance(base_url, str)
+            or base_url.rstrip("/") != "https://api.giga.chat/v1"
+        ):
             return
         try:
             resolution = resolve_upstream_model(

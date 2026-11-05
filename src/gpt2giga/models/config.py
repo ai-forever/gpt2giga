@@ -108,7 +108,7 @@ class ProxySettings(BaseSettings):
     )
     normalize_tool_schemas: bool = Field(
         default=False,
-        description="Lossily collapse tool-schema unions only for GigaChat-2 models; preserve GigaChat-3 and unknown models.",
+        description="Lossily collapse tool-schema unions only for GigaChat-2 at https://api.giga.chat/v1; preserve other endpoints and models.",
     )
     normalization_mode: Literal["off", "shadow", "on"] = Field(
         default="off",

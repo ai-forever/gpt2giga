@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **GigaChat TLS (#243)**: bundle the public Russian Trusted Root CA and add it to the client SSL context when TLS verification is enabled. Explicit CA bundles and SSL contexts retain priority; `GIGACHAT_USE_BUNDLED_CA=False` disables the addition. System trust stores are unchanged.
-- **GigaChat-2 tool schemas (#249)**: opt-in `GPT2GIGA_NORMALIZE_TOOL_SCHEMAS=True` adapts `anyOf`/`oneOf`, type lists, and objects without `properties`. Use the effective upstream model for both API v1/v2; preserve GigaChat-3 and unknown-model schemas. The conversion is disabled by default and may change schema constraints.
+- **GigaChat-2 tool schemas (#249)**: opt-in `GPT2GIGA_NORMALIZE_TOOL_SCHEMAS=True` adapts `anyOf`/`oneOf`, type lists, and objects without `properties`. Apply only to effective GigaChat-2 models at `https://api.giga.chat/v1` (allowing a trailing slash); preserve schemas on other endpoints and for GigaChat-3 or unknown models. The conversion is disabled by default and may change schema constraints.
 
 ## [0.3.1] - 2026-11-05
 

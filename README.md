@@ -229,8 +229,10 @@ Compose profiles, reverse proxies, TLS и hardening описаны в [Deploymen
 Явный CA bundle или SSL context имеет приоритет; отключить добавление можно через
 `GIGACHAT_USE_BUNDLED_CA=False`. Для клиентов с union-схемами инструментов
 (например, Hermes Agent) доступна опция `GPT2GIGA_NORMALIZE_TOOL_SCHEMAS=True`.
-Она применяется только к моделям GigaChat-2 и преобразует схемы с потерей части
-ограничений; по умолчанию выключена. Схемы для GigaChat-3 не меняются.
+Она применяется только к моделям GigaChat-2 на `https://api.giga.chat/v1`
+и преобразует схемы с потерей части ограничений; по умолчанию выключена.
+На других адресах, включая `staging.example.com` и
+`gateway.example.com`, а также для GigaChat-3 схемы не меняются.
 Подробнее — [Configuration](https://ai-forever.github.io/gpt2giga/configuration).
 
 ## Структура Репозитория

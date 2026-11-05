@@ -3,7 +3,7 @@ from copy import deepcopy
 import pytest
 from loguru import logger
 
-from gpt2giga.models.config import ProxyConfig, ProxySettings
+from gpt2giga.models.config import GigaChatCLI, ProxyConfig, ProxySettings
 from gpt2giga.protocol import RequestTransformer
 from gpt2giga.common.tool_schema import normalize_tool_schema
 
@@ -57,7 +57,10 @@ async def test_opt_in_tool_schema_normalization(backend, field):
         field: [fn if field == "functions" else {"type": "function", "function": fn}],
     }
     for enabled in (False, True):
-        config = ProxyConfig(proxy=ProxySettings(normalize_tool_schemas=enabled))
+        config = ProxyConfig(
+            proxy=ProxySettings(normalize_tool_schemas=enabled),
+            gigachat=GigaChatCLI(base_url="https://api.giga.chat/v1"),
+        )
         transformer = RequestTransformer(config, logger)
         if backend == "v1":
             result = await transformer.prepare_chat(data)
@@ -127,6 +130,17 @@ def test_schema_edge_cases(schema, expected):
 
 @pytest.mark.parametrize("backend", ["v1", "v2", "responses_v1", "responses_v2"])
 @pytest.mark.parametrize(
+    "base_url, affected_endpoint",
+    [
+        ("https://api.giga.chat/v1", True),
+        ("https://api.giga.chat/v1/", True),
+        ("https://staging.example.com/v1/", False),
+        ("https://gateway.example.com/v1", False),
+        ("https://api.giga.chat/v2", False),
+        ("https://other.example/v1", False),
+    ],
+)
+@pytest.mark.parametrize(
     "requested, configured, pass_model, forced, normalized",
     [
         ("GigaChat-2", "GigaChat-3", True, None, True),
@@ -146,10 +160,15 @@ def test_schema_edge_cases(schema, expected):
     ],
 )
 async def test_normalization_uses_effective_model(
-    backend, requested, configured, pass_model, forced, normalized
+    backend,
+    requested,
+    configured,
+    pass_model,
+    forced,
+    normalized,
+    base_url,
+    affected_endpoint,
 ):
-    from gpt2giga.models.config import GigaChatCLI
-
     if backend.startswith("responses") and forced:
         pytest.skip("Responses has no forced-model override")
     schema = {
@@ -158,7 +177,7 @@ async def test_normalization_uses_effective_model(
     }
     config = ProxyConfig(
         proxy=ProxySettings(normalize_tool_schemas=True, pass_model=pass_model),
-        gigachat=GigaChatCLI(model=configured),
+        gigachat=GigaChatCLI(model=configured, base_url=base_url),
     )
     transformer = RequestTransformer(config, logger)
     data = {
@@ -195,4 +214,6 @@ async def test_normalization_uses_effective_model(
         )
     else:
         actual = result.tools[0].functions.specifications[0].parameters
-    assert actual == (normalize_tool_schema(schema) if normalized else schema)
+    assert actual == (
+        normalize_tool_schema(schema) if normalized and affected_endpoint else schema
+    )

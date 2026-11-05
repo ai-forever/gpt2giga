@@ -225,7 +225,11 @@ treated as an upstream model, so `GIGACHAT_MODEL` must be configured.
 
 `GPT2GIGA_NORMALIZE_TOOL_SCHEMAS=True` enables lossy compatibility conversion for
 function parameters sent to **GigaChat-2 models** (including Pro/Max) over either
-backend API v1/v2, including `tools` and legacy `functions`. GigaChat-3 and unknown
+backend API v1/v2, including `tools` and legacy `functions`, **only when
+`GIGACHAT_BASE_URL=https://api.giga.chat/v1`** (a trailing slash is accepted).
+Other base URLs, including `https://staging.example.com/v1/` and
+`https://gateway.example.com/v1`, preserve schemas even with the flag enabled.
+GigaChat-3 and unknown
 models retain their original schemas even when this flag is enabled. Selection
 uses the effective upstream model, including the configured model and forced overrides;
 the API version does not determine the model generation.
