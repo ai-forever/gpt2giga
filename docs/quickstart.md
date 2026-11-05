@@ -6,8 +6,10 @@ gateway to GigaChat and verify each protocol with a first request.
 ## Requirements
 
 - Python 3.10–3.14 for a local run.
-- This checkout requires GigaChat Python SDK `>=0.2.4a1,<0.3.0`.
-  SDK `0.2.4a1` is available on PyPI and is installed automatically with the gateway.
+- Python 3.15 support is experimental (preview). A separate non-blocking CI job
+  runs the tests, builds the wheel/sdist, and checks the installed package.
+- This checkout requires GigaChat Python SDK `>=0.2.4,<0.3.0`.
+  SDK `0.2.4` is available on PyPI and is installed automatically with the gateway.
 - `uv` for local development.
 - Docker with the Compose plugin for a container run.
 - GigaChat credentials and scope for the target account.
@@ -61,6 +63,25 @@ Check:
 curl http://localhost:8090/health
 ```
 
+## Python 3.15 preview images
+
+Python 3.15 container support is experimental. Both registries publish
+`linux/amd64` and `linux/arm64` images:
+
+```sh
+docker pull gigateam/gpt2giga:0.3.1-preview
+docker pull ghcr.io/ai-forever/gpt2giga:0.3.1-preview
+```
+
+The moving tag is `preview`. Python-specific tags are `python3.15-preview`
+on Docker Hub and `py3.15-preview` on GHCR, also prefixed with `0.3.1-`
+for this release. The `latest` and `0.3.1` tags use Python 3.13.
+Build the preview locally with:
+
+```sh
+docker build --build-arg PYTHON_VERSION=3.15-rc -t gpt2giga:preview .
+```
+
 ## Install the gateway
 
 The package-index command installs the published stable gateway release:
@@ -70,9 +91,8 @@ uv tool install gpt2giga
 gpt2giga --help
 ```
 
-This checkout contains prerelease gateway features that may not be in that
-release. Install the checkout as described below to use them. Its GigaChat SDK
-dependency is available on PyPI; a separate local SDK wheel is no longer needed.
+The stable gateway version is 0.3.1. Its GigaChat SDK dependency is available
+on PyPI; a separate local SDK wheel is not needed.
 
 ## Run from the repository
 

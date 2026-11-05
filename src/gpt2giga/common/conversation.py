@@ -12,6 +12,7 @@ from typing import Any, Literal
 
 from starlette.requests import Request
 
+from gpt2giga.common.streaming_response import closing_stream
 from gpt2giga.core.context import (
     fingerprint_sensitive_value,
     get_request_context,
@@ -258,17 +259,18 @@ async def stitch_chat_completion_stream(
     body_iterator: AsyncIterator[str],
 ) -> AsyncIterator[str]:
     """Observe Chat Completions SSE and save state after successful completion."""
-    if turn is None:
-        async for chunk in body_iterator:
-            yield chunk
-        return
+    async with closing_stream(body_iterator):
+        if turn is None:
+            async for chunk in body_iterator:
+                yield chunk
+            return
 
-    observer = _ChatCompletionStreamConversationObserver()
-    async for chunk in body_iterator:
-        observer.observe_chunk(chunk)
-        yield chunk
-    if observer.completed:
-        await commit_conversation_turn(request, turn, observer.response_messages())
+        observer = _ChatCompletionStreamConversationObserver()
+        async for chunk in body_iterator:
+            observer.observe_chunk(chunk)
+            yield chunk
+        if observer.completed:
+            await commit_conversation_turn(request, turn, observer.response_messages())
 
 
 async def stitch_responses_stream(
@@ -277,17 +279,18 @@ async def stitch_responses_stream(
     body_iterator: AsyncIterator[str],
 ) -> AsyncIterator[str]:
     """Observe Responses SSE and save state after successful completion."""
-    if turn is None:
-        async for chunk in body_iterator:
-            yield chunk
-        return
+    async with closing_stream(body_iterator):
+        if turn is None:
+            async for chunk in body_iterator:
+                yield chunk
+            return
 
-    observer = _ResponsesStreamConversationObserver()
-    async for chunk in body_iterator:
-        observer.observe_chunk(chunk)
-        yield chunk
-    if observer.completed:
-        await commit_conversation_turn(request, turn, observer.response_messages())
+        observer = _ResponsesStreamConversationObserver()
+        async for chunk in body_iterator:
+            observer.observe_chunk(chunk)
+            yield chunk
+        if observer.completed:
+            await commit_conversation_turn(request, turn, observer.response_messages())
 
 
 async def stitch_anthropic_stream(
@@ -368,6 +371,11 @@ def anthropic_response_messages(payload: Mapping[str, Any]) -> list[dict[str, An
             tool_calls.append(
                 {
                     "type": "function",
+                    **{
+                        key: block[key]
+                        for key in ("id", "tools_state_id")
+                        if _non_empty_string(block.get(key))
+                    },
                     "function": {
                         "name": block.get("name"),
                         "arguments": block.get("input"),
@@ -447,10 +455,15 @@ def _merge_messages(
 
 
 def _is_single_new_turn(messages: list[dict[str, Any]]) -> bool:
-    if len(messages) != 1:
+    if not messages:
         return False
-    role = messages[0].get("role")
-    return role in {"function", "tool", "user"}
+    roles = [message.get("role") for message in messages]
+    if len(roles) == 1:
+        return roles[0] in {"function", "tool", "user"}
+    # One client turn may contain parallel tool results and trailing user text.
+    if roles[-1] == "user":
+        roles = roles[:-1]
+    return all(role in {"function", "tool"} for role in roles)
 
 
 def _starts_with(messages: list[dict[str, Any]], prefix: list[dict[str, Any]]) -> bool:
@@ -783,6 +796,11 @@ class _AnthropicStreamConversationObserver:
             return
         self._active_tool_call = {
             "type": "function",
+            **{
+                key: block[key]
+                for key in ("id", "tools_state_id")
+                if _non_empty_string(block.get(key))
+            },
             "function": {"name": block.get("name"), "arguments": ""},
         }
         self.tool_calls.append(self._active_tool_call)

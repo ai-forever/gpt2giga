@@ -3,6 +3,7 @@ name: Docker Image CI
 on:
   push:
     branches: [ "main" ]
+    tags: [ "v*.*.*" ]
     paths:
       - 'Dockerfile'
       - 'src/gpt2giga/**'
@@ -10,6 +11,7 @@ on:
       - 'README.md'
       - 'pyproject.toml'
       - '.github/workflows/docker_image.yaml'
+  workflow_dispatch:
 
 env:
   REGISTRY: docker.io
@@ -23,8 +25,13 @@ jobs:
     name: Gateway Docker Hub / Python ${{ matrix.python-version }}
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         python-version: ['3.10', '3.11', '3.12', '3.13', '3.14']
+        include:
+          - python-version: '3.15'
+            python-image: '3.15-rc'
+            preview: true
 
     steps:
     - uses: actions/checkout@v7
@@ -51,13 +58,8 @@ jobs:
 
         echo "VERSION=$VERSION" >> "$GITHUB_OUTPUT"
 
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v7
-      with:
-        python-version: ${{ matrix.python-version }}
-
     - name: Log in to Docker Hub
-      uses: docker/login-action@v4.6.0
+      uses: docker/login-action@v4.7.0
       with:
         registry: ${{ env.REGISTRY }}
         username: ${{ secrets.DOCKERHUB_LOGIN }}
@@ -75,12 +77,20 @@ jobs:
       run: |
         PYTHON_VERSION="${{ matrix.python-version }}"
         VERSION="${{ steps.get_version.outputs.VERSION }}"
+        SUFFIX="python${PYTHON_VERSION}"
+        if [ "${{ matrix.preview }}" = "true" ]; then
+          SUFFIX="${SUFFIX}-preview"
+        fi
 
         {
           echo "tags<<EOF"
-          echo "${IMAGE_NAME}:python${PYTHON_VERSION}"
-          echo "${IMAGE_NAME}:python${PYTHON_VERSION}-${GITHUB_SHA}"
-          echo "${IMAGE_NAME}:${VERSION}-python${PYTHON_VERSION}"
+          echo "${IMAGE_NAME}:${SUFFIX}"
+          echo "${IMAGE_NAME}:${SUFFIX}-${GITHUB_SHA}"
+          echo "${IMAGE_NAME}:${VERSION}-${SUFFIX}"
+          if [ "${{ matrix.preview }}" = "true" ]; then
+            echo "${IMAGE_NAME}:preview"
+            echo "${IMAGE_NAME}:${VERSION}-preview"
+          fi
           if [ "${PYTHON_VERSION}" = "3.13" ]; then
             echo "${IMAGE_NAME}:${VERSION}"
             echo "${IMAGE_NAME}:latest"
@@ -94,7 +104,7 @@ jobs:
         context: .
         file: ./Dockerfile
         build-args: |
-          PYTHON_VERSION=${{ matrix.python-version }}
+          PYTHON_VERSION=${{ matrix.python-image || matrix.python-version }}
         push: true
         platforms: linux/amd64,linux/arm64
         tags: ${{ steps.docker_tags.outputs.tags }}

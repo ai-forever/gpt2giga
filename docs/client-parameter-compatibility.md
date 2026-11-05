@@ -76,6 +76,8 @@ top-level fields: for example `logprobs`, `audio`, `container`, or
 `mcp_servers`. `previous_response_id` is supported for OpenAI Responses in
 GigaChat v2 mode and is mapped to `storage.thread_id`; in Responses v1 mode it is
 rejected when non-null (`store=true` is also rejected in v1).
+Native Responses tool results also need a resolvable function name; see
+[Replaying tool calls](api-compatibility.md#replaying-tool-calls).
 If the same key is explicitly placed inside a literal `extra_body`, gpt2giga
 passes it to `additional_fields`, and the GigaChat upstream determines the final
 support.

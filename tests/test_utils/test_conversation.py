@@ -62,6 +62,48 @@ async def test_stitch_chat_payload_uses_overlap_without_duplicates():
     assert second_turn.divergent is False
 
 
+@pytest.mark.parametrize("trailing_user", [False, True])
+async def test_stitch_tool_result_turn_preserves_history(trailing_user):
+    request = make_request(ProxySettings(conversation_stitching_enabled=True))
+    first = {
+        "conversation": "synthetic-tools-conversation",
+        "messages": [{"role": "user", "content": "Call both tools."}],
+    }
+    turn = await stitch_chat_payload(request, first, protocol="openai")
+    tool_calls = [
+        {
+            "id": call_id,
+            "type": "function",
+            "function": {"name": name, "arguments": "{}"},
+        }
+        for call_id, name in [("call-one", "first"), ("call-two", "second")]
+    ]
+    await commit_conversation_turn(
+        request, turn, [{"role": "assistant", "content": "", "tool_calls": tool_calls}]
+    )
+    incoming = [
+        {"role": "tool", "tool_call_id": call_id, "content": result}
+        for call_id, result in [
+            ("call-two", "Second result"),
+            ("call-one", "First result"),
+        ]
+    ]
+    if trailing_user:
+        incoming.append({"role": "user", "content": "Summarize the results."})
+    payload = {"conversation": "synthetic-tools-conversation", "messages": incoming}
+
+    next_turn = await stitch_chat_payload(request, payload, protocol="openai")
+
+    assert (
+        payload["messages"]
+        == first["messages"]
+        + [{"role": "assistant", "content": "", "tool_calls": tool_calls}]
+        + incoming
+    )
+    assert next_turn.stitched is True
+    assert next_turn.divergent is False
+
+
 async def test_stitch_chat_payload_forks_on_divergence():
     request = make_request(
         ProxySettings(

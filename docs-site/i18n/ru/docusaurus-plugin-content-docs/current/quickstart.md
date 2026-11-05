@@ -6,8 +6,10 @@ Anthropic и Gemini, и проверить каждый протокол пер�
 ## Требования
 
 - Python 3.10–3.14 для локального запуска.
-- Текущему checkout нужен GigaChat Python SDK `>=0.2.4a1,<0.3.0`.
-  SDK `0.2.4a1` опубликован в PyPI и устанавливается автоматически вместе со шлюзом.
+- Поддержка Python 3.15 экспериментальная (preview). Отдельный неблокирующий CI-job
+  запускает тесты, собирает wheel/sdist и проверяет установленный пакет.
+- Текущему checkout нужен GigaChat Python SDK `>=0.2.4,<0.3.0`.
+  SDK `0.2.4` опубликован в PyPI и устанавливается автоматически вместе со шлюзом.
 - `uv` для локальной разработки.
 - Docker с плагином Compose для контейнерного запуска.
 - Учётные данные и scope GigaChat для нужного аккаунта.
@@ -70,8 +72,7 @@ uv tool install gpt2giga
 gpt2giga --help
 ```
 
-Текущий checkout содержит prerelease-возможности gateway, которых может ещё не
-быть в этом релизе. Для доступа к ним установите checkout по инструкции ниже.
+Стабильная версия gateway — 0.3.1. Для установки checkout используйте инструкцию ниже.
 Требуемый GigaChat SDK доступен в PyPI; отдельный локальный wheel SDK больше не нужен.
 
 ## Запуск из репозитория
@@ -188,3 +189,18 @@ GPT2GIGA_PASS_TOKEN=True
 - Anthropic Messages: [examples/anthropic/README.md](https://github.com/ai-forever/gpt2giga/blob/main/examples/anthropic/README.md)
 - Gemini GenerateContent: [examples/gemini/README.md](https://github.com/ai-forever/gpt2giga/blob/main/examples/gemini/README.md)
 - Все примеры: [examples/README.md](https://github.com/ai-forever/gpt2giga/blob/main/examples/README.md)
+
+## Preview-образы Python 3.15
+
+Поддержка Python 3.15 в контейнерах экспериментальная. Оба реестра публикуют
+образы для `linux/amd64` и `linux/arm64`:
+
+```sh
+docker pull gigateam/gpt2giga:0.3.1-preview
+docker pull ghcr.io/ai-forever/gpt2giga:0.3.1-preview
+```
+
+Подвижный тег — `preview`. Теги с версией Python — `python3.15-preview`
+в Docker Hub и `py3.15-preview` в GHCR; для релиза добавляется префикс
+`0.3.1-`. Теги `latest` и `0.3.1` используют Python 3.13.
+Локальная сборка: `docker build --build-arg PYTHON_VERSION=3.15-rc -t gpt2giga:preview .`.

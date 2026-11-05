@@ -256,10 +256,10 @@ goes to the GigaChat v2 contract.
 built-in-tool capabilities evolve mostly around GigaChat v2 mode, so clients that
 need them can point to `http://localhost:8090/v2`.
 
-## SDK contract alignment in 0.3.1a1
+## SDK contract alignment
 
-The bundled `gigachat==0.2.4a1` wheel is built from SDK commit `6e9bb50`.
-The lock file records its SHA-256. The gateway and SDK are tested together
+The gateway installs `gigachat>=0.2.4,<0.3.0` from PyPI; `uv.lock` pins the
+resolved version and artifact hashes. The gateway and SDK are tested together
 with synthetic HTTP responses; these checks do not establish live model quality,
 feature permissions, cache savings, or deterministic generation.
 
@@ -272,6 +272,8 @@ feature permissions, cache savings, or deterministic generation.
 | Cached tokens | OpenAI prompt/input totals include cached tokens, with the cache count also exposed in token details. Anthropic exposes uncached `input_tokens` and separate `cache_read_input_tokens`. |
 | Responses settings | Omitted `temperature` and `top_p` are reported as `null`, including streaming responses; an omitted `store` is reported as `false`. `parallel_tool_calls` reflects the effective GigaChat request, including nested overrides; its GigaChat default is `false`. |
 | Responses history | Native v2 maps `previous_response_id` to `storage.thread_id`, omits `model` on continuation, and sends only the new input. v1 rejects `previous_response_id` and `store=true`; send full history or use `/v2/responses`. |
+| Responses model | `model` may be omitted when a configured default or upstream assistant/thread selector supplies it. An explicit client model name is preserved in the response; otherwise the upstream model or configured default is used. |
+| Responses completion | Token-limit and content-filter stops return `status="incomplete"` with `incomplete_details.reason` set to `max_output_tokens` or `content_filter`. SSE ends with `response.incomplete`; partial output is retained. |
 | Assistant/thread selectors | Native `assistant_id` and stateful storage select the upstream without an injected default model, including v1. |
 | Session header | `GIGACHAT_SESSION_ID` supplies the SDK default; request `X-Session-ID` overrides it without leaking into later requests. |
 | CLI env file | Relative `--env-path` resolves from the working directory. A missing explicit file stops startup. |
@@ -296,6 +298,18 @@ and Anthropic `tool_use` block. Keep that extension when replaying the assistant
 message or output items, for example with the Python SDK's `model_dump()`.
 The gateway uses it for the assistant turn and matches tool results by their
 original call ID, including multiple calls with the same function name.
+
+Native Responses also needs the function name for each `function_call_output`.
+Include the matching `function_call` in `input`, or set the GigaChat extension
+`name` on the result, for example:
+
+```json
+{"type": "function_call_output", "call_id": "call_123", "name": "get_weather", "output": "Sunny"}
+```
+
+`previous_response_id` alone does not recover this name. If it cannot be resolved
+from the request, the gateway returns HTTP 400 with `unsupported_semantic`
+before contacting GigaChat. Preserve `call_id` and any `tools_state_id` as well.
 
 Treat call IDs and state IDs as separate opaque strings. Do not strip their
 prefixes or replace `id` / `call_id` / `tool_use_id` with the state. SDK streaming

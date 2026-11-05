@@ -1,12 +1,14 @@
 from copy import deepcopy
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from gigachat.models.chat_completions import ChatCompletionResponse
 from loguru import logger
 
+from gpt2giga.app.factory import create_app
 from gpt2giga.models.config import ProxyConfig, ProxySettings
-from gpt2giga.protocol import ResponseProcessor
+from gpt2giga.protocol import RequestTransformer, ResponseProcessor
 from gpt2giga.routers.anthropic import router as anthropic_router
 from gpt2giga.routers.openai import router as openai_router
 
@@ -372,3 +374,248 @@ def test_anthropic_messages_stitches_by_metadata_conversation_id():
         {"role": "assistant", "content": "ok-1"},
         {"role": "user", "content": "again"},
     ]
+
+
+class MountedChatResource(FakeAChatResource):
+    async def stream(self, payload):
+        yield await self.create(payload)
+
+
+class ToolCallingChatResource(MountedChatResource):
+    async def create(self, payload):
+        if self.chat_completion_calls:
+            return await super().create(payload)
+        self.chat_completion_calls.append(deepcopy(payload))
+        return ChatCompletionResponse.model_validate(
+            {
+                "model": "GigaChat-2-Max",
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "tool_state_id": "synthetic-tools-state",
+                        "content": [
+                            {
+                                "function_call": {
+                                    "id": "call-lookup",
+                                    "name": "lookup",
+                                    "arguments": {"query": "example"},
+                                }
+                            }
+                        ],
+                    }
+                ],
+                "finish_reason": "function_call",
+                "usage": {"input_tokens": 2, "output_tokens": 3, "total_tokens": 5},
+            }
+        )
+
+
+def make_mounted_anthropic_app(*, normalization_mode):
+    app = create_app(
+        ProxyConfig(
+            proxy=ProxySettings(
+                mode="DEV",
+                gigachat_api_mode="v1",
+                conversation_stitching_enabled=True,
+                normalization_mode=normalization_mode,
+                legacy_chat_fallback=False,
+            ),
+            gigachat={"model": "GigaChat-2-Max"},
+        )
+    )
+    app.state.gigachat_client = FakeGigachat()
+    app.state.gigachat_client.achat = MountedChatResource()
+    app.state.logger = logger
+    app.state.response_processor = ResponseProcessor(logger=logger)
+    app.state.request_transformer = RequestTransformer(app.state.config, logger=logger)
+    return app
+
+
+@pytest.mark.parametrize("mode", ["v1", "v2"])
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize("normalization_mode", ["off", "on"])
+def test_mounted_anthropic_preserves_stitched_history(mode, stream, normalization_mode):
+    app = make_mounted_anthropic_app(normalization_mode=normalization_mode)
+    client = TestClient(app)
+    headers = {"x-gpt2giga-conversation-id": "synthetic-conversation"}
+
+    first = client.post(
+        f"/{mode}/messages",
+        headers=headers,
+        json={
+            "model": "GigaChat-2-Max",
+            "system": "Remember this rule.",
+            "messages": [{"role": "user", "content": "First question."}],
+            "max_tokens": 16,
+            "stream": stream,
+        },
+    )
+    second = client.post(
+        f"/{mode}/messages",
+        headers=headers,
+        json={
+            "model": "GigaChat-2-Max",
+            "messages": [{"role": "user", "content": "Second question."}],
+            "max_tokens": 16,
+            "stream": stream,
+        },
+    )
+
+    assert first.status_code == second.status_code == 200
+    upstream = app.state.gigachat_client
+    if mode == "v2":
+        payload = upstream.achat.chat_completion_calls[1].model_dump(mode="json")
+        expected_answer = "ok-v2"
+    else:
+        payload = (upstream.stream_calls if stream else upstream.achat.chat_calls)[1]
+        expected_answer = "stream-ok" if stream else "ok-1"
+    assert [message["role"] for message in payload["messages"]] == [
+        "system",
+        "user",
+        "assistant",
+        "user",
+    ]
+    assert [
+        message["content"]
+        if isinstance(message["content"], str)
+        else "".join(part.get("text", "") for part in message["content"])
+        for message in payload["messages"]
+    ] == ["Remember this rule.", "First question.", expected_answer, "Second question."]
+
+
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize("normalization_mode", ["off", "on"])
+@pytest.mark.parametrize("followup_text", [False, True])
+def test_mounted_anthropic_stitching_preserves_tool_identity(
+    stream, normalization_mode, followup_text
+):
+    app = make_mounted_anthropic_app(normalization_mode=normalization_mode)
+    upstream = ToolCallingChatResource()
+    app.state.gigachat_client.achat = upstream
+    client = TestClient(app)
+    headers = {"x-gpt2giga-conversation-id": "synthetic-tools-conversation"}
+    common = {
+        "model": "GigaChat-2-Max",
+        "max_tokens": 16,
+        "tools": [
+            {
+                "name": "lookup",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {"query": {"type": "string"}},
+                },
+            }
+        ],
+    }
+    first = client.post(
+        "/v2/messages",
+        headers=headers,
+        json={
+            **common,
+            "stream": stream,
+            "messages": [{"role": "user", "content": "Look it up."}],
+        },
+    )
+    assert first.status_code == 200, first.text
+    assert "call-lookup" in first.text
+    results = [
+        {
+            "type": "tool_result",
+            "tool_use_id": "call-lookup",
+            "content": "Found it.",
+        }
+    ]
+    if followup_text:
+        results.append({"type": "text", "text": "Summarize."})
+    second = client.post(
+        "/v2/messages",
+        headers=headers,
+        json={
+            **common,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": results,
+                }
+            ],
+        },
+    )
+
+    assert second.status_code == 200, second.text
+    messages = upstream.chat_completion_calls[1].model_dump(mode="json", by_alias=True)[
+        "messages"
+    ]
+    expected_roles = ["user", "assistant", "tool"]
+    if followup_text:
+        expected_roles.append("user")
+    assert [message["role"] for message in messages] == expected_roles
+    assert messages[1]["content"][0]["function_call"]["id"] == "call-lookup"
+    assert messages[1]["tools_state_id"] == "synthetic-tools-state"
+    assert messages[2]["content"][0]["function_result"]["id"] == "call-lookup"
+    assert messages[2]["content"][0]["function_result"]["name"] == "lookup"
+    assert messages[2]["tools_state_id"] == "synthetic-tools-state"
+
+
+@pytest.mark.parametrize("stream", [False, True])
+def test_mounted_normalized_anthropic_stitching_keeps_native_content(stream):
+    app = make_mounted_anthropic_app(normalization_mode="on")
+    client = TestClient(app)
+    payload = {
+        "model": "GigaChat-2-Max",
+        "max_tokens": 16,
+        "stream": stream,
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "First block."},
+                    {"type": "text", "text": "Second block."},
+                ],
+            },
+            {
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": "call-lookup",
+                        "name": "lookup",
+                        "input": {"query": "example"},
+                    }
+                ],
+            },
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "call-lookup",
+                        "tools_state_id": "explicit-tools-state",
+                        "content": "Found it.",
+                    }
+                ],
+            },
+        ],
+    }
+    plain = client.post("/v2/messages", json=payload)
+    first = client.post(
+        "/v2/messages",
+        headers={"x-gpt2giga-conversation-id": "synthetic-native-content"},
+        json=payload,
+    )
+    followup = client.post(
+        "/v2/messages",
+        headers={"x-gpt2giga-conversation-id": "synthetic-native-content"},
+        json={
+            "model": "GigaChat-2-Max",
+            "max_tokens": 16,
+            "stream": stream,
+            "messages": [{"role": "user", "content": "Next question."}],
+        },
+    )
+
+    assert plain.status_code == first.status_code == followup.status_code == 200
+    calls = app.state.gigachat_client.achat.chat_completion_calls
+    original = calls[0].model_dump(mode="json", by_alias=True)["messages"]
+    assert original[2]["tools_state_id"] == "explicit-tools-state"
+    assert calls[1].model_dump(mode="json", by_alias=True)["messages"] == original
+    assert calls[2].model_dump(mode="json", by_alias=True)["messages"][:3] == original

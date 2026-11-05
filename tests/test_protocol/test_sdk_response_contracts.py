@@ -1,4 +1,4 @@
-"""Contract regressions for SDK 0.2.4a1 (6e9bb50) and provider cache accounting."""
+"""Contract regressions for SDK 0.2.4 and provider cache accounting."""
 
 import copy
 import json

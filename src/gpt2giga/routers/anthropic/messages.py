@@ -8,6 +8,7 @@ from fastapi.responses import StreamingResponse
 
 from gpt2giga.app_state import get_gigachat_client, get_model_concurrency_limiter
 from gpt2giga.common.api_mode import resolve_gigachat_api_mode
+from gpt2giga.common.cache_session import apply_cache_session_id
 from gpt2giga.common.client_params import ClientCompatibilityError
 from gpt2giga.common.conversation import (
     commit_anthropic_response,
@@ -51,7 +52,9 @@ from gpt2giga.protocols.anthropic import (
     normalized_chat_response_to_anthropic,
 )
 from gpt2giga.protocols.normalized import BridgeMatrixAdmissionError, PublicProtocol
+from gpt2giga.protocols.openai import OpenAIProtocolAdapter
 from gpt2giga.providers.gigachat import GigaChatProviderAdapter
+from gpt2giga.providers.gigachat.adapter import normalized_chat_to_openai_payload
 from gpt2giga.providers.gigachat.model_resolution import resolve_upstream_model
 from gpt2giga.providers.profiles import (
     ProviderAliasError,
@@ -149,11 +152,6 @@ async def messages(request: Request):
         openai_data["conversation"] = data["conversation"]
     if "metadata" in data:
         openai_data["metadata"] = data["metadata"]
-    conversation_turn = await stitch_chat_payload(
-        request,
-        openai_data,
-        protocol="anthropic",
-    )
     mode = resolve_gigachat_api_mode(request)
 
     normalized_response = await _try_normalized_non_stream_message(
@@ -161,7 +159,6 @@ async def messages(request: Request):
         data,
         openai_data=openai_data,
         request_options=request_options,
-        conversation_turn=conversation_turn,
         pinned_model=pinned_model,
     )
     if normalized_response is not None:
@@ -172,11 +169,16 @@ async def messages(request: Request):
         data,
         openai_data=openai_data,
         request_options=request_options,
-        conversation_turn=conversation_turn,
         pinned_model=pinned_model,
     )
     if normalized_stream is not None:
         return normalized_stream
+
+    conversation_turn = await stitch_chat_payload(
+        request,
+        openai_data,
+        protocol="anthropic",
+    )
 
     if mode == "v2":
         async with gigachat_request_options(giga_client, request_options):
@@ -197,6 +199,9 @@ async def messages(request: Request):
         chat_request = apply_model_override(
             chat_request,
             resolution.model if resolution.source == "forced" else None,
+        )
+        request_options = apply_cache_session_id(
+            request, chat_request, request_options, model=resolution.limiter_key
         )
         effective_model = resolution.limiter_key
         update_request_context(
@@ -269,6 +274,9 @@ async def messages(request: Request):
     chat_messages = apply_model_override(
         chat_messages,
         resolution.model if resolution.source == "forced" else None,
+    )
+    request_options = apply_cache_session_id(
+        request, chat_messages, request_options, model=resolution.limiter_key
     )
     effective_model = resolution.limiter_key
     update_request_context(
@@ -364,7 +372,6 @@ async def _try_normalized_non_stream_message(
     *,
     openai_data: dict[str, Any],
     request_options: Any,
-    conversation_turn: Any,
     pinned_model: str | None,
 ) -> dict[str, Any] | None:
     settings = _normalization_settings(request)
@@ -380,6 +387,21 @@ async def _try_normalized_non_stream_message(
             payload,
             context=context,
         )
+        openai_data = {
+            **openai_data,
+            "messages": normalized_chat_to_openai_payload(normalized_request)[
+                "messages"
+            ],
+        }
+        conversation_turn = await stitch_chat_payload(
+            request, openai_data, protocol="anthropic"
+        )
+        if conversation_turn is not None:
+            normalized_request.messages = (
+                OpenAIProtocolAdapter()
+                .chat_to_normalized({"messages": openai_data["messages"]})
+                .messages
+            )
         normalized_response = await _provider_adapter(
             request,
             normalized_request=normalized_request,
@@ -416,7 +438,6 @@ async def _try_normalized_stream_message(
     *,
     openai_data: dict[str, Any],
     request_options: Any,
-    conversation_turn: Any,
     pinned_model: str | None,
 ) -> StreamingResponse | None:
     settings = _normalization_settings(request)
@@ -432,6 +453,21 @@ async def _try_normalized_stream_message(
             payload,
             context=context,
         )
+        openai_data = {
+            **openai_data,
+            "messages": normalized_chat_to_openai_payload(normalized_request)[
+                "messages"
+            ],
+        }
+        conversation_turn = await stitch_chat_payload(
+            request, openai_data, protocol="anthropic"
+        )
+        if conversation_turn is not None:
+            normalized_request.messages = (
+                OpenAIProtocolAdapter()
+                .chat_to_normalized({"messages": openai_data["messages"]})
+                .messages
+            )
         provider = _provider_adapter(
             request,
             normalized_request=normalized_request,
@@ -524,6 +560,7 @@ def _provider_adapter(
         giga_client=get_gigachat_client(request),
         model_limiter=get_model_concurrency_limiter(request),
         request_options=request_options,
+        cache_session_request=request,
         response_processor=state.response_processor if require_streaming else None,
         api_mode=resolve_gigachat_api_mode(request),
         provider_label="anthropic",

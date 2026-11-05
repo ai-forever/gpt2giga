@@ -167,6 +167,7 @@ class ResponseProcessor:
             usage=self._build_response_usage(giga_dict.get("usage")),
             response_text=response_text,
             response_metadata=response_metadata,
+            finish_reason=giga_dict["choices"][0].get("finish_reason"),
         )
         output_count = len(result.get("output", []))
         usage = result.get("usage") or {}
@@ -232,15 +233,23 @@ class ResponseProcessor:
         usage: Optional[Dict],
         response_text: dict,
         response_metadata: Optional[Mapping[str, str]] = None,
+        finish_reason: Optional[str] = None,
     ) -> dict:
         request_data = request_data or {}
+        incomplete_reason = None
+        if finish_reason in {"length", "max_tokens"}:
+            incomplete_reason = "max_output_tokens"
+        elif finish_reason == "content_filter":
+            incomplete_reason = "content_filter"
         return {
             "id": f"resp_{response_id}",
             "object": "response",
             "created_at": int(time.time()),
-            "status": "completed",
+            "status": "incomplete" if incomplete_reason else "completed",
             "error": None,
-            "incomplete_details": None,
+            "incomplete_details": (
+                {"reason": incomplete_reason} if incomplete_reason else None
+            ),
             "instructions": request_data.get("instructions"),
             "max_output_tokens": request_data.get("max_output_tokens"),
             "model": gpt_model,

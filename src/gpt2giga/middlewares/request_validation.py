@@ -11,13 +11,12 @@ from gpt2giga.models.security import DEFAULT_MAX_REQUEST_BODY_BYTES
 
 
 class RequestValidationMiddleware:
-    """Reject requests whose Content-Length exceeds the configured limit.
+    """Bound the received body before passing it to request handlers.
 
     The middleware reads the ``Content-Length`` header *before* the body is
     consumed so that obviously oversized requests are rejected early (with a
-    ``413 Request Entity Too Large`` response).
-
-    Requests without ``Content-Length`` remain subject to endpoint-level limits.
+    ``413 Request Entity Too Large`` response). Actual bytes are also counted,
+    including chunked bodies and bodies with an understated Content-Length.
     """
 
     def __init__(
@@ -42,6 +41,34 @@ class RequestValidationMiddleware:
                     response = self._too_large_response(length)
                     await response(scope, receive, send)
                     return
+
+            body = bytearray()
+            while True:
+                message = await receive()
+                if message["type"] == "http.disconnect":
+                    return
+                chunk = message.get("body", b"")
+                size = len(body) + len(chunk)
+                if size > self.max_body_bytes:
+                    await self._too_large_response(size)(scope, receive, send)
+                    return
+                body.extend(chunk)
+                if not message.get("more_body", False):
+                    break
+
+            buffered_body: bytes | None = bytes(body)
+            del body, message, chunk
+
+            async def receive_buffered():
+                nonlocal buffered_body
+                if buffered_body is not None:
+                    content = buffered_body
+                    buffered_body = None
+                    return {"type": "http.request", "body": content, "more_body": False}
+                return await receive()
+
+            await self.app(scope, receive_buffered, send)
+            return
 
         await self.app(scope, receive, send)
 

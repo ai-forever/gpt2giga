@@ -1,5 +1,6 @@
 """Explicit execution owners for the OpenAI Responses route."""
 
+from contextlib import AsyncExitStack
 from types import SimpleNamespace
 
 from fastapi import Request
@@ -13,6 +14,7 @@ from gpt2giga.app_state import (
     record_gigachat_model_catalog_snapshot,
 )
 from gpt2giga.common.api_mode import resolve_gigachat_api_mode
+from gpt2giga.common.cache_session import apply_cache_session_id
 from gpt2giga.common.client_params import ClientCompatibilityError
 from gpt2giga.common.conversation import (
     commit_responses_response,
@@ -27,6 +29,7 @@ from gpt2giga.common.streaming import (
     stream_responses_chat_completion_generator,
     stream_responses_generator,
 )
+from gpt2giga.common.streaming_response import ModelLimitedStreamingResponse
 from gpt2giga.core.context import get_request_context, update_request_context
 from gpt2giga.logger import rquid_context
 from gpt2giga.models.catalog import ModelNotFoundError
@@ -82,17 +85,25 @@ class NativeGigaChatResponsesExecutor:
                 state.config,
                 api_mode="v2",
             )
+            request_options = apply_cache_session_id(
+                request,
+                chat_request,
+                request_options,
+                model=model_resolution.limiter_key,
+            )
             update_request_context(
                 model_effective=model_resolution.model,
                 metadata={"model_source": model_resolution.source},
             )
             if stream:
-                acquired_model_limit = model_limiter.limit(
-                    model_resolution.limiter_key,
-                    provider="openai",
+                acquired_model_limit = AsyncExitStack()
+                await acquired_model_limit.enter_async_context(
+                    model_limiter.limit(
+                        model_resolution.limiter_key,
+                        provider="openai",
+                    )
                 )
-                await acquired_model_limit.__aenter__()
-                return StreamingResponse(
+                return ModelLimitedStreamingResponse(
                     observe_openai_response_stream(
                         state,
                         stream_responses_chat_completion_generator(
@@ -110,6 +121,7 @@ class NativeGigaChatResponsesExecutor:
                         context=get_request_context(),
                     ),
                     media_type="text/event-stream",
+                    acquired_model_limit=acquired_model_limit,
                 )
             async with model_limiter.limit(
                 model_resolution.limiter_key,
@@ -119,7 +131,7 @@ class NativeGigaChatResponsesExecutor:
                     response = await giga_client.achat.create(chat_request)
             adapted = adapt_chat_completion_to_chat_shape(
                 response,
-                default_model=data["model"],
+                default_model=data.get("model") or model_resolution.model or "unknown",
             )
             async with gigachat_request_options(giga_client, request_options):
                 await hydrate_chat_completion_image_files(
@@ -134,7 +146,7 @@ class NativeGigaChatResponsesExecutor:
                     "parallel_tool_calls": parallel_tool_calls_enabled(chat_request),
                 },
                 SimpleNamespace(model_dump=lambda: adapted),
-                data["model"],
+                data.get("model") or adapted["model"],
                 response_id,
             )
             await commit_responses_response(request, conversation_turn, result)
@@ -157,6 +169,9 @@ class NativeGigaChatResponsesExecutor:
             state.config,
             api_mode="v1",
         )
+        request_options = apply_cache_session_id(
+            request, chat_messages, request_options, model=model_resolution.limiter_key
+        )
         update_request_context(
             model_effective=model_resolution.model,
             metadata={"model_source": model_resolution.source},
@@ -171,7 +186,10 @@ class NativeGigaChatResponsesExecutor:
             result = state.response_processor.process_response_api(
                 {**data, "parallel_tool_calls": False},
                 response,
-                data["model"],
+                data.get("model")
+                or response.model_dump().get("model")
+                or model_resolution.model
+                or "unknown",
                 current_rquid,
             )
             await commit_responses_response(request, conversation_turn, result)
@@ -183,11 +201,13 @@ class NativeGigaChatResponsesExecutor:
             )
             return result
 
-        acquired_model_limit = model_limiter.limit(
-            model_resolution.limiter_key,
-            provider="openai",
+        acquired_model_limit = AsyncExitStack()
+        await acquired_model_limit.enter_async_context(
+            model_limiter.limit(
+                model_resolution.limiter_key,
+                provider="openai",
+            )
         )
-        await acquired_model_limit.__aenter__()
         response_stream = stream_responses_generator(
             request,
             chat_messages,
@@ -199,7 +219,7 @@ class NativeGigaChatResponsesExecutor:
             effective_model=model_resolution.limiter_key,
             acquired_model_limit=acquired_model_limit,
         )
-        return StreamingResponse(
+        return ModelLimitedStreamingResponse(
             observe_openai_response_stream(
                 state,
                 stitch_responses_stream(
@@ -211,6 +231,7 @@ class NativeGigaChatResponsesExecutor:
                 context=get_request_context(),
             ),
             media_type="text/event-stream",
+            acquired_model_limit=acquired_model_limit,
         )
 
 
@@ -427,6 +448,7 @@ async def _normalized_provider_adapter(
         giga_client=get_gigachat_client(request),
         model_limiter=get_model_concurrency_limiter(request),
         request_options=request_options,
+        cache_session_request=request,
         response_processor=state.response_processor if require_streaming else None,
         api_mode=resolve_gigachat_api_mode(request),
         forced_model=configured_model,

@@ -36,8 +36,8 @@ GigaChat не является drop-in заменой OpenAI или Anthropic AP
 
 ## Быстрый Старт
 
-Текущий checkout содержит prerelease gateway и требует GigaChat SDK
-`>=0.2.4a1,<0.3.0`. SDK `0.2.4a1` опубликован в PyPI и устанавливается
+Релиз 0.3.1 требует GigaChat SDK
+`>=0.2.4,<0.3.0`. SDK `0.2.4` опубликован в PyPI и устанавливается
 автоматически вместе со шлюзом через `uv`, pip или при сборке Docker.
 
 Из корня репозитория создайте `.env` из шаблона и заполните GigaChat credentials:
@@ -79,7 +79,9 @@ gpt2giga --help
 python -m pip install gpt2giga
 ```
 
-Поддерживается Python 3.10–3.14. Для Postgres, OpenSearch или Phoenix добавьте
+Поддерживается Python 3.10–3.14. Поддержка Python 3.15 пока экспериментальная
+(preview): отдельный неблокирующий CI-job проверяет тесты, сборку wheel/sdist
+и запуск установленного пакета. Для Postgres, OpenSearch или Phoenix добавьте
 соответствующую extra-зависимость. Например, для опубликованного релиза:
 
 ```sh
@@ -87,6 +89,18 @@ python -m pip install "gpt2giga[postgres]"
 ```
 
 При установке из текущего checkout используйте `python -m pip install ".[postgres]"`.
+
+Preview-образы Python 3.15 публикуются для `linux/amd64` и `linux/arm64`:
+
+```sh
+docker pull gigateam/gpt2giga:0.3.1-preview
+docker pull ghcr.io/ai-forever/gpt2giga:0.3.1-preview
+```
+
+Тег `preview` отслеживает текущую preview-сборку. Теги `latest` и `0.3.1`
+используют Python 3.13. Для локальной сборки preview:
+`docker build --build-arg PYTHON_VERSION=3.15-rc -t gpt2giga:preview .`.
+
 
 Минимальный OpenAI SDK вызов:
 

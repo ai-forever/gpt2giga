@@ -145,7 +145,7 @@ can be visible to other processes.
 | `GPT2GIGA_EMBEDDINGS` | `EmbeddingsGigaR` | Default embeddings model when the model from the request is not used. |
 | `GPT2GIGA_ENABLE_IMAGES` | `True` | Accept and translate supported image inputs. Disable when the deployment must reject image processing. |
 | `GPT2GIGA_DEFAULT_MAX_TOKENS` | empty | Add this positive `max_tokens` value only when the client did not provide `max_tokens`, `max_completion_tokens`, or `max_output_tokens`. Empty means no injected limit. |
-| `GPT2GIGA_MAX_REQUEST_BODY_BYTES` | `10485760` | Maximum HTTP request body size. |
+| `GPT2GIGA_MAX_REQUEST_BODY_BYTES` | `10485760` | Maximum received body size for POST/PUT/PATCH, including chunked requests without `Content-Length`. Oversized bodies return HTTP 413 before the handler runs. |
 | `GPT2GIGA_LOG_LEVEL` | `INFO` | Runtime log level. Avoid `DEBUG` in production. |
 | `GPT2GIGA_LOG_FILENAME` | `gpt2giga.log` | Runtime log file. |
 | `GPT2GIGA_LOG_MAX_SIZE` | `10485760` | Maximum log file size before rotation. |
@@ -180,7 +180,7 @@ least-recently-used eviction or shutdown; active streaming requests are never ev
 
 ## GigaChat settings
 
-The minimum supported GigaChat Python SDK version is `0.2.4a1`; the gateway keeps
+The minimum supported GigaChat Python SDK version is `0.2.4`; the gateway keeps
 the dependency within the compatible `0.2.x` series. The SDK default API base
 URL is `https://api.giga.chat/v1`.
 
@@ -323,6 +323,50 @@ GPT2GIGA_CONVERSATION_ON_DIVERGENCE=client_wins
 
 The state is kept in the process memory. With several workers/pods, use sticky
 routing or do not enable stitching.
+
+Anthropic stitching also applies in normalized mode and retains tool-call IDs
+and `tools_state_id`. A batch of tool results, optionally followed by user text,
+extends the saved history as one new turn. Gemini saves a streamed assistant
+turn only after successful completion; failed or interrupted streams do not
+replace the previous history.
+
+## Prompt-cache reuse with X-Session-ID
+
+GigaChat keeps a prefix key-value cache for a short window and reports reused
+tokens as `precached_prompt_tokens`, which the gateway surfaces as OpenAI
+`usage.prompt_tokens_details.cached_tokens` (and Anthropic
+`cache_read_input_tokens`). A stable upstream `X-Session-ID` keeps repeated
+requests on the same cache entry, so a long unchanged prefix is not reprocessed.
+
+Two independent mechanisms enable this:
+
+1. **Client header pass-through.** Any client can send `X-Session-ID`; the
+   gateway forwards it upstream without changes. `GIGACHAT_SESSION_ID` sets a
+   global default that the request header overrides.
+2. **Built session id.** For clients that cannot send custom headers, the
+   gateway can build a stable session id from the request's own stable prefix (a
+   one-way hash of the prompt text, never the raw content). Identical prefixes
+   map to the same id across workers and restarts.
+
+```dotenv
+GPT2GIGA_CACHE_SESSION_ENABLED=False
+GPT2GIGA_CACHE_SESSION_SCOPE=system
+GPT2GIGA_CACHE_SESSION_MIN_PREFIX_TOKENS=1024
+```
+
+| Variable | Default | Purpose |
+|---|---:|---|
+| `GPT2GIGA_CACHE_SESSION_ENABLED` | `False` | Build an upstream `X-Session-ID` from the request's stable prefix. |
+| `GPT2GIGA_CACHE_SESSION_SCOPE` | `system` | `system` hashes only the system prompt; `prefix` also includes the leading user turn. `system` is the default because it stays stable across turns. |
+| `GPT2GIGA_CACHE_SESSION_MIN_PREFIX_TOKENS` | `1024` | Minimum estimated prefix tokens before a built session id is applied. |
+
+The built session id applies to chat-like routes (OpenAI Chat Completions,
+OpenAI Responses, Anthropic Messages, Gemini GenerateContent) and is skipped
+when the client already supplies `X-Session-ID`, when `GIGACHAT_SESSION_ID` is
+set, or when the prefix is shorter than the configured minimum. It never changes
+the generated answer: it only affects which upstream cache entry a request
+reuses. See [Prompt caching](prompt-caching.md) for the measured cache
+behaviour.
 
 ## Per-model concurrency
 

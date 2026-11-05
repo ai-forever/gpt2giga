@@ -11,6 +11,7 @@ const sidebars: SidebarsConfig = {
         'quickstart',
         'chat-completions-bridge',
         'configuration',
+        'prompt-caching',
         'provider-profiles',
       ],
     },

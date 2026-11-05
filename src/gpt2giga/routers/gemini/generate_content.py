@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -39,6 +40,7 @@ from gpt2giga.protocols.normalized import (
     NormalizedMessage,
     NormalizedResponse,
     NormalizedStreamEvent,
+    NormalizedToolCall,
     NormalizedUsage,
     PublicProtocol,
 )
@@ -242,20 +244,11 @@ async def stream_generate_content(model: str, request: Request):
             )
             return
 
-        if not emitted_chunk:
+        if not emitted_chunk and not observer.failed:
             event = _stream_empty_end_event(
                 response_id=response_id,
                 model=requested_model,
             )
-            try:
-                observer.observe(event)
-            except Exception as exc:
-                logger = getattr(request.app.state, "logger", None)
-                if logger is not None:
-                    logger.warning(
-                        "Gemini empty stream observability observe failed: {}",
-                        exc,
-                    )
             span_events.extend(
                 build_stream_span_events(
                     event,
@@ -278,11 +271,16 @@ async def stream_generate_content(model: str, request: Request):
                     exc,
                 )
             return
-        await commit_conversation_turn(
-            request,
-            conversation_turn,
-            _normalized_response_messages(normalized_response),
-        )
+        if (
+            observer.finished
+            and not observer.failed
+            and not await request.is_disconnected()
+        ):
+            await commit_conversation_turn(
+                request,
+                conversation_turn,
+                _normalized_response_messages(normalized_response),
+            )
         await _emit_gemini_observability(
             request.app.state,
             normalized_request,
@@ -461,6 +459,7 @@ def _provider_adapter(
         giga_client=get_gigachat_client(request),
         model_limiter=get_model_concurrency_limiter(request),
         request_options=request_options,
+        cache_session_request=request,
         response_processor=state.response_processor if require_streaming else None,
         api_mode=resolve_gigachat_api_mode(request),
         provider_label="gemini",
@@ -667,13 +666,44 @@ class _GeminiStreamObserver:
         self.content_parts: list[str] = []
         self.usage: NormalizedUsage | None = None
         self.finish_reason: str | None = None
+        self.finished = False
+        self.failed = False
+        self.error: NormalizedError | None = None
+        self.tool_calls: dict[tuple[int, int], NormalizedToolCall] = {}
 
     def observe(self, event) -> None:
-        if event.type in {"content_delta", "message_end"} and event.content_delta:
+        if event.content_delta:
             self.content_parts.append(event.content_delta)
         if event.usage is not None:
             self.usage = event.usage
-        if event.type == "message_end":
+        if event.type in {"error", "cancelled"}:
+            self.failed = True
+            self.error = event.error
+        if event.type in {"tool_call_start", "tool_call_delta"} and event.tool_call:
+            call = event.tool_call
+            index = call.raw_extensions.get("index", 0)
+            key = (event.choice_index, index if isinstance(index, int) else 0)
+            arguments = call.arguments
+            arguments = (
+                arguments
+                if isinstance(arguments, str)
+                else (
+                    json.dumps(arguments, ensure_ascii=False)
+                    if arguments is not None
+                    else ""
+                )
+            )
+            if event.type == "tool_call_start":
+                self.tool_calls[key] = call.model_copy(
+                    deep=True, update={"arguments": arguments}
+                )
+            elif key in self.tool_calls:
+                existing = self.tool_calls[key]
+                existing.arguments = (existing.arguments or "") + arguments
+                existing.raw_extensions.update(call.raw_extensions)
+                existing.provider_metadata.update(call.provider_metadata)
+        if event.type == "message_end" or event.finish_reason is not None:
+            self.finished = True
             self.finish_reason = event.finish_reason
 
     def to_normalized_response(self) -> NormalizedResponse:
@@ -687,9 +717,13 @@ class _GeminiStreamObserver:
                     message=NormalizedMessage(
                         role="assistant",
                         content="".join(self.content_parts),
+                        tool_calls=[
+                            call for _, call in sorted(self.tool_calls.items())
+                        ],
                     ),
                     finish_reason=self.finish_reason,
                 )
             ],
             usage=self.usage,
+            error=self.error,
         )

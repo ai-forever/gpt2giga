@@ -31,6 +31,7 @@ from gpt2giga.common.sources import (
     has_source_marker_start,
     merge_inline_data,
 )
+from gpt2giga.common.streaming_response import closing_stream
 from gpt2giga.common.tools import find_imagegen_tool, split_gigachat_tool_name
 from gpt2giga.logger import rquid_context
 from gpt2giga.protocol.response import (
@@ -143,25 +144,31 @@ async def stream_chat_generator(
             call_indexes: dict[tuple[int, str], int] = {}
             known_state_id: Optional[str] = None
             async with gigachat_request_options(giga_client, request_options):
-                async for chunk in giga_client.astream(chat_messages):
-                    if await request.is_disconnected():
-                        if logger:
-                            logger.info(
-                                f"[{rquid}] Client disconnected during streaming"
+                async with closing_stream(
+                    giga_client.astream(chat_messages)
+                ) as _delegated_stream:
+                    async for chunk in _delegated_stream:
+                        if await request.is_disconnected():
+                            if logger:
+                                logger.info(
+                                    f"[{rquid}] Client disconnected during streaming"
+                                )
+                            break
+                        processed = (
+                            request.app.state.response_processor.process_stream_chunk(
+                                chunk,
+                                model,
+                                response_id,
+                                request_data=request_data,
                             )
-                        break
-                    processed = (
-                        request.app.state.response_processor.process_stream_chunk(
-                            chunk,
-                            model,
-                            response_id,
-                            request_data=request_data,
                         )
-                    )
-                    known_state_id = _deduplicate_tool_call_identity(
-                        processed, emitted_tool_identity, call_indexes, known_state_id
-                    )
-                    yield f"data: {json.dumps(processed)}\n\n"
+                        known_state_id = _deduplicate_tool_call_identity(
+                            processed,
+                            emitted_tool_identity,
+                            call_indexes,
+                            known_state_id,
+                        )
+                        yield f"data: {json.dumps(processed)}\n\n"
 
             response_processor = request.app.state.response_processor
             flush_stream_reasoning = getattr(
@@ -218,14 +225,16 @@ async def stream_chat_generator(
 
         if acquired_model_limit is not None:
             try:
-                async for event in emit_stream():
-                    yield event
+                async with closing_stream(emit_stream()) as _delegated_stream:
+                    async for event in _delegated_stream:
+                        yield event
             finally:
                 await acquired_model_limit.__aexit__(None, None, None)
         else:
             async with model_limiter.limit(effective_model, provider="openai"):
-                async for event in emit_stream():
-                    yield event
+                async with closing_stream(emit_stream()) as _delegated_stream:
+                    async for event in _delegated_stream:
+                        yield event
 
     except ModelConcurrencyTimeoutError:
         error_response = {
@@ -309,29 +318,35 @@ async def stream_chat_completion_generator(
             call_indexes: dict[tuple[int, str], int] = {}
             known_state_id: Optional[str] = None
             async with gigachat_request_options(giga_client, request_options):
-                async for chunk in giga_client.achat.stream(chat_request):
-                    if await request.is_disconnected():
-                        if logger:
-                            logger.info(
-                                f"[{rquid}] Client disconnected during streaming"
-                            )
-                        break
-                    adapted = adapt_chat_completion_chunk_to_chat_chunk_shape(
-                        chunk,
-                        default_model=model,
-                    )
-                    processed = (
-                        request.app.state.response_processor.process_stream_chunk(
-                            SimpleNamespace(model_dump=lambda: adapted),
-                            model,
-                            response_id,
-                            request_data=request_data,
+                async with closing_stream(
+                    giga_client.achat.stream(chat_request)
+                ) as _delegated_stream:
+                    async for chunk in _delegated_stream:
+                        if await request.is_disconnected():
+                            if logger:
+                                logger.info(
+                                    f"[{rquid}] Client disconnected during streaming"
+                                )
+                            break
+                        adapted = adapt_chat_completion_chunk_to_chat_chunk_shape(
+                            chunk,
+                            default_model=model,
                         )
-                    )
-                    known_state_id = _deduplicate_tool_call_identity(
-                        processed, emitted_tool_identity, call_indexes, known_state_id
-                    )
-                    yield f"data: {json.dumps(processed)}\n\n"
+                        processed = (
+                            request.app.state.response_processor.process_stream_chunk(
+                                SimpleNamespace(model_dump=lambda: adapted),
+                                model,
+                                response_id,
+                                request_data=request_data,
+                            )
+                        )
+                        known_state_id = _deduplicate_tool_call_identity(
+                            processed,
+                            emitted_tool_identity,
+                            call_indexes,
+                            known_state_id,
+                        )
+                        yield f"data: {json.dumps(processed)}\n\n"
 
             response_processor = request.app.state.response_processor
             flush_stream_reasoning = getattr(
@@ -388,14 +403,16 @@ async def stream_chat_completion_generator(
 
         if acquired_model_limit is not None:
             try:
-                async for event in emit_stream():
-                    yield event
+                async with closing_stream(emit_stream()) as _delegated_stream:
+                    async for event in _delegated_stream:
+                        yield event
             finally:
                 await acquired_model_limit.__aexit__(None, None, None)
         else:
             async with model_limiter.limit(effective_model, provider="openai"):
-                async for event in emit_stream():
-                    yield event
+                async with closing_stream(emit_stream()) as _delegated_stream:
+                    async for event in _delegated_stream:
+                        yield event
 
     except ModelConcurrencyTimeoutError:
         error_response = {
@@ -460,16 +477,21 @@ class _ChatCompletionResponsesStreamClient:
             async with gigachat_request_options(
                 self._giga_client, self._request_options
             ):
-                async for chunk in self._giga_client.achat.stream(chat_request):
-                    adapted = adapt_chat_completion_chunk_to_chat_chunk_shape(
-                        chunk,
-                        default_model=self._model,
-                    )
-                    await hydrate_chat_completion_image_files(
-                        adapted,
-                        self._giga_client,
-                    )
-                    yield SimpleNamespace(model_dump=lambda adapted=adapted: adapted)
+                async with closing_stream(
+                    self._giga_client.achat.stream(chat_request)
+                ) as _delegated_stream:
+                    async for chunk in _delegated_stream:
+                        adapted = adapt_chat_completion_chunk_to_chat_chunk_shape(
+                            chunk,
+                            default_model=self._model,
+                        )
+                        await hydrate_chat_completion_image_files(
+                            adapted,
+                            self._giga_client,
+                        )
+                        yield SimpleNamespace(
+                            model_dump=lambda adapted=adapted: adapted
+                        )
 
         return gen()
 
@@ -505,19 +527,22 @@ async def stream_responses_chat_completion_generator(
         request_options,
     )
 
-    async for event in stream_responses_generator(
-        request,
-        chat_request,
-        response_id,
-        giga_client=adapter_client,
-        request_data=request_data,
-        request_options=None,
-        model_limiter=model_limiter,
-        effective_model=effective_model,
-        acquired_model_limit=acquired_model_limit,
-        response_id_from_stream_metadata=True,
-    ):
-        yield event
+    async with closing_stream(
+        stream_responses_generator(
+            request,
+            chat_request,
+            response_id,
+            giga_client=adapter_client,
+            request_data=request_data,
+            request_options=None,
+            model_limiter=model_limiter,
+            effective_model=effective_model,
+            acquired_model_limit=acquired_model_limit,
+            response_id_from_stream_metadata=True,
+        )
+    ) as _delegated_stream:
+        async for event in _delegated_stream:
+            yield event
 
 
 def _accumulate_builtin_metadata(target: dict[str, Any], delta: dict[str, Any]) -> None:
@@ -703,6 +728,7 @@ async def stream_responses_generator(
     msg_id = f"msg_{response_id}"
     fc_id = f"fc_{response_id}"  # ID for function call item
     response_metadata: dict[str, str] = {}
+    incomplete_reason: str | None = None
 
     def build_reasoning_config() -> dict:
         reasoning_data = request_data.get("reasoning") if request_data else None
@@ -735,7 +761,9 @@ async def stream_responses_generator(
             "created_at": created_at,
             "status": status,
             "error": None,
-            "incomplete_details": None,
+            "incomplete_details": (
+                {"reason": incomplete_reason} if status == "incomplete" else None
+            ),
             "instructions": request_data.get("instructions") if request_data else None,
             "max_output_tokens": (
                 request_data.get("max_output_tokens") if request_data else None
@@ -1121,262 +1149,287 @@ async def stream_responses_generator(
             return events
 
         async def iterate_chunks_with_optional_prefetch():
-            stream = aio_enumerate(giga_client.astream(chat_messages))
-            if not response_id_from_stream_metadata:
+            async with (
+                closing_stream(giga_client.astream(chat_messages)) as upstream_stream,
+                closing_stream(aio_enumerate(upstream_stream)) as stream,
+            ):
+                if not response_id_from_stream_metadata:
+                    for event in response_start_events():
+                        yield event, None
+                    async for item in stream:
+                        yield None, item
+                    return
+
+                first_item = None
+                try:
+                    first_item = await anext(stream)
+                except StopAsyncIteration:
+                    # Empty upstream streams still need response start events below.
+                    pass
+                except Exception:
+                    for event in response_start_events():
+                        yield event, None
+                    raise
+                if first_item is not None:
+                    first_giga_dict = first_item[1].model_dump()
+                    response_metadata.update(
+                        extract_gigachat_response_metadata(
+                            first_giga_dict.get("x_headers")
+                        )
+                    )
+                    response_metadata.update(
+                        _extract_provider_response_metadata(first_giga_dict)
+                    )
+                    update_response_identity()
                 for event in response_start_events():
                     yield event, None
+                if first_item is not None:
+                    yield None, first_item
                 async for item in stream:
                     yield None, item
-                return
-
-            first_item = None
-            try:
-                first_item = await anext(stream)
-            except StopAsyncIteration:
-                # Empty upstream streams still need response start events below.
-                pass
-            except Exception:
-                for event in response_start_events():
-                    yield event, None
-                raise
-            if first_item is not None:
-                first_giga_dict = first_item[1].model_dump()
-                response_metadata.update(
-                    extract_gigachat_response_metadata(first_giga_dict.get("x_headers"))
-                )
-                response_metadata.update(
-                    _extract_provider_response_metadata(first_giga_dict)
-                )
-                update_response_identity()
-            for event in response_start_events():
-                yield event, None
-            if first_item is not None:
-                yield None, first_item
-            async for item in stream:
-                yield None, item
 
         async def emit_upstream_events() -> AsyncGenerator[str, None]:
             nonlocal final_usage, full_text, functions_state_id
+            nonlocal incomplete_reason
             nonlocal output_item_added, raw_full_text, reasoning_text
             nonlocal sequence_number, source_rendering_enabled, text_output_index
             async with gigachat_request_options(giga_client, request_options):
-                async for (
-                    prebuilt_event,
-                    chunk_item,
-                ) in iterate_chunks_with_optional_prefetch():
-                    if prebuilt_event is not None:
-                        yield prebuilt_event
-                        continue
-                    _i, chunk = chunk_item
-                    if await request.is_disconnected():
-                        if logger:
-                            logger.info(
-                                f"[{rquid}] Client disconnected during streaming"
-                            )
-                        break
-
-                    giga_dict = chunk.model_dump()
-                    response_metadata.update(
-                        extract_gigachat_response_metadata(giga_dict.get("x_headers"))
-                    )
-                    response_metadata.update(
-                        _extract_provider_response_metadata(giga_dict)
-                    )
-                    update_response_identity()
-                    if giga_dict.get("usage"):
-                        usage_builder = getattr(
-                            request.app.state.response_processor,
-                            "_build_response_usage",
-                            None,
-                        )
-                        final_usage = (
-                            usage_builder(giga_dict["usage"])
-                            if callable(usage_builder)
-                            else None
-                        )
-                    choice = giga_dict["choices"][0]
-                    delta = choice.get("delta", {})
-                    delta_content = _delta_text(delta.get("content"))
-                    delta_function_call = delta.get("function_call")
-                    delta_reasoning = _delta_text(delta.get("reasoning_content"))
-                    parsed_content = reasoning_parser.feed(delta_content)
-                    raw_delta_content = parsed_content.content
-                    inline_data = delta.get("inline_data")
-                    had_source_rendering = source_rendering_enabled
-                    source_rendering_enabled = (
-                        source_rendering_enabled
-                        or bool(extract_sources(inline_data or {}))
-                        or has_source_marker_start(raw_delta_content)
-                    )
-                    if (
-                        source_rendering_enabled
-                        and not had_source_rendering
-                        and full_text
-                    ):
-                        source_renderer.mark_emitted_text()
-                    delta_content = (
-                        source_renderer.feed(raw_delta_content)
-                        if source_rendering_enabled
-                        else raw_delta_content
-                    )
-                    if source_rendering_enabled:
-                        source_renderer.merge_inline_data(inline_data)
-                    if raw_delta_content:
-                        raw_full_text += raw_delta_content
-                    if parsed_content.reasoning_content:
-                        reasoning_text += parsed_content.reasoning_content
-                    if delta_reasoning:
-                        reasoning_text += delta_reasoning
-                    _accumulate_builtin_metadata(builtin_message_metadata, delta)
-                    for event in emit_builtin_tool_execution_events(
-                        delta.get("tool_executions")
-                    ):
-                        yield event
-                    for event in emit_builtin_tool_result_events():
-                        yield event
-                    for event in emit_url_annotation_events(include_unreferenced=False):
-                        yield event
-
-                    delta_tool_calls = delta.get("tool_calls")
-                    delta_state_id = (
-                        ResponseProcessor._raw_backend_state_id_from_message(delta)
-                    )
-                    if delta_state_id:
-                        functions_state_id = delta_state_id
-                        for call in function_calls.values():
-                            call.setdefault("tools_state_id", delta_state_id)
-                    if not isinstance(delta_tool_calls, list) or not delta_tool_calls:
-                        delta_tool_calls = (
-                            [{"index": 0, "function": delta_function_call}]
-                            if delta_function_call
-                            else []
-                        )
-                    for position, tool_call in enumerate(delta_tool_calls):
-                        if not isinstance(tool_call, dict):
+                async with closing_stream(
+                    iterate_chunks_with_optional_prefetch()
+                ) as _delegated_stream:
+                    async for (
+                        prebuilt_event,
+                        chunk_item,
+                    ) in _delegated_stream:
+                        if prebuilt_event is not None:
+                            yield prebuilt_event
                             continue
-                        delta_function_call = tool_call.get("function")
-                        if not isinstance(delta_function_call, dict):
-                            continue
-                        tools_state_id = (
-                            ResponseProcessor._raw_backend_state_id_from_message(
-                                tool_call
-                            )
-                            or ResponseProcessor._raw_backend_state_id_from_message(
-                                delta
-                            )
-                            or functions_state_id
-                        )
-                        if functions_state_id is None:
-                            functions_state_id = tools_state_id
-                        call_index = tool_call.get("index", position)
-                        call_id = (
-                            tool_call.get("id")
-                            or delta_function_call.get("id")
-                            or delta_function_call.get("id_")
-                        )
-                        if isinstance(call_id, str) and call_id:
-                            call_index = function_indexes.setdefault(
-                                call_id, len(function_indexes)
-                            )
-                        function_call_data = function_calls.get(call_index)
-                        tool_name, namespace = split_gigachat_tool_name(
-                            delta_function_call.get("name", ""),
-                            request_tools=(
-                                request_data.get("tools") if request_data else None
-                            ),
-                        )
-                        if function_call_data is None:
-                            output_index = len(function_calls)
-                            item_id = (
-                                fc_id
-                                if output_index == 0
-                                else f"{fc_id}_{output_index}"
-                            )
-                            function_call_data = {
-                                "id": item_id,
-                                "type": "function_call",
-                                "status": "in_progress",
-                                "name": tool_name,
-                                "arguments": "",
-                                "call_id": tool_call.get("id")
-                                or delta_function_call.get("id")
-                                or delta_function_call.get("id_")
-                                or (
-                                    f"call_{response_id}"
-                                    if output_index == 0
-                                    else f"call_{response_id}_{output_index}"
-                                ),
-                            }
-                            if namespace:
-                                function_call_data["namespace"] = namespace
-                            if tools_state_id:
-                                function_call_data["tools_state_id"] = tools_state_id
-                            function_calls[call_index] = function_call_data
-                            function_call_argument_parts[call_index] = []
-                            yield emit_sequenced_event(
-                                "response.output_item.added",
-                                {
-                                    "output_index": output_index,
-                                    "item": dict(function_call_data),
-                                },
-                            )
-                            output_item_added = True
-                        output_index = list(function_calls).index(call_index)
-                        if tools_state_id:
-                            function_call_data["tools_state_id"] = tools_state_id
-                        if delta_function_call.get("name"):
-                            function_call_data["name"] = tool_name
-                            if namespace:
-                                function_call_data["namespace"] = namespace
-                        args = delta_function_call.get("arguments")
-                        if args is not None:
-                            args_str = (
-                                json.dumps(args, ensure_ascii=False)
-                                if isinstance(args, dict)
-                                else str(args)
-                            )
-                            if args_str:
-                                yield emit_sequenced_event(
-                                    "response.function_call_arguments.delta",
-                                    {
-                                        "item_id": function_call_data["id"],
-                                        "output_index": output_index,
-                                        "delta": args_str,
-                                    },
+                        _i, chunk = chunk_item
+                        if await request.is_disconnected():
+                            if logger:
+                                logger.info(
+                                    f"[{rquid}] Client disconnected during streaming"
                                 )
-                                function_call_argument_parts[call_index].append(
-                                    args_str
-                                )
+                            break
 
-                    if not delta_tool_calls and delta_content:
-                        for event in emit_text_output_start_events():
+                        giga_dict = chunk.model_dump()
+                        response_metadata.update(
+                            extract_gigachat_response_metadata(
+                                giga_dict.get("x_headers")
+                            )
+                        )
+                        response_metadata.update(
+                            _extract_provider_response_metadata(giga_dict)
+                        )
+                        update_response_identity()
+                        if giga_dict.get("usage"):
+                            usage_builder = getattr(
+                                request.app.state.response_processor,
+                                "_build_response_usage",
+                                None,
+                            )
+                            final_usage = (
+                                usage_builder(giga_dict["usage"])
+                                if callable(usage_builder)
+                                else None
+                            )
+                        choice = giga_dict["choices"][0]
+                        finish_reason = choice.get("finish_reason")
+                        if finish_reason in {"length", "max_tokens"}:
+                            incomplete_reason = "max_output_tokens"
+                        elif finish_reason == "content_filter":
+                            incomplete_reason = "content_filter"
+                        delta = choice.get("delta", {})
+                        delta_content = _delta_text(delta.get("content"))
+                        delta_function_call = delta.get("function_call")
+                        delta_reasoning = _delta_text(delta.get("reasoning_content"))
+                        parsed_content = reasoning_parser.feed(delta_content)
+                        raw_delta_content = parsed_content.content
+                        inline_data = delta.get("inline_data")
+                        had_source_rendering = source_rendering_enabled
+                        source_rendering_enabled = (
+                            source_rendering_enabled
+                            or bool(extract_sources(inline_data or {}))
+                            or has_source_marker_start(raw_delta_content)
+                        )
+                        if (
+                            source_rendering_enabled
+                            and not had_source_rendering
+                            and full_text
+                        ):
+                            source_renderer.mark_emitted_text()
+                        delta_content = (
+                            source_renderer.feed(raw_delta_content)
+                            if source_rendering_enabled
+                            else raw_delta_content
+                        )
+                        if source_rendering_enabled:
+                            source_renderer.merge_inline_data(inline_data)
+                        if raw_delta_content:
+                            raw_full_text += raw_delta_content
+                        if parsed_content.reasoning_content:
+                            reasoning_text += parsed_content.reasoning_content
+                        if delta_reasoning:
+                            reasoning_text += delta_reasoning
+                        _accumulate_builtin_metadata(builtin_message_metadata, delta)
+                        for event in emit_builtin_tool_execution_events(
+                            delta.get("tool_executions")
+                        ):
                             yield event
-
-                        full_text += delta_content
-                        yield sse_event(
-                            "response.output_text.delta",
-                            {
-                                "type": "response.output_text.delta",
-                                "item_id": msg_id,
-                                "output_index": text_output_index,
-                                "content_index": 0,
-                                "delta": delta_content,
-                                "sequence_number": sequence_number,
-                            },
-                        )
-                        sequence_number += 1
+                        for event in emit_builtin_tool_result_events():
+                            yield event
                         for event in emit_url_annotation_events(
                             include_unreferenced=False
                         ):
                             yield event
 
+                        delta_tool_calls = delta.get("tool_calls")
+                        delta_state_id = (
+                            ResponseProcessor._raw_backend_state_id_from_message(delta)
+                        )
+                        if delta_state_id:
+                            functions_state_id = delta_state_id
+                            for call in function_calls.values():
+                                call.setdefault("tools_state_id", delta_state_id)
+                        if (
+                            not isinstance(delta_tool_calls, list)
+                            or not delta_tool_calls
+                        ):
+                            delta_tool_calls = (
+                                [{"index": 0, "function": delta_function_call}]
+                                if delta_function_call
+                                else []
+                            )
+                        for position, tool_call in enumerate(delta_tool_calls):
+                            if not isinstance(tool_call, dict):
+                                continue
+                            delta_function_call = tool_call.get("function")
+                            if not isinstance(delta_function_call, dict):
+                                continue
+                            tools_state_id = (
+                                ResponseProcessor._raw_backend_state_id_from_message(
+                                    tool_call
+                                )
+                                or ResponseProcessor._raw_backend_state_id_from_message(
+                                    delta
+                                )
+                                or functions_state_id
+                            )
+                            if functions_state_id is None:
+                                functions_state_id = tools_state_id
+                            call_index = tool_call.get("index", position)
+                            call_id = (
+                                tool_call.get("id")
+                                or delta_function_call.get("id")
+                                or delta_function_call.get("id_")
+                            )
+                            if isinstance(call_id, str) and call_id:
+                                call_index = function_indexes.setdefault(
+                                    call_id, len(function_indexes)
+                                )
+                            function_call_data = function_calls.get(call_index)
+                            tool_name, namespace = split_gigachat_tool_name(
+                                delta_function_call.get("name", ""),
+                                request_tools=(
+                                    request_data.get("tools") if request_data else None
+                                ),
+                            )
+                            if function_call_data is None:
+                                output_index = len(function_calls)
+                                item_id = (
+                                    fc_id
+                                    if output_index == 0
+                                    else f"{fc_id}_{output_index}"
+                                )
+                                function_call_data = {
+                                    "id": item_id,
+                                    "type": "function_call",
+                                    "status": "in_progress",
+                                    "name": tool_name,
+                                    "arguments": "",
+                                    "call_id": tool_call.get("id")
+                                    or delta_function_call.get("id")
+                                    or delta_function_call.get("id_")
+                                    or (
+                                        f"call_{response_id}"
+                                        if output_index == 0
+                                        else f"call_{response_id}_{output_index}"
+                                    ),
+                                }
+                                if namespace:
+                                    function_call_data["namespace"] = namespace
+                                if tools_state_id:
+                                    function_call_data["tools_state_id"] = (
+                                        tools_state_id
+                                    )
+                                function_calls[call_index] = function_call_data
+                                function_call_argument_parts[call_index] = []
+                                yield emit_sequenced_event(
+                                    "response.output_item.added",
+                                    {
+                                        "output_index": output_index,
+                                        "item": dict(function_call_data),
+                                    },
+                                )
+                                output_item_added = True
+                            output_index = list(function_calls).index(call_index)
+                            if tools_state_id:
+                                function_call_data["tools_state_id"] = tools_state_id
+                            if delta_function_call.get("name"):
+                                function_call_data["name"] = tool_name
+                                if namespace:
+                                    function_call_data["namespace"] = namespace
+                            args = delta_function_call.get("arguments")
+                            if args is not None:
+                                args_str = (
+                                    json.dumps(args, ensure_ascii=False)
+                                    if isinstance(args, dict)
+                                    else str(args)
+                                )
+                                if args_str:
+                                    yield emit_sequenced_event(
+                                        "response.function_call_arguments.delta",
+                                        {
+                                            "item_id": function_call_data["id"],
+                                            "output_index": output_index,
+                                            "delta": args_str,
+                                        },
+                                    )
+                                    function_call_argument_parts[call_index].append(
+                                        args_str
+                                    )
+
+                        if not delta_tool_calls and delta_content:
+                            for event in emit_text_output_start_events():
+                                yield event
+
+                            full_text += delta_content
+                            yield sse_event(
+                                "response.output_text.delta",
+                                {
+                                    "type": "response.output_text.delta",
+                                    "item_id": msg_id,
+                                    "output_index": text_output_index,
+                                    "content_index": 0,
+                                    "delta": delta_content,
+                                    "sequence_number": sequence_number,
+                                },
+                            )
+                            sequence_number += 1
+                            for event in emit_url_annotation_events(
+                                include_unreferenced=False
+                            ):
+                                yield event
+
         if acquired_model_limit is not None:
-            async for event in emit_upstream_events():
-                yield event
+            async with closing_stream(emit_upstream_events()) as _delegated_stream:
+                async for event in _delegated_stream:
+                    yield event
         else:
             async with model_limiter.limit(effective_model, provider="openai"):
-                async for event in emit_upstream_events():
-                    yield event
+                async with closing_stream(emit_upstream_events()) as _delegated_stream:
+                    async for event in _delegated_stream:
+                        yield event
 
         flushed_reasoning = reasoning_parser.flush()
         if flushed_reasoning.content:
@@ -1407,6 +1460,8 @@ async def stream_responses_generator(
         if flushed_reasoning.reasoning_content:
             reasoning_text += flushed_reasoning.reasoning_content
 
+        final_status = "incomplete" if incomplete_reason else "completed"
+        final_event_type = f"response.{final_status}"
         if function_calls:
             for call_index, call in function_calls.items():
                 call["arguments"] = "".join(function_call_argument_parts[call_index])
@@ -1443,10 +1498,10 @@ async def stream_responses_generator(
                 )
                 final_output.append(done_item)
             yield emit_sequenced_event(
-                "response.completed",
+                final_event_type,
                 {
                     "response": build_response_obj(
-                        "completed", output=final_output, usage=final_usage
+                        final_status, output=final_output, usage=final_usage
                     )
                 },
             )
@@ -1556,11 +1611,11 @@ async def stream_responses_generator(
                     }
                 )
             yield sse_event(
-                "response.completed",
+                final_event_type,
                 {
-                    "type": "response.completed",
+                    "type": final_event_type,
                     "response": build_response_obj(
-                        "completed", output=final_output, usage=final_usage
+                        final_status, output=final_output, usage=final_usage
                     ),
                     "sequence_number": sequence_number,
                 },
