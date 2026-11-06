@@ -36,6 +36,100 @@ async def stored_file(request: Request, file_id: str):
     return resource
 
 
+async def _file_for_read(request: Request, file_id: str):
+    """Locate a caller's resource and bind its profile for Files operations only."""
+    store = get_resource_store(request)
+    resource = await store.get(get_resource_owner(request), "file", file_id)
+    runtime = getattr(request.app.state, "bridge_provider_runtime", None)
+    if resource is None and runtime is not None:
+        for profile_id in runtime._giga_settings:
+            resource = await store.get(
+                get_resource_owner(request, profile=profile_id), "file", file_id
+            )
+            if resource is not None:
+                from gpt2giga.app.providers import bind_gigachat_profile
+
+                await bind_gigachat_profile(request, profile_id)
+                break
+    if resource is None:
+        return await stored_file(request, file_id)
+    return resource
+
+
+async def validate_model_attachments(request: Request, data: dict) -> None:
+    """Apply the Files ownership gate to every accepted model-input reference.
+
+    Unknown native IDs retain their existing request-credential policy. Known
+    foreign/deleted/expired resources never fall back to native lookup.
+    """
+    from gpt2giga.common.client_params import ClientCompatibilityError
+    from gpt2giga.core.context import _infer_protocol
+    from gpt2giga.routers.openai.helpers import request_attachment_ids
+
+    references = set(request_attachment_ids(request))
+    provider = (
+        "anthropic" if _infer_protocol(request.url.path) == "anthropic" else "openai"
+    )
+
+    def collect(value):
+        if isinstance(value, list):
+            for item in value:
+                collect(item)
+        elif isinstance(value, dict):
+            for key in ("attachments", "file_ids"):
+                ids = value.get(key)
+                if isinstance(ids, list):
+                    references.update(item for item in ids if isinstance(item, str))
+            for key in ("file_id", "fileUri", "file_uri"):
+                file_id = value.get(key)
+                if isinstance(file_id, str) and file_id:
+                    references.add(file_id.removeprefix("files/"))
+            # Do not inspect user JSON, function arguments or tool schemas.
+            for key in (
+                "messages",
+                "input",
+                "contents",
+                "content",
+                "parts",
+                "source",
+                "file",
+                "fileData",
+                "file_data",
+                "extra_body",
+                "additional_fields",
+                "tools",
+                "container",
+                "mask",
+                "raw_extensions",
+                "data",
+            ):
+                collect(value.get(key))
+
+    collect(data)
+    for file_id in references:
+        try:
+            resource = await stored_file(request, file_id)
+        except HTTPException as exc:
+            if exc.status_code != 404:
+                raise
+            raise ClientCompatibilityError(
+                "File not found.",
+                provider=provider,
+                status_code=404,
+                param="attachments",
+                code="file_not_found",
+                error_type="not_found_error",
+            ) from exc
+        if resource is not None and (
+            resource.metadata.get("local") or not resource.metadata.get("upstream_id")
+        ):
+            raise ClientCompatibilityError(
+                "Local batch and result files cannot be used as model attachments.",
+                param="attachments",
+                provider=provider,
+            )
+
+
 async def upload_file_resource(
     request: Request,
     *,
@@ -44,6 +138,7 @@ async def upload_file_resource(
     mime_type: str,
     purpose: str = "user_data",
     protocol: str = "openai",
+    upload_session_id: str | None = None,
 ) -> dict:
     """Publish metadata only after a real upload or atomic local blob creation."""
     store = get_resource_store(request)
@@ -94,9 +189,14 @@ async def upload_file_resource(
     }
     existing = await store.get(owner, "file", file_id)
     try:
-        await store.put(
-            owner, "file", file_id, metadata, blob=content if is_local else None
-        )
+        if is_local and upload_session_id is not None:
+            await store.promote_blob(
+                owner, "upload", upload_session_id, "file", file_id, metadata
+            )
+        else:
+            await store.put(
+                owner, "file", file_id, metadata, blob=content if is_local else None
+            )
     except asyncio.CancelledError:
         # The store drains its write before propagating cancellation. Remove a
         # newly published resource before allowing the cancelled request to exit.
@@ -130,7 +230,7 @@ async def upload_file_resource(
 
 async def file_metadata(request: Request, file_id: str) -> dict:
     """Return stored metadata, or obtain a legacy upstream file under caller credentials."""
-    resource = await stored_file(request, file_id)
+    resource = await _file_for_read(request, file_id)
     if resource is not None:
         return resource.metadata
     options = extract_gigachat_request_options(request)
@@ -147,7 +247,7 @@ async def file_metadata(request: Request, file_id: str) -> dict:
 
 async def file_content(request: Request, file_id: str) -> bytes:
     """Read raw local/upstream bytes without base64 conversion."""
-    resource = await stored_file(request, file_id)
+    resource = await _file_for_read(request, file_id)
     if resource is not None and resource.metadata.get("local"):
         content = await get_resource_store(request).read_blob(
             get_resource_owner(request), "file", file_id
@@ -164,7 +264,7 @@ async def file_content(request: Request, file_id: str) -> bytes:
 
 async def remove_file(request: Request, file_id: str) -> None:
     """Delete upstream bytes first, then the owner's metadata and local blob."""
-    resource = await stored_file(request, file_id)
+    resource = await _file_for_read(request, file_id)
     if resource is None or not resource.metadata.get("local"):
         options = extract_gigachat_request_options(request)
         async with gigachat_request_options(
@@ -176,10 +276,27 @@ async def remove_file(request: Request, file_id: str) -> None:
     )
 
 
+async def list_stored_files(request: Request):
+    """List registered files across only the caller's configured profile scopes."""
+    store = get_resource_store(request)
+    owners = {get_resource_owner(request)}
+    runtime = getattr(request.app.state, "bridge_provider_runtime", None)
+    if runtime is not None:
+        owners.update(
+            get_resource_owner(request, profile=profile_id)
+            for profile_id in runtime._giga_settings
+        )
+    records = {}
+    for owner in sorted(owners):
+        for record in await store.list(owner, "file"):
+            records.setdefault(record.public_id, record)
+    return sorted(records.values(), key=lambda row: (row.created_at, row.public_id))
+
+
 async def list_file_metadata(request: Request) -> list[dict]:
     """Combine durable metadata with request-scoped legacy upstream documents."""
     store = get_resource_store(request)
-    records = await store.list(get_resource_owner(request), "file")
+    records = await list_stored_files(request)
     known = {record.public_id: record.metadata for record in records}
     options = extract_gigachat_request_options(
         request,

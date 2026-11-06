@@ -92,6 +92,7 @@ def build_provider_registry(
     return ProviderRegistry(
         loaded,
         loss_matrix_revision=BRIDGE_LOSS_MATRIX_V1.revision,
+        default_profile_id="native-gigachat" if path is None else None,
     )
 
 

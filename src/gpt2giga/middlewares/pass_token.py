@@ -1,3 +1,4 @@
+from contextlib import AsyncExitStack
 from starlette.types import ASGIApp, Receive, Scope, Send
 from starlette.responses import JSONResponse
 
@@ -21,6 +22,11 @@ class PassTokenMiddleware:
             await self.app(scope, receive, send)
             return
 
+        async with AsyncExitStack() as stack:
+            scope.setdefault("state", {})["provider_client_stack"] = stack
+            await self._call_with_auth(scope, receive, send)
+
+    async def _call_with_auth(self, scope: Scope, receive: Receive, send: Send) -> None:
         state = scope["app"].state
         proxy_config = getattr(state.config, "proxy_settings", None)
         scope.setdefault("state", {})["gigachat_client"] = getattr(

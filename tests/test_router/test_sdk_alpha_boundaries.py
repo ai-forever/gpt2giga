@@ -486,3 +486,158 @@ def test_gemini_sse_timeout_uses_google_status_and_safe_metadata():
             "metadata": {"gigachat_x_request_id": "upstream-timeout"},
         }
     }
+
+
+@pytest.mark.parametrize("mode", ["v1", "v2"])
+@pytest.mark.parametrize("normalization", ["off", "on"])
+async def test_reasoning_and_hosted_tool_survive_sdk_boundary(
+    mode, normalization, monkeypatch
+):
+    import gpt2giga.providers.gigachat.adapter as provider_module
+
+    monkeypatch.setattr(
+        provider_module,
+        "normalized_chat_to_openai_payload",
+        lambda _: pytest.fail(
+            "Execution must use typed SDK preparation, not the compatibility preview"
+        ),
+    )
+    seen = []
+
+    def handle(request):
+        seen.append(json.loads(request.content))
+        if mode == "v1":
+            result = {
+                "choices": [
+                    {
+                        "message": {"role": "assistant", "content": "ok"},
+                        "finish_reason": "stop",
+                        "index": 0,
+                    }
+                ],
+                "created": 1,
+                "model": "test-model",
+                "object": "chat.completion",
+                "usage": {
+                    "prompt_tokens": 1,
+                    "completion_tokens": 1,
+                    "total_tokens": 2,
+                },
+            }
+        else:
+            result = {
+                "messages": [{"role": "assistant", "content": [{"text": "ok"}]}],
+                "finish_reason": "stop",
+                "model": "test-model",
+                "usage": {"input_tokens": 1, "output_tokens": 1},
+            }
+        return httpx2.Response(200, json=result)
+
+    async with sdk_app(handle, normalization=normalization) as (client, _):
+        path, data = chat_request("openai", mode)
+        data["reasoning"] = {"effort": "high", "max_tokens": 64}
+        if mode == "v2":
+            data["tools"] = [{"type": "web_search"}]
+        response = await client.post(path, json=data)
+    assert response.status_code == 200, response.text
+    assert len(seen) == 1
+    if mode == "v1":
+        assert seen[0]["reasoning_effort"] == "high"
+        assert seen[0]["reasoning_max_tokens"] == 64
+    else:
+        assert seen[0]["model_options"]["reasoning"] == {
+            "effort": "high",
+            "max_tokens": 64,
+        }
+        assert seen[0]["tools"] == [{"web_search": {}}]
+
+
+@pytest.mark.parametrize("mode", ["v1", "v2"])
+@pytest.mark.parametrize("normalization", ["off", "on"])
+@pytest.mark.parametrize(
+    "content", ['<think>private plan</think>{"answer":1}', '{"answer":1}']
+)
+async def test_reasoning_content_is_decoded_before_projection(
+    mode, normalization, content
+):
+    def handle(request):
+        if mode == "v1":
+            result = {
+                "choices": [
+                    {
+                        "message": {"role": "assistant", "content": content},
+                        "finish_reason": "stop",
+                        "index": 0,
+                    }
+                ],
+                "created": 1,
+                "model": "test-model",
+                "object": "chat.completion",
+                "usage": {
+                    "prompt_tokens": 1,
+                    "completion_tokens": 1,
+                    "total_tokens": 2,
+                },
+            }
+        else:
+            result = {
+                "messages": [{"role": "assistant", "content": [{"text": content}]}],
+                "finish_reason": "stop",
+                "model": "test-model",
+                "usage": {"input_tokens": 1, "output_tokens": 1},
+            }
+        return httpx2.Response(200, json=result)
+
+    async with sdk_app(handle, normalization=normalization) as (client, _):
+        path, data = chat_request("openai", mode)
+        response = await client.post(path, json=data)
+    assert response.status_code == 200, response.text
+    message = response.json()["choices"][0]["message"]
+    assert json.loads(message["content"]) == {"answer": 1}
+    assert message.get("reasoning_content") == (
+        "private plan" if "<think>" in content else None
+    )
+
+
+@pytest.mark.parametrize("storage_mode", ["native", "gateway"])
+@pytest.mark.parametrize("mode", ["v1", "v2"])
+async def test_responses_done_without_semantic_finish_is_error(mode, storage_mode):
+    chunk = (
+        {
+            "choices": [
+                {"index": 0, "delta": {"role": "assistant", "content": "partial"}}
+            ]
+        }
+        if mode == "v1"
+        else {"messages": [{"role": "assistant", "content": [{"text": "partial"}]}]}
+    )
+
+    def handle(request):
+        return httpx2.Response(
+            200,
+            text=f"data: {json.dumps(chunk)}\n\ndata: [DONE]\n\n",
+            headers={"content-type": "text/event-stream"},
+        )
+
+    async with sdk_app(handle) as (client, app):
+        app.state.config.proxy_settings.responses_storage_mode = storage_mode
+        path, data = chat_request("responses", mode, stream=True)
+        response = await client.post(path, json=data)
+        frames = [
+            json.loads(line[6:])
+            for line in response.text.splitlines()
+            if line.startswith("data: ") and line != "data: [DONE]"
+        ]
+        errors = [frame for frame in frames if frame.get("type") == "error"]
+        assert len(errors) == 1, response.text
+        assert not any(
+            frame.get("type") in {"response.completed", "response.incomplete"}
+            for frame in frames
+        )
+        if storage_mode == "gateway":
+            response_id = next(
+                frame["response"]["id"]
+                for frame in frames
+                if frame["type"] == "response.created"
+            )
+            assert (await client.get(f"/v1/responses/{response_id}")).status_code == 404

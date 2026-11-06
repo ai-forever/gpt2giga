@@ -60,6 +60,14 @@ class GateGigachat:
 
 
 class RecordingTransformer:
+    async def prepare_normalized(
+        self, request, giga_client=None, *, api_mode, forced_model=None
+    ):
+        payload = await self.prepare_chat({"model": request.model}, giga_client)
+        if forced_model is not None:
+            payload["model"] = forced_model
+        return payload
+
     def __init__(self):
         self.prepared_count = 0
         self.second_prepared = asyncio.Event()
@@ -90,7 +98,7 @@ class StreamingGigachat:
             )
             yield MockResponse(
                 {
-                    "choices": [{"delta": {"content": "B"}, "finish_reason": None}],
+                    "choices": [{"delta": {"content": "B"}, "finish_reason": "stop"}],
                     "usage": None,
                 }
             )
@@ -109,6 +117,7 @@ class FakeAppState:
 class FakeStreamRequest:
     def __init__(self, client, limiter):
         self.app = SimpleNamespace(state=FakeAppState(client, limiter))
+        self.state = SimpleNamespace()
 
     async def is_disconnected(self):
         return False
@@ -142,8 +151,11 @@ async def _post_stream_response(client: httpx.AsyncClient, model: str):
 
 
 async def _wait_for_call_count(gigachat: GateGigachat, count: int) -> None:
-    while gigachat.call_count < count:
-        await asyncio.sleep(0)
+    async def wait():
+        while gigachat.call_count < count:
+            await asyncio.sleep(0)
+
+    await asyncio.wait_for(wait(), timeout=2)
 
 
 async def test_responses_non_stream_serializes_same_model() -> None:

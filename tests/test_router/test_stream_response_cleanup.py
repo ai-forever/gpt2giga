@@ -342,18 +342,12 @@ async def test_real_sdk_stream_closed_before_model_slot_release(
         def fail_conversion(*args, **kwargs):
             raise RuntimeError("synthetic stream converter failure")
 
-        if protocol == "messages" and not normalized:
-            target = "gpt2giga.protocol.anthropic.streaming"
-            monkeypatch.setattr(
-                importlib.import_module(target), "_delta_text", fail_conversion
-            )
-        else:
-            target = "gpt2giga.providers.gigachat.streaming"
-            monkeypatch.setattr(
-                importlib.import_module(target).GigaChatNormalizedStreamMapper,
-                "chunk_to_events",
-                fail_conversion,
-            )
+        target = "gpt2giga.providers.gigachat.streaming"
+        monkeypatch.setattr(
+            importlib.import_module(target).GigaChatNormalizedStreamMapper,
+            "chunk_to_events",
+            fail_conversion,
+        )
 
     class TrackedStream(httpx2.AsyncByteStream):
         closed = False

@@ -11,3 +11,12 @@ Root, /v1 и /v2 предоставляют Responses create/GET/DELETE/input_it
 Неизвестный, удалённый, истёкший или чужой snapshot даёт 404 и никогда не становится произвольным GigaChat thread ID. store=false не сохраняет response object. Ошибка, incomplete stream и замеченный disconnect не записывают успешное завершение. Streaming использует один snapshot ID. Удаление snapshot не удаляет независимые дочерние снимки; удаление conversation не удаляет snapshots.
 
 TTL берётся из resource retention, а не batch deadline. Input/output сохраняются намеренно для replay в приватном каталоге; log content capture остаётся opt-in. Сохраняйте persistent volume и namespace secret между workers/restarts. Пример: examples/openai/responses/storage/snapshots.py.
+
+
+Gateway snapshots отклоняют attachment headers и mutable native `storage`/`assistant_id`,
+включая overrides в `extra_body` и `additional_fields`, до provider I/O.
+Публичный `previous_response_id` сохраняет lineage. Ранее выданные native continuation ID
+продолжают native путь даже при включённом gateway mode. Native Responses stream требует
+semantic finish: одного транспортного `[DONE]` недостаточно для `response.completed`.
+Успешный structured result сохраняется в snapshot/history до сериализации terminal SSE;
+оборванный или некорректный stream не сохраняет успешную историю.

@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 
 from gpt2giga.api_server import create_app
 from gpt2giga.models.config import ProxyConfig, ProxySettings
+from gpt2giga.protocol import RequestTransformer
 
 
 class MockResponse:
@@ -42,6 +43,8 @@ class FakeAChatResource:
         )
 
     async def create(self, chat):
+        if hasattr(chat, "model_dump"):
+            chat = chat.model_dump(exclude_none=True)
         return MockResponse(
             {
                 "model": chat.get("model", "GigaChat"),
@@ -75,28 +78,6 @@ class FakeGigaChat:
         return None
 
 
-class FakeRequestTransformer:
-    async def prepare_chat(self, data, giga_client=None):
-        return {
-            "model": data.get("model", "giga"),
-            "messages": data.get("messages", []),
-            "tools": data.get("tools"),
-            "function_call": data.get("function_call"),
-            "functions": data.get("functions"),
-            "reasoning_effort": data.get("reasoning_effort"),
-        }
-
-    async def prepare_chat_completion(self, data, giga_client=None):
-        return {
-            "model": data.get("model", "giga"),
-            "messages": data.get("messages", []),
-            "tools": data.get("tools"),
-            "function_call": data.get("function_call"),
-            "functions": data.get("functions"),
-            "reasoning_effort": data.get("reasoning_effort"),
-        }
-
-
 def make_app(monkeypatch):
     config = ProxyConfig(
         proxy=ProxySettings(
@@ -113,7 +94,9 @@ def make_app(monkeypatch):
 
 
 def install_fake_transformer(app):
-    app.state.request_transformer = FakeRequestTransformer()
+    app.state.request_transformer = RequestTransformer(
+        app.state.config, app.state.logger
+    )
 
 
 def test_ci_smoke_health(monkeypatch):

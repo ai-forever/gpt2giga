@@ -108,6 +108,18 @@ class FakeGigachat:
 
 
 class FakeRequestTransformer:
+    async def prepare_normalized(
+        self, request, giga_client=None, *, api_mode, forced_model=None
+    ):
+        from gpt2giga.providers.gigachat.adapter import (
+            normalized_chat_to_openai_payload,
+        )
+
+        payload = normalized_chat_to_openai_payload(request)
+        if api_mode == "v2":
+            return await self.prepare_chat_completion(payload, giga_client)
+        return await self.prepare_chat(payload, giga_client)
+
     def __init__(self):
         self.chat_calls = []
         self.response_chat_calls = []

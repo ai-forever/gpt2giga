@@ -5,6 +5,7 @@ import time
 import httpx
 import pytest
 from fastapi import HTTPException
+from gigachat.exceptions import APIConnectionError
 from loguru import logger
 
 from gpt2giga.protocol import AttachmentProcessor
@@ -58,12 +59,12 @@ async def test_attachment_processor_base64_and_cache(monkeypatch):
     img_bytes = b"\xff\xd8\xff\xd9"  # минимальный jpeg маркер SOI/EOI
     data_url = "data:image/jpeg;base64," + base64.b64encode(img_bytes).decode()
 
-    id1 = await p.upload_file(client, data_url)
+    id1 = await p.upload_file(client, data_url, cache_scope="scope-a")
     assert id1 == "f1"
 
     # Повтор с тем же URL должен взять из кэша, не дергая upload_file
     before = client.calls
-    id2 = await p.upload_file(client, data_url)
+    id2 = await p.upload_file(client, data_url, cache_scope="scope-a")
     assert id2 == id1
     assert client.calls == before
 
@@ -109,7 +110,7 @@ async def test_attachment_processor_cache_ttl(monkeypatch):
     img_bytes = b"\xff\xd8\xff\xd9"
     data_url = "data:image/jpeg;base64," + base64.b64encode(img_bytes).decode()
 
-    id1 = await p.upload_file(client, data_url)
+    id1 = await p.upload_file(client, data_url, cache_scope="scope-a")
     assert id1 == "f1"
     assert client.calls == 1
 
@@ -117,7 +118,7 @@ async def test_attachment_processor_cache_ttl(monkeypatch):
     time.sleep(1.1)
 
     # Теперь должен загрузить заново
-    id2 = await p.upload_file(client, data_url)
+    id2 = await p.upload_file(client, data_url, cache_scope="scope-a")
     assert id2 == "f2"
     assert client.calls == 2
 
@@ -133,7 +134,7 @@ async def test_attachment_processor_cache_lru_eviction(monkeypatch):
     for i in range(5):
         img_bytes = f"image{i}".encode()
         data_url = f"data:image/jpeg;base64,{base64.b64encode(img_bytes).decode()}"
-        await p.upload_file(client, data_url)
+        await p.upload_file(client, data_url, cache_scope="scope-a")
 
     # Кэш не должен превышать max_size
     assert len(p._cache) <= 3
@@ -159,7 +160,7 @@ async def test_attachment_processor_clear_cache():
 
     img_bytes = b"\xff\xd8\xff\xd9"
     data_url = "data:image/jpeg;base64," + base64.b64encode(img_bytes).decode()
-    await p.upload_file(client, data_url)
+    await p.upload_file(client, data_url, cache_scope="scope-a")
 
     assert len(p._cache) == 1
 
@@ -199,8 +200,9 @@ async def test_attachment_processor_http_error(monkeypatch):
         return [ipaddress.ip_address("93.184.216.34")]
 
     monkeypatch.setattr(p, "_resolve_host_ips", fake_resolve)
-    result = await p.upload_file(client, "http://example.com/image.jpg")
-    assert result is None  # Ошибка должна вернуть None
+    with pytest.raises(APIConnectionError):
+        await p.upload_file(client, "http://example.com/image.jpg")
+    assert client.calls == 0
 
     await p.close()
 
@@ -212,7 +214,7 @@ async def test_attachment_processor_base64_image_limit():
     data_url = "data:image/jpeg;base64," + base64.b64encode(img_bytes).decode()
 
     with pytest.raises(HTTPException) as exc:
-        await p.upload_file(client, data_url)
+        await p.upload_file(client, data_url, cache_scope="scope-a")
     assert exc.value.status_code == 413
     assert client.calls == 0
 
@@ -256,7 +258,7 @@ async def test_attachment_processor_rejects_unsupported_base64_mime():
     data_url = f"data:application/zip;base64,{payload}"
 
     with pytest.raises(HTTPException) as exc:
-        await p.upload_file(client, data_url)
+        await p.upload_file(client, data_url, cache_scope="scope-a")
     assert exc.value.status_code == 415
     assert client.calls == 0
 
@@ -330,3 +332,34 @@ async def test_attachment_processor_blocks_private_ip_url():
         await p.upload_file(client, "http://10.0.0.1/image.jpg")
     assert exc.value.status_code == 400
     assert client.calls == 0
+
+
+async def test_attachment_cache_preserves_scope_metadata_and_remaining_budget():
+    processor = AttachmentProcessor(logger)
+    first, second = DummyClient(), DummyClient()
+    data_url = "data:image/jpeg;base64," + base64.b64encode(b"1234").decode()
+    a = await processor.upload_file_with_meta(first, data_url, cache_scope="owner-a")
+    b = await processor.upload_file_with_meta(second, data_url, cache_scope="owner-b")
+    again = await processor.upload_file_with_meta(
+        first, data_url, cache_scope="owner-a"
+    )
+    assert (first.calls, second.calls) == (1, 1)
+    assert a == again
+    assert a.file_size_bytes == b.file_size_bytes == 4
+    assert a.file_kind == b.file_kind == "image"
+    with pytest.raises(HTTPException) as exc:
+        await processor.upload_file_with_meta(
+            first, data_url, cache_scope="owner-a", max_audio_image_total_remaining=3
+        )
+    assert exc.value.status_code == 413
+    assert first.calls == 1
+
+
+async def test_attachment_cache_without_scope_never_reuses_native_id():
+    processor = AttachmentProcessor(logger)
+    client = DummyClient()
+    data_url = "data:image/jpeg;base64," + base64.b64encode(b"1234").decode()
+    await processor.upload_file(client, data_url)
+    await processor.upload_file(client, data_url)
+    assert client.calls == 2
+    assert not processor._cache

@@ -15,6 +15,7 @@ from urllib.parse import urljoin, urlsplit, urlunsplit
 import httpx
 from pydantic import Field, field_validator, model_validator
 
+from gpt2giga.common.streaming_response import closing_stream
 from gpt2giga.protocols.normalized import (
     BridgeFeature,
     DownstreamProtocol,
@@ -340,65 +341,69 @@ class OpenAICompatibleProviderAdapter:
             )
             return
         if self.profile.upstream_stream_mode == "buffered":
-            async for event in self._stream_buffered_chat(
-                request,
-                admission=admission,
-                sequence=sequence,
-                is_disconnected=is_disconnected,
-            ):
-                yield event
+            async with closing_stream(
+                self._stream_buffered_chat(
+                    request,
+                    admission=admission,
+                    sequence=sequence,
+                    is_disconnected=is_disconnected,
+                )
+            ) as delegated:
+                async for event in delegated:
+                    yield event
             return
         payload = normalized_chat_to_openai_compatible_payload(request)
         try:
-            async for chunk, compatibility_fallback in self._stream_chat_json(payload):
-                if not response_started:
-                    yield _message_start_event(
-                        self.profile,
-                        admission=admission,
+            async with closing_stream(self._stream_chat_json(payload)) as delegated:
+                async for chunk, compatibility_fallback in delegated:
+                    if not response_started:
+                        yield _message_start_event(
+                            self.profile,
+                            admission=admission,
+                            sequence=sequence,
+                            compatibility_fallback=compatibility_fallback,
+                        )
+                        sequence += 1
+                        response_started = True
+                    if chunk is None:
+                        saw_done = True
+                        break
+                    if await _is_disconnected(is_disconnected):
+                        yield NormalizedStreamEvent(
+                            type="cancelled",
+                            sequence=sequence,
+                            cancellation=request.cancellation,
+                            stop_reason="cancelled",
+                        )
+                        return
+                    if saw_usage:
+                        raise _protocol_error(
+                            "stream_data_after_usage",
+                            "Upstream stream continued after its usage summary.",
+                        )
+                    events = _chunk_to_events(
+                        chunk,
                         sequence=sequence,
+                        started_tool_calls=started_tool_calls,
+                        terminal_choices=terminal_choices,
+                    )
+                    _annotate_compatibility_fallback(
+                        events,
                         compatibility_fallback=compatibility_fallback,
                     )
-                    sequence += 1
-                    response_started = True
-                if chunk is None:
-                    saw_done = True
-                    break
-                if await _is_disconnected(is_disconnected):
-                    yield NormalizedStreamEvent(
-                        type="cancelled",
-                        sequence=sequence,
-                        cancellation=request.cancellation,
-                        stop_reason="cancelled",
-                    )
-                    return
-                if saw_usage:
-                    raise _protocol_error(
-                        "stream_data_after_usage",
-                        "Upstream stream continued after its usage summary.",
-                    )
-                events = _chunk_to_events(
-                    chunk,
-                    sequence=sequence,
-                    started_tool_calls=started_tool_calls,
-                    terminal_choices=terminal_choices,
-                )
-                _annotate_compatibility_fallback(
-                    events,
-                    compatibility_fallback=compatibility_fallback,
-                )
-                usage_events = [event for event in events if event.type == "usage"]
-                if usage_events and not terminal_choices:
-                    raise _protocol_error(
-                        "usage_before_stream_terminal",
-                        "Upstream stream reported usage before a terminal choice.",
-                    )
-                saw_usage = bool(usage_events)
-                for event in events:
-                    sequence = (event.sequence or sequence) + 1
-                    if event.type in {"message_end", "usage"}:
-                        pending_terminal_events.append(event)
-                    else:
-                        yield event
+                    usage_events = [event for event in events if event.type == "usage"]
+                    if usage_events and not terminal_choices:
+                        raise _protocol_error(
+                            "usage_before_stream_terminal",
+                            "Upstream stream reported usage before a terminal choice.",
+                        )
+                    saw_usage = bool(usage_events)
+                    for event in events:
+                        sequence = (event.sequence or sequence) + 1
+                        if event.type in {"message_end", "usage"}:
+                            pending_terminal_events.append(event)
+                        else:
+                            yield event
             if not saw_done or not terminal_choices:
                 raise _protocol_error(
                     "incomplete_stream", "Upstream stream was incomplete."
@@ -607,13 +612,16 @@ class OpenAICompatibleProviderAdapter:
         """Retry a pre-stream chat-template failure with textual tool history."""
         emitted = False
         try:
-            async for chunk in self._stream_json(
-                url=self.profile.chat_completions_url,
-                purpose=_REQUEST_PURPOSE_CHAT,
-                payload=payload,
-            ):
-                emitted = True
-                yield chunk, None
+            async with closing_stream(
+                self._stream_json(
+                    url=self.profile.chat_completions_url,
+                    purpose=_REQUEST_PURPOSE_CHAT,
+                    payload=payload,
+                )
+            ) as delegated:
+                async for chunk in delegated:
+                    emitted = True
+                    yield chunk, None
             return
         except OpenAICompatibleUpstreamError as exc:
             fallback_payload = _tool_history_text_replay_payload(payload)
@@ -623,12 +631,15 @@ class OpenAICompatibleProviderAdapter:
                 or fallback_payload is None
             ):
                 raise
-        async for chunk in self._stream_json(
-            url=self.profile.chat_completions_url,
-            purpose=_REQUEST_PURPOSE_CHAT,
-            payload=fallback_payload,
-        ):
-            yield chunk, _CHAT_TEMPLATE_FALLBACK
+        async with closing_stream(
+            self._stream_json(
+                url=self.profile.chat_completions_url,
+                purpose=_REQUEST_PURPOSE_CHAT,
+                payload=fallback_payload,
+            )
+        ) as delegated:
+            async for chunk in delegated:
+                yield chunk, _CHAT_TEMPLATE_FALLBACK
 
     async def _stream_json(
         self,

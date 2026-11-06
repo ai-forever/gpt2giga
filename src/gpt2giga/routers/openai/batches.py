@@ -45,7 +45,11 @@ def _jsonl(rows):
 
 async def _materialize(request: Request, resource):
     metadata = resource.metadata
-    if metadata["status"] not in TERMINAL or metadata.get("files_materialized"):
+    if (
+        metadata["status"] not in TERMINAL
+        or metadata.get("files_materialized")
+        or metadata.get("submission_state") == "unknown"
+    ):
         return resource
     originals = {row["id"]: row for row in metadata["rows"]}
     target = get_batch_target(metadata["endpoint"])
@@ -140,7 +144,17 @@ async def batch_object(request: Request, resource):
             "completed": completed,
             "failed": failed,
         },
-        "errors": None,
+        "errors": {
+            "object": "list",
+            "data": [
+                {
+                    "code": "submission_outcome_unknown",
+                    "message": "Submission outcome is unknown; inspect the upstream job before retrying.",
+                }
+            ],
+        }
+        if m.get("submission_state") == "unknown"
+        else None,
         "metadata": m.get("metadata"),
         "output_file_id": m.get("output_file_id"),
         "error_file_id": m.get("error_file_id"),

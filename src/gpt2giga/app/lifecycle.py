@@ -112,6 +112,8 @@ async def lifespan(app: FastAPI):
             retention_seconds=config.proxy_settings.resource_retention_seconds,
             max_blob_bytes=config.proxy_settings.resource_max_blob_bytes,
             max_total_blob_bytes=config.proxy_settings.resource_max_total_blob_bytes,
+            max_metadata_bytes=config.proxy_settings.resource_max_metadata_bytes,
+            max_resources=config.proxy_settings.resource_max_resources,
         )
         await app.state.resource_store.purge_expired()
         app.state.bridge_provider_runtime = BridgeProviderRuntime(app.state)

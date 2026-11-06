@@ -60,6 +60,14 @@ class GateGigachat:
 
 
 class RecordingTransformer:
+    async def prepare_normalized(
+        self, request, giga_client=None, *, api_mode, forced_model=None
+    ):
+        payload = await self.prepare_chat({"model": request.model}, giga_client)
+        if forced_model is not None:
+            payload["model"] = forced_model
+        return payload
+
     def __init__(self, *, include_model: bool = True):
         self.include_model = include_model
         self.prepared_count = 0
@@ -144,8 +152,11 @@ async def _post_chat(client: httpx.AsyncClient, model: str):
 
 
 async def _wait_for_call_count(gigachat: GateGigachat, count: int) -> None:
-    while gigachat.call_count < count:
-        await asyncio.sleep(0)
+    async def wait():
+        while gigachat.call_count < count:
+            await asyncio.sleep(0)
+
+    await asyncio.wait_for(wait(), timeout=2)
 
 
 async def test_chat_completions_non_stream_serializes_same_model() -> None:

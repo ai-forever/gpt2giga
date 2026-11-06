@@ -70,7 +70,7 @@ async def test_response_commit_checks_revision_owner_and_retention(tmp_path):
         "items": [{"id": "first"}],
         "revision": 1,
     }
-    assert await store.is_registered("response", "saved")
+    assert (await store.get("owner", "response", "saved")).metadata == {"response": {}}
     await store.commit_response(
         "owner",
         "ephemeral",

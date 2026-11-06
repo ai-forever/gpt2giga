@@ -10,11 +10,14 @@ from typing import Any
 from fastapi import HTTPException, Request
 from fastapi.encoders import jsonable_encoder
 
+from gpt2giga.app.providers import bind_gigachat_profile
+from gpt2giga.app_state import get_request_transformer
 from gpt2giga.app_state import (
     get_gigachat_client,
     get_resource_owner,
     get_resource_store,
 )
+from gpt2giga.common.files import validate_model_attachments
 from gpt2giga.common.gigachat_options import (
     extract_gigachat_request_options,
     gigachat_request_options,
@@ -30,7 +33,7 @@ from gpt2giga.providers.gigachat.model_resolution import (
     UpstreamModelRequiredError,
 )
 from gpt2giga.providers.profiles.errors import ProviderAliasError
-from gpt2giga.storage.resources import Resource
+from gpt2giga.storage.resources import Resource, ResourceStoreError
 
 TERMINAL = frozenset({"completed", "failed", "expired"})
 _STATUS = {
@@ -159,7 +162,7 @@ async def create_batch(
     rows: list[dict[str, Any]],
     metadata: dict[str, Any] | None = None,
 ) -> Resource:
-    """Submit exactly once, then publish durable mappings before returning an ID."""
+    """Persist an intent before one submit; never retry an unknown outcome."""
     rows = jsonable_encoder(rows, by_alias=True, exclude_none=True)
     if method not in {"chat_completions", "embedder"} or not rows:
         raise batch_error("A non-empty supported batch is required.")
@@ -187,6 +190,42 @@ async def create_batch(
     store = get_resource_store(request)
     if len(content) > store.max_blob_bytes:
         raise batch_error("Batch input exceeds the resource size limit.", 413)
+    profile_id = getattr(request.state, "batch_provider_profile", None)
+    if profile_id is not None:
+        await bind_gigachat_profile(request, profile_id)
+    now = time.time()
+    public_id = "batch_g2g_" + uuid.uuid4().hex
+    owner = batch_owner(request)
+    # A failed/unknown intent is durable before any network effect. A crash or
+    # timeout cannot safely prove whether the remote service accepted the job.
+    data = {
+        **(metadata or {}),
+        "protocol": protocol,
+        "provider": "gigachat",
+        "provider_profile": getattr(request.state, "batch_provider_profile", None),
+        "upstream_id": None,
+        "method": method,
+        "model": model,
+        "rows": deepcopy(rows),
+        "status": "failed",
+        "submission_state": "unknown",
+        "created_at": now,
+        "ended_at": now,
+        "deadline": now + 86400 if protocol in {"openai", "anthropic"} else None,
+        "results": [
+            {
+                "id": row["id"],
+                "error": {
+                    "code": "submission_outcome_unknown",
+                    "type": "api_error",
+                    "message": "Submission outcome is unknown; automatic resubmission is disabled. Inspect the upstream job before retrying.",
+                },
+            }
+            for row in rows
+        ],
+        "native_output_file_id": None,
+    }
+    await store.put(owner, "batch", public_id, data)
     options = extract_gigachat_request_options(request)
     async with gigachat_request_options(
         get_gigachat_client(request), options, include_body=False
@@ -195,26 +234,24 @@ async def create_batch(
             content, method=method
         )
     status = _status(batch)
-    now = time.time()
-    data = {
-        **(metadata or {}),
-        "protocol": protocol,
-        "provider": "gigachat",
-        "provider_profile": getattr(request.state, "batch_provider_profile", None),
-        "upstream_id": batch.id_,
-        "method": method,
-        "model": model,
-        "rows": deepcopy(rows),
-        "status": "in_progress" if status in TERMINAL else status,
-        "created_at": now,
-        "deadline": now + 86400 if protocol in {"openai", "anthropic"} else None,
-        "results": [],
-        "native_output_file_id": batch.output_file_id,
-    }
-    # A unique public ID separates jobs and protocol ownership from native IDs.
-    return await store.put(
-        batch_owner(request), "batch", "batch_g2g_" + uuid.uuid4().hex, data
+    # ResourceStore drains this transaction if the request is cancelled. The
+    # pre-existing intent remains available even when this publication fails.
+    resource = await store.update(
+        owner,
+        "batch",
+        public_id,
+        {
+            "upstream_id": batch.id_,
+            "status": "in_progress" if status in TERMINAL else status,
+            "submission_state": "submitted",
+            "ended_at": None,
+            "results": [],
+            "native_output_file_id": batch.output_file_id,
+        },
     )
+    if resource is None:
+        raise ResourceStoreError("Batch submission mapping could not be published")
+    return resource
 
 
 async def get_batch(request: Request, batch_id: str, protocol: str) -> Resource:
@@ -243,7 +280,7 @@ def _expire(metadata: dict[str, Any], now: float) -> dict[str, Any]:
     return metadata
 
 
-def _results(content: bytes, rows: list[dict], *, terminal: bool) -> list[dict]:
+def _results(content: bytes, rows: list[dict]) -> list[dict]:
     expected = {row["id"] for row in rows}
     found = {}
     try:
@@ -270,8 +307,6 @@ def _results(content: bytes, rows: list[dict], *, terminal: bool) -> list[dict]:
                 "result": body,
                 "request_id": row.get("request_id") or key,
             }
-    if terminal and set(found) != expected:
-        raise batch_error("Upstream batch results do not match submitted row IDs.", 502)
     return [found[row["id"]] for row in rows if row["id"] in found]
 
 
@@ -285,6 +320,9 @@ async def poll_batch(request: Request, batch_id: str, protocol: str) -> Resource
     )
     if resource.metadata["status"] in TERMINAL:
         return resource
+    profile_id = resource.metadata.get("provider_profile")
+    if profile_id is not None:
+        await bind_gigachat_profile(request, profile_id)
     options = extract_gigachat_request_options(request)
     async with gigachat_request_options(
         get_gigachat_client(request), options, include_body=False
@@ -304,19 +342,7 @@ async def poll_batch(request: Request, batch_id: str, protocol: str) -> Resource
                 raise batch_error(
                     "Upstream batch output exceeds the resource size limit.", 502
                 )
-            results = _results(
-                content, resource.metadata["rows"], terminal=status == "completed"
-            )
-        elif status == "completed":
-            raise batch_error("Completed upstream batch has no result file.", 502)
-        elif status == "failed":
-            results = [
-                {
-                    "id": row["id"],
-                    "error": {"message": "Upstream batch failed.", "type": "api_error"},
-                }
-                for row in resource.metadata["rows"]
-            ]
+            results = _results(content, resource.metadata["rows"])
 
     def apply(metadata):
         metadata = _expire(metadata, time.time())
@@ -324,6 +350,19 @@ async def poll_batch(request: Request, batch_id: str, protocol: str) -> Resource
             return metadata
         confirmed = {row["id"]: row for row in metadata.get("results", [])}
         confirmed.update({row["id"]: row for row in results})
+        if status in TERMINAL:
+            for row in metadata["rows"]:
+                confirmed.setdefault(
+                    row["id"],
+                    {
+                        "id": row["id"],
+                        "error": {
+                            "type": "api_error",
+                            "code": "missing_batch_result",
+                            "message": "Upstream batch ended without a result for this row.",
+                        },
+                    },
+                )
         metadata.update(
             status=status,
             native_output_file_id=batch.output_file_id,
@@ -357,7 +396,7 @@ async def list_batches(request: Request, protocol: str) -> list[Resource]:
 async def result_file(request: Request, resource, suffix: str, content: bytes) -> str:
     """Publish a deterministic result file once, preserving it across restarts."""
     file_id = f"file_g2g_{resource.public_id}_{suffix}"
-    store, owner = get_resource_store(request), get_resource_owner(request)
+    store, owner = get_resource_store(request), batch_owner(request, resource)
     if await store.get(owner, "file", file_id) is None:
         metadata = {
             "id": file_id,
@@ -368,6 +407,7 @@ async def result_file(request: Request, resource, suffix: str, content: bytes) -
             "purpose": "batch_output",
             "mime_type": "application/jsonl",
             "protocol": resource.metadata["protocol"],
+            "provider_profile": resource.metadata.get("provider_profile"),
             "local": True,
             "downloadable": True,
             "upstream_id": None,
@@ -417,15 +457,20 @@ async def prepare_rows(
         selected_model = model
     if not source_rows:
         raise batch_error("Batch input must not be empty.")
+    profile_id = getattr(request.state, "batch_provider_profile", None)
+    if profile_id is not None:
+        await bind_gigachat_profile(request, profile_id)
+    for row in source_rows:
+        await validate_model_attachments(request, row["body"])
     for row in source_rows:
         body = deepcopy(row["body"])
         body["model"] = selected_model
         if target.kind == "chat":
-            native = await request.app.state.request_transformer.prepare_chat(
+            native = await get_request_transformer(request).prepare_chat(
                 body, get_gigachat_client(request), forced_model=selected_model
             )
         elif target.kind == "responses":
-            native = await request.app.state.request_transformer.prepare_response_chat(
+            native = await get_request_transformer(request).prepare_response_chat(
                 body, get_gigachat_client(request)
             )
         else:

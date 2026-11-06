@@ -64,7 +64,7 @@ Examples:
 |---|---|---|
 | `GET /models` | Supported | Returned in the Anthropic shape when the request contains Anthropic SDK headers. |
 | `GET /models/{model_id}` | Supported | Returned in the Anthropic shape when the request contains Anthropic SDK headers. |
-| `POST /messages` | Supported | Messages API, streaming, local tools, GigaChat v2 mapping for compatible Anthropic provider tools, and native structured output. With `GPT2GIGA_NORMALIZATION_MODE=on`, the accepted v1 subset uses the normalized request/response/SSE core. |
+| `POST /messages` | Supported | Messages API, streaming, local tools, GigaChat v2 mapping for compatible Anthropic provider tools, and native structured output. All compatibility modes share the request/response/SSE execution core. |
 | `POST /messages/count_tokens` | Provider-dependent | GigaChat can count message, system, tool, and structured-output text. A Chat Completions-only external alias rejects the operation because it has no exact token-count API. |
 | `POST /messages/batches`, `GET /messages/batches*` | Supported subset | Native execution and per-item results with enforced gateway delivery deadline; no cancellation. |
 | Files API beta | Supported subset | Explicit Anthropic headers dispatch shared `/files`; file-only upload and native attachment references. |
@@ -385,3 +385,17 @@ Batch APIs require GigaChat pay-as-you-go batch access. Each job has one GigaCha
 For OpenAI `completion_window="24h"` and Anthropic `expires_at`, 24 hours is a **gateway result-acceptance deadline**, not a promise about native processing duration. Poll before the deadline to persist confirmed results. At the first poll after the deadline, unresolved rows become permanently expired; confirmed success/error results remain accessible until resource retention expires. A first poll after the deadline can therefore expire a job that the backend actually finished in time: the SDK's `updated_at` is not a verified completion timestamp. Late results never overwrite expiry. GigaChat jobs may continue and be billed after gateway expiry; cancellation and deletion return 501 and do not stop the upstream job. These limitations also apply to the examples.
 
 Create failures after an ambiguous timeout are not automatically retried, because the native job may already exist. Batch output/error files and row mappings survive worker changes and restart when the resource volume is preserved. Check both `output_file_id` and `error_file_id` for OpenAI, or each Anthropic result's `type`; successful HTTP polling does not imply every item succeeded.
+
+
+### Execution and resource boundaries
+
+Known GigaChat aliases bind the selected endpoint, credentials and upstream model before
+preparation, including when request-model forwarding is disabled. Request token overrides
+retain that endpoint. The public Chat Completions facade to an OpenAI-compatible upstream
+remains blocked; it does not fall through to GigaChat. See [provider profiles](provider-profiles.md).
+
+Required attachment failures stop generation. Registered file ownership applies to raw
+native IDs, headers and protocol-specific references, including batch rows. See
+[resource guarantees](resource-apis.md#failure-and-ownership-guarantees).
+Responses streams require semantic completion, and gateway snapshot admission rejects
+unreplayable attachment/native state before I/O; see [response storage](response-storage.md).

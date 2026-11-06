@@ -59,7 +59,8 @@ async def create_file(request: Request):
             400, detail="Multipart upload requires file and, for OpenAI, purpose."
         )
     if any(
-        name in multipart["form"] for name in ("expires_at", "expires_after", "scope")
+        name in multipart["form"]
+        for name in ("expires_at", "expires_after", "expires_in_seconds", "scope")
     ):
         raise HTTPException(
             400, detail="Custom scope and expiration are not supported."

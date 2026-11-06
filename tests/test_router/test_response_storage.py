@@ -60,6 +60,8 @@ async def test_sdk_snapshot_restart_branch_and_delete(tmp_path):
             model="test-model", input="branch", previous_response_id=first.id
         )
         assert len({first.id, second.id, branch.id}) == 3
+        assert second.previous_response_id == first.id
+        assert branch.previous_response_id == first.id
         assert [m["content"] for m in seen[1]["messages"]] == [
             "first",
             "answer-1",
@@ -265,6 +267,16 @@ async def test_snapshot_selected_profile_namespace_retrieve_delete(monkeypatch):
     ):
         app.state.config.proxy_settings.responses_storage_mode = "gateway"
         app.state.provider_registry = SimpleNamespace(
+            default_profile_id="default-profile",
+            resolve=lambda _: SimpleNamespace(
+                profile_id="selected-profile",
+                provider_kind=ProviderKind.GIGACHAT,
+                public_alias="test-model",
+                upstream_model="test-model",
+                config_revision="fixture",
+                capability_profile="fixture",
+                execution_context=lambda: {},
+            ),
             config=SimpleNamespace(
                 profiles=[
                     SimpleNamespace(
@@ -275,7 +287,7 @@ async def test_snapshot_selected_profile_namespace_retrieve_delete(monkeypatch):
                         profile_id="other-profile", provider_kind=ProviderKind.GIGACHAT
                     ),
                 ]
-            )
+            ),
         )
         response = await http.post(
             "/v1/responses", json={"model": "test-model", "input": "hello"}
@@ -380,3 +392,167 @@ async def test_stream_snapshot_published_only_after_terminal_success(failure):
             assert len(completed) == 1
             assert retrieved.status_code == 200
             assert retrieved.json()["output"] == completed[0]["response"]["output"]
+
+
+@pytest.mark.parametrize("mode", ["v1", "v2"])
+@pytest.mark.parametrize("container", [None, "extra_body", "additional_fields"])
+@pytest.mark.parametrize("field", ["storage", "assistant_id", "attachments"])
+async def test_snapshot_rejects_native_state_before_sdk(mode, container, field):
+    extra = {
+        field: {"thread_id": "native-thread"} if field == "storage" else "native-id"
+    }
+    if container:
+        extra = {container: extra}
+    async with sdk_app(
+        lambda _: pytest.fail("Snapshot must reject before SDK I/O")
+    ) as (http, app):
+        app.state.config.proxy_settings.responses_storage_mode = "gateway"
+        response = await http.post(
+            f"/{mode}/responses",
+            json={"model": "test-model", "input": "hello", **extra},
+        )
+    assert response.status_code == 400, response.text
+
+
+@pytest.mark.parametrize("mode", ["v1", "v2"])
+async def test_snapshot_rejects_attachment_header_before_sdk(mode):
+    async with sdk_app(
+        lambda _: pytest.fail("Snapshot must reject before SDK I/O")
+    ) as (http, app):
+        app.state.config.proxy_settings.responses_storage_mode = "gateway"
+        response = await http.post(
+            f"/{mode}/responses",
+            headers={"x-gpt2giga-attachment-ids": "native-file"},
+            json={"model": "test-model", "input": "hello"},
+        )
+    assert response.status_code == 400, response.text
+
+
+@pytest.mark.parametrize("mode", ["v1", "v2"])
+async def test_snapshot_function_replay_retains_context_and_opaque_state(mode):
+    seen = []
+
+    def handle(request):
+        seen.append(json.loads(request.content))
+        if mode == "v1":
+            result = chat_response()
+            if len(seen) == 1:
+                result["choices"][0].update(
+                    finish_reason="function_call",
+                    message={
+                        "role": "assistant",
+                        "content": "",
+                        "function_call": {"name": "lookup", "arguments": {"x": 1}},
+                        "functions_state_id": "opaque-state",
+                    },
+                )
+        else:
+            result = {
+                "messages": [{"role": "assistant", "content": [{"text": "done"}]}],
+                "finish_reason": "stop",
+                "model": "test-model",
+                "usage": {"input_tokens": 1, "output_tokens": 1},
+            }
+            if len(seen) == 1:
+                result.update(
+                    finish_reason="function_call",
+                    messages=[
+                        {
+                            "role": "assistant",
+                            "content": [
+                                {
+                                    "function_call": {
+                                        "id": "call-opaque",
+                                        "name": "lookup",
+                                        "arguments": {"x": 1},
+                                    }
+                                }
+                            ],
+                            "tools_state_id": "opaque-state",
+                        }
+                    ],
+                )
+        return httpx2.Response(200, json=result)
+
+    async with sdk_app(handle) as (http, app):
+        app.state.config.proxy_settings.responses_storage_mode = "gateway"
+        first = await http.post(
+            f"/{mode}/responses",
+            json={
+                "model": "test-model",
+                "input": "lookup one",
+                "tools": [
+                    {
+                        "type": "function",
+                        "name": "lookup",
+                        "parameters": {"type": "object"},
+                    }
+                ],
+            },
+        )
+        assert first.status_code == 200, first.text
+        response = first.json()
+        call = next(
+            item for item in response["output"] if item["type"] == "function_call"
+        )
+        second = await http.post(
+            f"/{mode}/responses",
+            json={
+                "model": "test-model",
+                "previous_response_id": response["id"],
+                "input": [
+                    {
+                        "type": "function_call_output",
+                        "call_id": call["call_id"],
+                        "output": "found",
+                    }
+                ],
+            },
+        )
+    assert second.status_code == 200, second.text
+    assert second.json()["previous_response_id"] == response["id"]
+    assert len(seen) == 2
+    messages = seen[1]["messages"]
+    assert len(messages) == 3
+    if mode == "v1":
+        assert messages[0]["content"] == "lookup one"
+        assert messages[1]["function_call"]["arguments"] == {"x": 1}
+        assert messages[2]["role"] == "function"
+    else:
+        assert messages[0]["content"] == [{"text": "lookup one"}]
+        assert messages[1]["tools_state_id"] == "opaque-state"
+        assert messages[1]["content"][0]["function_call"]["id"] == "call-opaque"
+        assert messages[2]["tools_state_id"] == "opaque-state"
+        assert messages[2]["content"][0]["function_result"]["id"] == "call-opaque"
+
+
+async def test_gateway_mode_preserves_issued_native_continuation_with_state():
+    seen = []
+
+    def handle(request):
+        seen.append(json.loads(request.content))
+        return httpx2.Response(
+            200,
+            json={
+                "messages": [{"role": "assistant", "content": [{"text": "ok"}]}],
+                "finish_reason": "stop",
+                "model": "test-model",
+                "thread_id": "native-thread",
+                "usage": {"input_tokens": 1, "output_tokens": 1},
+            },
+        )
+
+    async with sdk_app(handle) as (http, app):
+        app.state.config.proxy_settings.responses_storage_mode = "gateway"
+        response = await http.post(
+            "/v2/responses",
+            json={
+                "model": "test-model",
+                "input": "continue",
+                "previous_response_id": "resp_native-thread",
+                "extra_body": {"storage": {"thread_id": "native-thread"}},
+            },
+        )
+    assert response.status_code == 200, response.text
+    assert not response.json()["id"].startswith("resp_g2g_")
+    assert seen[0]["storage"]["thread_id"] == "native-thread"

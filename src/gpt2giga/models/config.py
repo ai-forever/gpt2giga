@@ -78,6 +78,14 @@ class ProxySettings(BaseSettings):
         default=1024 * 1024 * 1024,
         description="Maximum total bytes in retained resource blobs.",
     )
+    resource_max_metadata_bytes: PositiveInt = Field(
+        default=64 * 1024 * 1024,
+        description="Maximum total serialized resource metadata bytes, independent of blob quota.",
+    )
+    resource_max_resources: PositiveInt = Field(
+        default=100_000,
+        description="Maximum retained resource records, independent of blob quota.",
+    )
     resource_trusted_identity: Optional[str] = Field(
         default=None,
         description="Deployment-controlled resource identity; never read from untrusted headers.",
@@ -134,13 +142,13 @@ class ProxySettings(BaseSettings):
     normalization_mode: Literal["off", "shadow", "on"] = Field(
         default="off",
         description=(
-            "Normalized layer execution mode: off disables it, shadow records "
-            "parallel translation only, on uses normalized execution."
+            "Compatibility mode for the shared execution core; shadow records "
+            "content-free diagnostics from the decoded request."
         ),
     )
     legacy_chat_fallback: bool = Field(
         default=True,
-        description="Allow legacy chat path fallback while modular migration is experimental.",
+        description="Accepted compatibility alias; shared execution never replays dispatch.",
     )
     responses_storage_mode: Literal["native", "gateway"] = Field(
         default="native",

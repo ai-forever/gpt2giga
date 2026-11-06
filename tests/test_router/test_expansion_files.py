@@ -317,3 +317,346 @@ async def test_repeated_cancellation_drains_file_cleanup(monkeypatch):
         with pytest.raises(asyncio.CancelledError):
             await operation
         assert await store.list(get_resource_owner(request), "file") == []
+
+
+async def test_anthropic_expires_in_seconds_rejected_before_upload():
+    def unexpected(request):
+        pytest.fail("Unsupported expiry must not upload bytes")
+
+    async with sdk_app(unexpected) as (client, _):
+        response = await client.post(
+            "/v1/files",
+            headers={"anthropic-version": "2026-10-21"},
+            files={"file": ("notes.txt", b"hello", "text/plain")},
+            data={"expires_in_seconds": "3600"},
+        )
+        assert response.status_code == 400, response.text
+
+
+@pytest.mark.parametrize("normalization", ["off", "on"])
+@pytest.mark.parametrize("failure", ["timeout", "connection", "auth", "invalid"])
+async def test_required_attachment_upload_failure_never_dispatches_generation(
+    normalization, failure
+):
+    from loguru import logger
+    from gpt2giga.protocol import AttachmentProcessor
+
+    seen = []
+
+    def handle(request):
+        seen.append(request.url.path)
+        assert request.url.path.endswith("/files")
+        if failure == "timeout":
+            raise httpx2.ReadTimeout("synthetic-secret", request=request)
+        if failure == "connection":
+            raise httpx2.ConnectError("synthetic-secret", request=request)
+        if failure == "auth":
+            return httpx2.Response(401, json={"message": "synthetic-secret"})
+        return httpx2.Response(200, json={"invalid": "synthetic-secret"})
+
+    async with sdk_app(handle, normalization=normalization) as (client, app):
+        app.state.config.proxy_settings.enable_images = True
+        app.state.request_transformer.attachment_processor = AttachmentProcessor(logger)
+        response = await client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "test-model",
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "image_url",
+                                "image_url": {"url": "data:image/png;base64,eA=="},
+                            }
+                        ],
+                    }
+                ],
+            },
+        )
+    assert (
+        response.status_code
+        == {"timeout": 504, "connection": 502, "auth": 401, "invalid": 502}[failure]
+    ), response.text
+    assert seen == ["/v1/files"]
+    assert "synthetic-secret" not in response.text
+
+
+@pytest.mark.parametrize("normalization", ["off", "on"])
+async def test_attachment_cache_separates_request_credentials_on_sdk_wire(
+    normalization, monkeypatch
+):
+    from gigachat import GigaChat
+    from loguru import logger
+    from gpt2giga.middlewares.pass_token import PassTokenMiddleware
+    from gpt2giga.protocol import AttachmentProcessor
+
+    uploaded, generated = [], []
+
+    def handle(request):
+        auth = request.headers["authorization"]
+        if request.url.path.endswith("/files"):
+            uploaded.append(auth)
+            return httpx2.Response(
+                200,
+                json={
+                    "id": "native-" + auth.removeprefix("Bearer "),
+                    "object": "file",
+                    "bytes": 1,
+                    "created_at": 1,
+                    "filename": "image.png",
+                    "purpose": "general",
+                },
+            )
+        payload = json.loads(request.content)
+        generated.append((auth, payload["messages"][-1]["attachments"]))
+        return httpx2.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {"role": "assistant", "content": "ok"},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "created": 1,
+                "model": "test-model",
+                "object": "chat.completion",
+                "usage": {
+                    "prompt_tokens": 1,
+                    "completion_tokens": 1,
+                    "total_tokens": 2,
+                },
+            },
+        )
+
+    async with httpx2.AsyncClient(
+        transport=httpx2.MockTransport(handle), trust_env=False
+    ) as wire:
+
+        def scoped_client(settings, token):
+            return GigaChat(
+                base_url="https://gigachat.test/v1",
+                access_token=token,
+                credentials="",
+                user="",
+                password="",
+                scope="",
+                max_retries=0,
+                async_http_client=wire,
+                trust_env=False,
+            )
+
+        monkeypatch.setattr(
+            "gpt2giga.middlewares.pass_token.create_gigachat_client_for_request",
+            scoped_client,
+        )
+        async with sdk_app(handle, normalization=normalization) as (client, app):
+            app.state.config.proxy_settings.enable_images = True
+            app.state.config.proxy_settings.pass_token = True
+            app.add_middleware(PassTokenMiddleware)
+            app.state.request_transformer.attachment_processor = AttachmentProcessor(
+                logger
+            )
+            for owner in ("owner-a", "owner-b", "owner-a"):
+                response = await client.post(
+                    "/v1/chat/completions",
+                    headers={"authorization": f"Bearer {owner}"},
+                    json={
+                        "model": "test-model",
+                        "messages": [
+                            {
+                                "role": "user",
+                                "content": [
+                                    {
+                                        "type": "image_url",
+                                        "image_url": {
+                                            "url": "data:image/png;base64,eA=="
+                                        },
+                                    }
+                                ],
+                            }
+                        ],
+                    },
+                )
+                assert response.status_code == 200, response.text
+    assert uploaded == ["Bearer owner-a", "Bearer owner-b"]
+    assert generated == [
+        ("Bearer owner-a", ["native-owner-a"]),
+        ("Bearer owner-b", ["native-owner-b"]),
+        ("Bearer owner-a", ["native-owner-a"]),
+    ]
+
+
+@pytest.mark.parametrize("normalization", ["off", "on"])
+@pytest.mark.parametrize("shape", ["raw", "header", "anthropic", "gemini"])
+async def test_registered_foreign_model_attachment_never_reaches_upstream(
+    normalization, shape
+):
+    async with sdk_app(
+        lambda _: pytest.fail("Foreign attachment must not dispatch"),
+        normalization=normalization,
+    ) as (client, app):
+        await app.state.resource_store.put(
+            "foreign-owner", "file", "native-foreign", {"upstream_id": "native-foreign"}
+        )
+        headers = {}
+        path = "/v1/chat/completions"
+        data = {
+            "model": "test-model",
+            "messages": [{"role": "user", "content": "hello"}],
+        }
+        if shape == "raw":
+            data["messages"][0]["attachments"] = ["native-foreign"]
+        elif shape == "header":
+            path = "/v1/responses"
+            data = {"model": "test-model", "input": "hello"}
+            headers = {"x-gpt2giga-attachment-ids": "native-foreign"}
+        elif shape == "anthropic":
+            path = "/v1/messages"
+            data["max_tokens"] = 32
+            data["messages"][0]["content"] = [
+                {
+                    "type": "document",
+                    "source": {"type": "file", "file_id": "native-foreign"},
+                }
+            ]
+        else:
+            path = "/v1beta/models/test-model:generateContent"
+            data = {
+                "contents": [
+                    {
+                        "role": "user",
+                        "parts": [
+                            {
+                                "fileData": {
+                                    "fileUri": "files/native-foreign",
+                                    "mimeType": "application/pdf",
+                                }
+                            }
+                        ],
+                    }
+                ]
+            }
+        response = await client.post(path, json=data, headers=headers)
+        assert response.status_code == 404, response.text
+
+
+@pytest.mark.parametrize("failure", ["timeout", "connection", "http_status"])
+async def test_required_attachment_download_failure_stops_before_sdk(
+    failure, monkeypatch
+):
+    import ipaddress
+    import httpx
+    from loguru import logger
+    from gpt2giga.protocol import AttachmentProcessor
+
+    def download(request):
+        if failure == "timeout":
+            raise httpx.ReadTimeout("secret-source-url", request=request)
+        if failure == "connection":
+            raise httpx.ConnectError("secret-source-url", request=request)
+        return httpx.Response(403, text="secret-source-url")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(download)) as downloader:
+        async with sdk_app(
+            lambda _: pytest.fail("Download failed before provider I/O")
+        ) as (client, app):
+            processor = AttachmentProcessor(logger)
+            processor._http_client = downloader
+
+            async def public_ip(*args):
+                return [ipaddress.ip_address("93.184.216.34")]
+
+            monkeypatch.setattr(processor, "_resolve_host_ips", public_ip)
+            app.state.request_transformer.attachment_processor = processor
+            app.state.config.proxy_settings.enable_images = True
+            response = await client.post(
+                "/v1/chat/completions",
+                json={
+                    "model": "test-model",
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": [
+                                {
+                                    "type": "image_url",
+                                    "image_url": {
+                                        "url": "https://source.test/image.png?secret-source-url"
+                                    },
+                                }
+                            ],
+                        }
+                    ],
+                },
+            )
+    assert response.status_code == (504 if failure == "timeout" else 502), response.text
+    assert "secret-source-url" not in response.text
+
+
+@pytest.mark.parametrize("resource_state", ["owned", "legacy", "expired", "local"])
+async def test_model_native_attachment_ownership_policy(resource_state):
+    from starlette.requests import Request
+    from gpt2giga.app_state import get_resource_owner
+
+    calls = []
+
+    def handle(request):
+        calls.append(request.url.path)
+        assert json.loads(request.content)["messages"][-1]["attachments"] == [
+            "native-file"
+        ]
+        return httpx2.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {"role": "assistant", "content": "ok"},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "created": 1,
+                "model": "test-model",
+                "object": "chat.completion",
+                "usage": {
+                    "prompt_tokens": 1,
+                    "completion_tokens": 1,
+                    "total_tokens": 2,
+                },
+            },
+        )
+
+    async with sdk_app(handle) as (client, app):
+        if resource_state != "legacy":
+            request = Request(
+                {
+                    "type": "http",
+                    "method": "GET",
+                    "path": "/",
+                    "headers": [],
+                    "app": app,
+                }
+            )
+            await app.state.resource_store.put(
+                get_resource_owner(request),
+                "file",
+                "native-file",
+                {"upstream_id": "native-file", "local": resource_state == "local"},
+                expires_at=1 if resource_state == "expired" else None,
+            )
+        response = await client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "test-model",
+                "messages": [
+                    {"role": "user", "content": "hello", "attachments": ["native-file"]}
+                ],
+            },
+        )
+    expected = {"owned": 200, "legacy": 200, "expired": 404, "local": 400}[
+        resource_state
+    ]
+    assert response.status_code == expected, response.text
+    assert calls == (["/v1/chat/completions"] if expected == 200 else [])

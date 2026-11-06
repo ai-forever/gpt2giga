@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from __future__ import annotations
-
 import asyncio
 import hashlib
 import hmac
@@ -26,7 +24,7 @@ class ResourceStoreError(RuntimeError):
 
 
 class ResourceLimitError(ResourceStoreError):
-    """Report a resource blob quota violation."""
+    """Report a resource metadata, count, or blob quota violation."""
 
 
 class ResourceConflictError(ResourceStoreError):
@@ -59,12 +57,16 @@ class ResourceStore:
         retention_seconds: int = 30 * 86400,
         max_blob_bytes: int = 100 * 1024 * 1024,
         max_total_blob_bytes: int = 1024 * 1024 * 1024,
+        max_metadata_bytes: int = 64 * 1024 * 1024,
+        max_resources: int = 100_000,
         clock: Callable[[], float] = time.time,
     ) -> None:
         self.path = Path(path)
         self.retention_seconds = retention_seconds
         self.max_blob_bytes = max_blob_bytes
         self.max_total_blob_bytes = max_total_blob_bytes
+        self.max_metadata_bytes = max_metadata_bytes
+        self.max_resources = max_resources
         self._clock = clock
         self._lock = threading.RLock()
         self._db: sqlite3.Connection | None = None
@@ -123,7 +125,12 @@ class ResourceStore:
                     "CREATE TABLE IF NOT EXISTS registered_resources (kind TEXT NOT NULL, public_id TEXT NOT NULL, PRIMARY KEY(kind, public_id))"
                 )
                 db.execute(
-                    "INSERT OR IGNORE INTO registered_resources SELECT kind, public_id FROM resources"
+                    "INSERT OR IGNORE INTO registered_resources SELECT kind, public_id FROM resources WHERE kind='file' AND public_id NOT GLOB 'file_g2g_*'"
+                )
+                # Only native file IDs can fall back to the upstream Files API.
+                # Gateway-prefixed IDs and non-file resources are rejected locally.
+                db.execute(
+                    "DELETE FROM registered_resources WHERE kind!='file' OR public_id GLOB 'file_g2g_*'"
                 )
                 db.execute(
                     "CREATE INDEX IF NOT EXISTS resource_expiry ON resources(expires_at)"
@@ -192,14 +199,25 @@ class ResourceStore:
         return Resource(row[0], row[1], json.loads(row[2]), row[3], row[4], row[5])
 
     def _purge(self, db: sqlite3.Connection) -> int:
+        # Bound foreground cleanup. Registered IDs are intentional ACL tombstones.
         rows = db.execute(
-            "SELECT blob_name FROM resources WHERE expires_at <= ?", (self._clock(),)
+            "SELECT rowid, blob_name FROM resources WHERE expires_at <= ? ORDER BY expires_at LIMIT 256",
+            (self._clock(),),
         ).fetchall()
-        db.execute("DELETE FROM resources WHERE expires_at <= ?", (self._clock(),))
-        for (name,) in rows:
+        db.executemany(
+            "DELETE FROM resources WHERE rowid=?", [(row[0],) for row in rows]
+        )
+        for _, name in rows:
             if name:
                 (self.path / "blobs" / name).unlink(missing_ok=True)
         return len(rows)
+
+    def _check_metadata_budget(self, db: sqlite3.Connection) -> None:
+        count, size = db.execute(
+            "SELECT COUNT(*), COALESCE(SUM(length(CAST(metadata AS BLOB))), 0) FROM resources"
+        ).fetchone()
+        if count > self.max_resources or size > self.max_metadata_bytes:
+            raise ResourceLimitError("Resource store metadata quota exceeded")
 
     async def purge_expired(self) -> int:
         """Remove retained metadata/blobs; delivery deadlines are metadata only."""
@@ -256,14 +274,16 @@ class ResourceStore:
                             if expires_at is not None
                             else now + self.retention_seconds
                         )
-                        db.execute(
-                            "INSERT OR IGNORE INTO registered_resources VALUES (?, ?)",
-                            (kind, public_id),
-                        )
+                        if kind == "file" and not public_id.startswith("file_g2g_"):
+                            db.execute(
+                                "INSERT OR IGNORE INTO registered_resources VALUES (?, ?)",
+                                (kind, public_id),
+                            )
                         db.execute(
                             "INSERT INTO resources VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                             (owner, kind, public_id, encoded, now, expiry, name, size),
                         )
+                        self._check_metadata_budget(db)
                     return Resource(
                         public_id, kind, json.loads(encoded), now, expiry, size
                     )
@@ -350,6 +370,7 @@ class ResourceStore:
                     "UPDATE resources SET metadata=? WHERE owner=? AND kind=? AND public_id=?",
                     (encoded, owner, kind, public_id),
                 )
+                self._check_metadata_budget(db)
                 return self._resource((row[0], row[1], encoded, *row[3:]))
 
         return await self._run(operation)
@@ -376,6 +397,7 @@ class ResourceStore:
         def operation() -> None:
             with self._lock, self._connection() as db:
                 db.execute("BEGIN IMMEDIATE")
+                self._purge(db)
                 now = self._clock()
                 if conversation_id is not None:
                     row = db.execute(
@@ -404,10 +426,6 @@ class ResourceStore:
                     )
                 if encoded is not None:
                     db.execute(
-                        "INSERT OR IGNORE INTO registered_resources VALUES ('response', ?)",
-                        (response_id,),
-                    )
-                    db.execute(
                         "INSERT INTO resources VALUES (?, 'response', ?, ?, ?, ?, NULL, 0)",
                         (
                             owner,
@@ -417,6 +435,7 @@ class ResourceStore:
                             now + self.retention_seconds,
                         ),
                     )
+                self._check_metadata_budget(db)
                 if cancelled.is_set():
                     raise ResourceStoreError("Response storage cancelled")
 
@@ -463,9 +482,11 @@ class ResourceStore:
                             return None
                         metadata = json.loads(row[2])
                         if metadata.get("status") in {"finalizing", "finalized"}:
-                            raise ValueError("Upload session no longer accepts data")
+                            raise ResourceConflictError(
+                                "Upload session no longer accepts data"
+                            )
                         if row[5] != offset:
-                            raise ValueError(
+                            raise ResourceConflictError(
                                 "Upload offset does not match received bytes"
                             )
                         size = offset + len(data)
@@ -501,6 +522,7 @@ class ResourceStore:
                             "UPDATE resources SET blob_name=?, blob_size=?, metadata=? WHERE owner=? AND kind=? AND public_id=?",
                             (new_name, size, encoded, owner, kind, public_id),
                         )
+                        self._check_metadata_budget(db)
                     committed = True
                     if old_name:
                         (self.path / "blobs" / old_name).unlink(missing_ok=True)
@@ -511,6 +533,49 @@ class ResourceStore:
                     if new_name and not committed:
                         (self.path / "blobs" / new_name).unlink(missing_ok=True)
                     raise
+
+        return await self._run(operation)
+
+    async def promote_blob(
+        self,
+        owner: str,
+        source_kind: str,
+        source_id: str,
+        kind: str,
+        public_id: str,
+        metadata: dict[str, Any],
+    ) -> Resource:
+        """Adopt an owned upload blob without copying or charging quota twice."""
+        encoded = json.dumps(metadata, ensure_ascii=False, separators=(",", ":"))
+
+        def operation() -> Resource:
+            with self._lock, self._connection() as db:
+                db.execute("BEGIN IMMEDIATE")
+                row = db.execute(
+                    "SELECT blob_name, blob_size FROM resources WHERE owner=? AND kind=? AND public_id=? AND expires_at>?",
+                    (owner, source_kind, source_id, self._clock()),
+                ).fetchone()
+                if row is None:
+                    raise ResourceNotFoundError("Upload session no longer exists")
+                now = self._clock()
+                expiry = now + self.retention_seconds
+                if kind == "file" and not public_id.startswith("file_g2g_"):
+                    db.execute(
+                        "INSERT OR IGNORE INTO registered_resources VALUES (?, ?)",
+                        (kind, public_id),
+                    )
+                db.execute(
+                    "INSERT INTO resources VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (owner, kind, public_id, encoded, now, expiry, row[0], row[1]),
+                )
+                db.execute(
+                    "DELETE FROM resources WHERE owner=? AND kind=? AND public_id=?",
+                    (owner, source_kind, source_id),
+                )
+                self._check_metadata_budget(db)
+                return Resource(
+                    public_id, kind, json.loads(encoded), now, expiry, row[1]
+                )
 
         return await self._run(operation)
 

@@ -186,3 +186,17 @@ Gemini CLI приведена в разделе
 [матрице совместимости провайдеров](bridge-compatibility.md). Проверка перед
 запуском, обновление и откат — в разделе
 [Переход на gpt2giga 0.3](migration-0-3.md).
+
+
+### Привязка GigaChat client
+
+Каждый явный GigaChat profile использует собственные `base_url` и OAuth `credential_env`
+через общую SDK-фабрику. TLS/transport берутся из GigaChat configuration, а auth аккаунта
+по умолчанию очищается. Profile без credential намеренно работает без ключа.
+Pass-through auth заменяет credentials внутри выбранного profile, сохраняя endpoint.
+Динамические модели используют настроенный dynamic GigaChat profile. Известные aliases
+не переходят к default client.
+
+Chat Completions → OpenAI-compatible остаётся blocked в executable loss matrix:
+отказ происходит до upstream I/O. Responses, Anthropic Messages и Gemini GenerateContent
+сохраняют допустимые external bridge пути.

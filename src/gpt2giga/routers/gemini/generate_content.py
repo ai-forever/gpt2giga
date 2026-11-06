@@ -13,11 +13,14 @@ from gpt2giga.common.streaming_response import ModelLimitedStreamingResponse
 
 from gpt2giga.common.streaming_response import closing_stream
 
+from gpt2giga.app.providers import bind_model_request
+from gpt2giga.common.files import validate_model_attachments
+from gpt2giga.app_state import get_request_transformer
 from gpt2giga.app_state import get_gigachat_client, get_model_concurrency_limiter
 from gpt2giga.common.api_mode import resolve_gigachat_api_mode
 from gpt2giga.common.conversation import (
-    commit_conversation_turn,
     stitch_message_list,
+    commit_conversation_turn,
 )
 from gpt2giga.common.exceptions import exceptions_handler
 from gpt2giga.common.gigachat_options import extract_gigachat_request_options
@@ -48,6 +51,7 @@ from gpt2giga.protocols.normalized import (
     PublicProtocol,
 )
 from gpt2giga.providers.gigachat import GigaChatProviderAdapter
+from gpt2giga.providers.gigachat.adapter import _normalized_token_count_texts
 from gpt2giga.providers.gigachat.model_resolution import resolve_upstream_model
 from gpt2giga.providers.profiles import (
     ProviderAliasError,
@@ -78,9 +82,18 @@ async def generate_content(model: str, request: Request):
     """Create a Gemini-compatible content response."""
     data = await read_request_json(request)
     requested_model = _normalize_model_name(model)
+    await bind_model_request(
+        request, requested_model, PublicProtocol.GEMINI_GENERATE_CONTENT
+    )
+    await validate_model_attachments(request, data)
     external_route = _external_provider_route(request, requested_model)
     pinned_model = (
-        None if external_route is not None else _gemini_cli_model_override(request)
+        None
+        if external_route is not None
+        else (
+            getattr(request.state, "upstream_model", None)
+            or _gemini_cli_model_override(request)
+        )
     )
     effective_model = pinned_model or requested_model
     update_request_context(
@@ -142,9 +155,18 @@ async def stream_generate_content(model: str, request: Request):
     """Create a Gemini-compatible content stream."""
     data = await read_request_json(request)
     requested_model = _normalize_model_name(model)
+    await bind_model_request(
+        request, requested_model, PublicProtocol.GEMINI_GENERATE_CONTENT
+    )
+    await validate_model_attachments(request, data)
     external_route = _external_provider_route(request, requested_model)
     pinned_model = (
-        None if external_route is not None else _gemini_cli_model_override(request)
+        None
+        if external_route is not None
+        else (
+            getattr(request.state, "upstream_model", None)
+            or _gemini_cli_model_override(request)
+        )
     )
     effective_model = pinned_model or requested_model
     update_request_context(
@@ -345,9 +367,17 @@ async def count_tokens(model: str, request: Request):
     """Count prompt tokens for a Gemini-compatible request."""
     data = await read_request_json(request)
     requested_model = _normalize_model_name(model)
+    await bind_model_request(
+        request, requested_model, PublicProtocol.GEMINI_GENERATE_CONTENT
+    )
     external_route = _external_provider_route(request, requested_model)
     pinned_model = (
-        None if external_route is not None else _gemini_cli_model_override(request)
+        None
+        if external_route is not None
+        else (
+            getattr(request.state, "upstream_model", None)
+            or _gemini_cli_model_override(request)
+        )
     )
     if external_route is not None:
         resolution = None
@@ -371,19 +401,20 @@ async def count_tokens(model: str, request: Request):
             "model_source": model_source,
         },
     )
-    normalized = await _try_normalized_count_tokens(
-        request,
-        data,
-        effective_model=effective_model,
-    )
-    if normalized is not None:
-        return normalized
-    if resolution is None:  # pragma: no cover - external count rejects above
+    if resolution is None:
         raise gemini_invalid_request(
             "The selected Chat Completions upstream has no exact token-count API.",
             param="model",
         )
-    texts = _extract_texts_for_token_count(data)
+    # Keep the historical count projection while sharing the sole SDK dispatch.
+    if request.app.state.config.proxy_settings.normalization_mode == "on":
+        texts = _normalized_token_count_texts(
+            _gemini_adapter(request).count_tokens_to_normalized(
+                data, model=effective_model, context=get_request_context()
+            )
+        )
+    else:
+        texts = _extract_texts_for_token_count(data)
     if not texts:
         return {"totalTokens": 0}
 
@@ -404,47 +435,6 @@ async def count_tokens(model: str, request: Request):
     return {"totalTokens": total_tokens}
 
 
-async def _try_normalized_count_tokens(
-    request: Request,
-    payload: dict[str, Any],
-    *,
-    effective_model: str,
-) -> dict[str, int] | None:
-    settings = _normalization_settings(request)
-    external_route = _external_provider_route(request, effective_model)
-    if external_route is None and (
-        settings is None or settings.normalization_mode != "on"
-    ):
-        return None
-    if external_route is not None:
-        raise gemini_invalid_request(
-            "The selected Chat Completions upstream has no exact token-count API.",
-            param="model",
-        )
-    try:
-        context = get_request_context()
-        normalized_request = _gemini_adapter(request).count_tokens_to_normalized(
-            payload,
-            model=effective_model,
-            context=context,
-        )
-        request_options = extract_gigachat_request_options(request, payload)
-        provider = _provider_adapter(
-            request,
-            normalized_request=normalized_request.input,
-            request_options=request_options,
-            forced_model=_gemini_cli_model_override(request),
-        )
-    except Exception as exc:
-        if settings is None or not settings.legacy_chat_fallback:
-            raise
-        _log_normalized_fallback(request, exc, event="gemini_count_tokens_fallback")
-        return None
-    # Once dispatched, failure has an unknown outcome and must never replay.
-    response = await provider.count_tokens(normalized_request, context=context)
-    return {"totalTokens": response.input_tokens}
-
-
 def _provider_adapter(
     request: Request,
     *,
@@ -454,7 +444,11 @@ def _provider_adapter(
     forced_model: str | None = None,
 ) -> Any:
     state = request.app.state
-    route = _external_provider_route(request, normalized_request.model)
+    route = getattr(request.state, "provider_route", None)
+    if route is None:
+        route = _external_provider_route(request, normalized_request.model)
+    if route is not None and route.provider_kind is ProviderKind.GIGACHAT:
+        route = None
     if route is not None:
         try:
             return state.bridge_provider_runtime.adapter_for(
@@ -470,7 +464,7 @@ def _provider_adapter(
             ) from exc
     return GigaChatProviderAdapter(
         config=state.config,
-        request_transformer=state.request_transformer,
+        request_transformer=get_request_transformer(request),
         giga_client=get_gigachat_client(request),
         model_limiter=get_model_concurrency_limiter(request),
         request_options=request_options,
@@ -518,32 +512,6 @@ def _gemini_adapter(request: Request) -> GeminiProtocolAdapter:
     return adapter
 
 
-def _normalization_settings(request: Request) -> Any:
-    return getattr(
-        getattr(request.app.state, "config", None),
-        "proxy_settings",
-        None,
-    )
-
-
-def _log_normalized_fallback(
-    request: Request,
-    exc: Exception,
-    *,
-    event: str,
-) -> None:
-    logger = getattr(request.app.state, "logger", None)
-    if logger is None:
-        return
-    context = get_request_context()
-    logger.bind(
-        event=event,
-        route=request.url.path,
-        error_type=type(exc).__name__,
-        request_id=getattr(context, "request_id", None),
-    ).warning("Normalized Gemini path failed; using legacy fallback")
-
-
 async def _stitch_gemini_request(
     request: Request,
     payload: dict[str, Any],
@@ -560,6 +528,14 @@ async def _stitch_gemini_request(
             NormalizedMessage.model_validate(message)
             for message in turn.request_messages
         ]
+    await validate_model_attachments(
+        request,
+        {
+            "messages": [
+                message.to_json_dict() for message in normalized_request.messages
+            ]
+        },
+    )
     return turn
 
 

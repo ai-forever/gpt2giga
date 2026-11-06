@@ -39,3 +39,12 @@ Content capture in logs remains opt-in. Back up the directory and its namespace 
 and keep the configured identity/profile consistent across workers and restarts.
 
 Example: `examples/openai/responses/storage/snapshots.py` in the repository.
+
+
+Gateway snapshots reject attachment headers and native mutable `storage`/`assistant_id`
+state, including overrides in `extra_body` and `additional_fields`, before provider I/O.
+They retain public `previous_response_id` lineage. Native continuation IDs still use
+the native execution path when gateway mode is configured. Every native Responses stream
+requires a semantic finish: transport `[DONE]` alone cannot produce `response.completed`.
+Structured successful results reach snapshot/history persistence before terminal SSE
+serialization; interrupted or malformed streams do not commit successful history.

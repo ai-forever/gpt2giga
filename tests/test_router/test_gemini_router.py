@@ -11,6 +11,7 @@ from gpt2giga.common.signed_model_override import _model_override_signature
 from gpt2giga.models.config import ProxyConfig, ProxySettings
 from gpt2giga.protocol import ResponseProcessor
 from gpt2giga.protocol.request.transformer import RequestTransformer
+from gpt2giga.providers.gigachat.adapter import normalized_chat_to_openai_payload
 from gpt2giga.protocols.gemini import GeminiProtocolAdapter
 from gpt2giga.routers.gemini import router as gemini_router
 from gpt2giga.routers.gemini.batches import router as gemini_batches_router
@@ -229,23 +230,26 @@ class PartialFailingStreamGigaChat(FakeGigaChat):
         return gen()
 
 
-class FakeRequestTransformer:
-    def __init__(self):
+class FakeRequestTransformer(RequestTransformer):
+    def __init__(self, config=None):
+        super().__init__(config or ProxyConfig(_env_file=None), logger)
         self.chat_calls = []
         self.chat_completion_calls = []
 
-    async def prepare_chat(self, data, giga_client=None):
-        self.chat_calls.append((data, giga_client))
-        return {"model": data["model"], "messages": data["messages"]}
-
-    async def prepare_chat_completion(self, data, giga_client=None):
-        self.chat_completion_calls.append((data, giga_client))
-        return {"model": data["model"], "messages": data["messages"]}
+    async def prepare_normalized(self, request, giga_client=None, **kwargs):
+        payload = normalized_chat_to_openai_payload(request)
+        calls = (
+            self.chat_completion_calls
+            if kwargs["api_mode"] == "v2"
+            else self.chat_calls
+        )
+        calls.append((payload, giga_client))
+        return await super().prepare_normalized(request, giga_client, **kwargs)
 
 
 class FailingPrepareRequestTransformer(FakeRequestTransformer):
-    async def prepare_chat(self, data, giga_client=None):
-        self.chat_calls.append((data, giga_client))
+    async def prepare_normalized(self, request, giga_client=None, **kwargs):
+        self.chat_calls.append((request, giga_client))
         raise RuntimeError("prepare stream payload failed")
 
 
@@ -274,11 +278,13 @@ def make_app(
         app.include_router(gemini_files_router)
         app.include_router(gemini_batches_router)
     app.state.gigachat_client = giga_client or FakeGigaChat()
-    app.state.request_transformer = request_transformer or FakeRequestTransformer()
     app.state.response_processor = ResponseProcessor(logger=logger)
     app.state.gemini_protocol_adapter = GeminiProtocolAdapter()
     app.state.config = ProxyConfig(
         proxy=ProxySettings(gigachat_api_mode=mode, **settings)
+    )
+    app.state.request_transformer = request_transformer or FakeRequestTransformer(
+        app.state.config
     )
     return app
 
@@ -558,6 +564,7 @@ def test_gemini_generate_content_preserves_multi_function_response_payload():
                 },
                 {
                     "type": "function",
+                    "id": None,
                     "function": {
                         "name": "second",
                         "arguments": {"value": 2},
@@ -824,9 +831,14 @@ def test_gemini_v2_stream_generate_content_handles_named_done_event():
     assert "[DONE]" not in body
     assert not app.state.request_transformer.chat_calls
     assert app.state.request_transformer.chat_completion_calls
-    assert app.state.gigachat_client.achat.stream_calls == [
-        {"model": "gemini-pro", "messages": [{"role": "user", "content": "Hello"}]}
-    ]
+    assert len(app.state.gigachat_client.achat.stream_calls) == 1
+    assert app.state.gigachat_client.achat.stream_calls[0].model_dump(
+        exclude_none=True
+    ) == {
+        "model": "gemini-pro",
+        "messages": [{"role": "user", "content": [{"text": "Hello"}]}],
+        "stream": True,
+    }
 
 
 def test_gemini_v2_stream_generate_content_updates_conversation():
@@ -990,8 +1002,9 @@ def test_gemini_count_tokens_includes_system_contents_and_tools():
     ]
 
 
-def test_gemini_count_tokens_normalization_on_uses_normalized_contract():
-    app = make_app(normalization_mode="on", legacy_chat_fallback=False)
+@pytest.mark.parametrize("normalization", ["off", "on"])
+def test_gemini_count_tokens_preserves_schema_projection_by_mode(normalization):
+    app = make_app(normalization_mode=normalization, legacy_chat_fallback=False)
     client = TestClient(app)
 
     response = client.post(
@@ -1024,7 +1037,7 @@ def test_gemini_count_tokens_normalization_on_uses_normalized_contract():
                 "count these words",
                 "lookup",
                 "Lookup data",
-                '{"type": "object"}',
+                *(['{"type": "object"}'] if normalization == "on" else []),
             ],
             "model": "gemini-pro",
         }

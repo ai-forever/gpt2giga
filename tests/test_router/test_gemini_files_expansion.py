@@ -1,5 +1,6 @@
 """Google SDK Files lifecycle against mounted gateway and real GigaChat SDK."""
 
+import asyncio
 import io
 import json
 
@@ -322,3 +323,71 @@ async def test_google_sdk_downloads_generated_binary_bytes_and_session_expires()
         response = await client.post(url, headers={"X-Goog-Upload-Command": "query"})
         assert response.status_code == 404
         assert await app.state.resource_store.purge_expired() == 2
+
+
+async def test_jsonl_finalize_does_not_charge_double_blob_quota():
+    def unexpected(request):
+        pytest.fail("Local JSONL must not upload upstream")
+
+    async with sdk_app(unexpected) as (client, app):
+        app.state.resource_store.max_total_blob_bytes = 6
+        response = await client.post(
+            "/upload/v1beta/files",
+            headers={
+                "X-Goog-Upload-Protocol": "resumable",
+                "X-Goog-Upload-Command": "start",
+                "X-Goog-Upload-Header-Content-Length": "4",
+                "X-Goog-Upload-Header-Content-Type": "application/jsonl",
+            },
+            json={"file": {"displayName": "input.jsonl"}},
+        )
+        url = response.headers["x-goog-upload-url"]
+        result = await client.post(
+            url,
+            headers={
+                "X-Goog-Upload-Command": "upload, finalize",
+                "X-Goog-Upload-Offset": "0",
+            },
+            content=b"{}\n\n",
+        )
+        assert result.status_code == 200, result.text
+        file_id = result.json()["file"]["name"].removeprefix("files/")
+        content = await client.get(f"/v1/files/{file_id}/content")
+        assert content.content == b"{}\n\n"
+
+
+async def test_atomic_offset_conflict_maps_to_409(monkeypatch):
+    async with sdk_app(lambda request: pytest.fail("No upstream call")) as (
+        client,
+        app,
+    ):
+        url = await start(client, 4)
+        original = app.state.resource_store.append_blob
+        arrived = 0
+        ready = asyncio.Event()
+
+        async def concurrent_append(*args, **kwargs):
+            nonlocal arrived
+            arrived += 1
+            if arrived == 2:
+                ready.set()
+            await ready.wait()
+            return await original(*args, **kwargs)
+
+        monkeypatch.setattr(app.state.resource_store, "append_blob", concurrent_append)
+        responses = await asyncio.gather(
+            *(
+                client.post(
+                    url,
+                    headers={
+                        "X-Goog-Upload-Command": "upload",
+                        "X-Goog-Upload-Offset": "0",
+                    },
+                    content=b"ab",
+                )
+                for _ in range(2)
+            )
+        )
+        assert sorted(response.status_code for response in responses) == [200, 409]
+        queried = await client.post(url, headers={"X-Goog-Upload-Command": "query"})
+        assert queried.headers["X-Goog-Upload-Size-Received"] == "2"

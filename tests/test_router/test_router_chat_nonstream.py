@@ -59,10 +59,19 @@ class FakeGigachat:
         return gen()
 
 
-class FakeRequestTransformer:
+class FakeRequestTransformer(RequestTransformer):
     def __init__(self):
+        super().__init__(ProxyConfig(), logger=logger)
         self.chat_calls = []
         self.response_calls = []
+
+    async def prepare_normalized(
+        self, request, giga_client=None, *, api_mode, forced_model=None
+    ):
+        self.chat_calls.append((request, giga_client))
+        return await super().prepare_normalized(
+            request, giga_client, api_mode=api_mode, forced_model=forced_model
+        )
 
     async def prepare_chat(self, data, giga_client=None):
         self.chat_calls.append((data, giga_client))
@@ -492,7 +501,7 @@ def test_chat_completions_stream_span_event_failure_does_not_break_sse(monkeypat
     assert "OpenAI-Completions" in emitted
 
 
-def test_chat_completions_normalization_on_stream_falls_back_before_sse_start():
+def test_chat_completions_decoder_error_is_not_replayed_for_stream():
     app = make_app()
     app.state.config = ProxyConfig(
         proxy=ProxySettings(
@@ -520,12 +529,12 @@ def test_chat_completions_normalization_on_stream_falls_back_before_sse_start():
     ) as response:
         body = "".join(response.iter_text())
 
-    assert response.status_code == 200
-    assert "data: [DONE]" in body
-    assert app.state.request_transformer.chat_calls
+    assert response.status_code == 500
+    assert "data: [DONE]" not in body
+    assert not app.state.request_transformer.chat_calls
 
 
-def test_chat_completions_normalization_on_falls_back_to_legacy_when_enabled():
+def test_chat_completions_decoder_error_is_not_replayed_with_legacy_flag():
     app = make_app()
     app.state.config = ProxyConfig(
         proxy=ProxySettings(
@@ -547,9 +556,9 @@ def test_chat_completions_normalization_on_falls_back_to_legacy_when_enabled():
         json={"model": "gpt-x", "messages": [{"role": "user", "content": "hi"}]},
     )
 
-    assert resp.status_code == 200
-    assert resp.json()["object"] == "chat.completion"
-    assert app.state.request_transformer.chat_calls
+    assert resp.status_code == 500
+    assert resp.json()["error"]["type"] == "server_error"
+    assert not app.state.request_transformer.chat_calls
 
 
 def test_chat_completions_normalization_on_without_fallback_returns_error():
@@ -578,7 +587,7 @@ def test_chat_completions_normalization_on_without_fallback_returns_error():
     assert resp.json()["error"]["type"] == "server_error"
 
 
-def test_chat_completions_shadow_mode_adapter_error_does_not_break_legacy_response():
+def test_chat_completions_shadow_mode_records_decoder_failure_without_dispatch():
     calls = []
     app = make_app()
     app.state.config = ProxyConfig(
@@ -598,15 +607,15 @@ def test_chat_completions_shadow_mode_adapter_error_does_not_break_legacy_respon
         json={"model": "gpt-x", "messages": [{"role": "user", "content": "hi"}]},
     )
 
-    assert resp.status_code == 200
-    assert resp.json()["object"] == "chat.completion"
+    assert resp.status_code == 500
+    assert resp.json()["error"]["type"] == "server_error"
     assert len(calls) == 1
     event = app.state.normalization_shadow_events[-1]
     assert event.normalization_status == "error"
     assert event.errors == ["RuntimeError"]
 
 
-def test_chat_completions_normalization_off_does_not_call_shadow_adapter():
+def test_chat_completions_normalization_off_decodes_once_without_shadow_diagnostic():
     calls = []
     app = make_app()
     app.state.config = ProxyConfig(
@@ -616,6 +625,7 @@ def test_chat_completions_normalization_off_does_not_call_shadow_adapter():
     class RecordingShadowAdapter:
         async def to_normalized(self, payload, *, context=None):
             calls.append(payload)
+            return OpenAIProtocolAdapter().chat_to_normalized(payload)
 
     app.state.openai_protocol_adapter = RecordingShadowAdapter()
     client = TestClient(app)
@@ -626,7 +636,8 @@ def test_chat_completions_normalization_off_does_not_call_shadow_adapter():
     )
 
     assert resp.status_code == 200
-    assert calls == []
+    assert len(calls) == 1
+    assert not hasattr(app.state, "normalization_shadow_events")
 
 
 def test_chat_completions_shadow_mode_records_shape_diagnostic_without_raw_prompt():

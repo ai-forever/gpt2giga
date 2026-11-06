@@ -92,6 +92,8 @@ class FakeGigachat:
                 }
             )
 
+            yield MockResponse({"choices": [{"delta": {}, "finish_reason": "stop"}]})
+
         return gen()
 
 
@@ -120,6 +122,8 @@ class FakeGigachatNullReasoningStream(FakeGigachat):
                     },
                 }
             )
+
+            yield MockResponse({"choices": [{"delta": {}, "finish_reason": "stop"}]})
 
         return gen()
 
@@ -202,6 +206,8 @@ class FakeGigachatReasoning:
                 }
             )
 
+            yield MockResponse({"choices": [{"delta": {}, "finish_reason": "stop"}]})
+
         return gen()
 
 
@@ -245,6 +251,8 @@ class FakeGigachatThinkTags:
                     },
                 }
             )
+
+            yield MockResponse({"choices": [{"delta": {}, "finish_reason": "stop"}]})
 
         return gen()
 
@@ -294,6 +302,10 @@ class FakeGigachatFunctionCall:
                 }
             )
 
+            yield MockResponse(
+                {"choices": [{"delta": {}, "finish_reason": "function_call"}]}
+            )
+
         return gen()
 
 
@@ -339,6 +351,8 @@ class FakeGigachatStructuredOutput:
                     "usage": None,
                 }
             )
+
+            yield MockResponse({"choices": [{"delta": {}, "finish_reason": "stop"}]})
 
         return gen()
 
@@ -386,6 +400,10 @@ class FakeGigachatFunctionCallReservedWebSearch:
                     ],
                     "usage": None,
                 }
+            )
+
+            yield MockResponse(
+                {"choices": [{"delta": {}, "finish_reason": "function_call"}]}
             )
 
         return gen()
@@ -484,6 +502,18 @@ class FakeGigachatBatches(FakeGigachat):
 
 
 class FakeRequestTransformer:
+    async def prepare_normalized(
+        self, request, giga_client=None, *, api_mode, forced_model=None
+    ):
+        from gpt2giga.providers.gigachat.adapter import (
+            normalized_chat_to_openai_payload,
+        )
+
+        payload = normalized_chat_to_openai_payload(request)
+        if api_mode == "v2":
+            return await self.prepare_chat_completion(payload, giga_client)
+        return await self.prepare_chat(payload, giga_client)
+
     async def prepare_chat(self, data, giga_client=None, *, forced_model=None):
         return {
             "model": data.get("model", "giga"),

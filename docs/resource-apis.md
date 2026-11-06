@@ -68,3 +68,23 @@ automatic prompt-prefix caching is disabled. The hash separates owner/profile an
 and contains no raw prompt/key. Explicit user session headers take priority, followed by
 the global GIGACHAT session setting, then prompt_cache_key, then enabled automatic prefix
 caching. This does not implement OpenAI cache retention TTL; usage comes only from upstream.
+
+
+### Failure and ownership guarantees
+
+A durable submission intent is written before a batch POST. If local storage is
+unavailable, no POST is sent. An ambiguous submission or failure to persist its native
+ID leaves a failed intent with `submission_outcome_unknown`; polling never resubmits it.
+The operator must reconcile that record with the provider before submitting another job.
+This cannot provide an atomic transaction across SQLite and the provider.
+Every terminal batch accounts for each input ID exactly once, retaining confirmed partial
+results and explicit errors for missing rows. Polling after a restart uses the stored
+provider profile and the caller's matching credential namespace.
+
+Registered file ownership is enforced for native `attachments`, attachment headers and
+protocol file references before generation. Explicit image/document upload or download
+failure stops the request; it never silently becomes a text-only success. Attachment
+cache reuse is scoped to provider/profile/credentials and retains size/type accounting.
+Anthropic `expires_in_seconds` is rejected before upload until native expiry is supported.
+Concurrent resumable writes at the same offset yield one success and one HTTP 409.
+Finalizing local JSONL adopts its upload blob without requiring a second blob quota.

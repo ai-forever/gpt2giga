@@ -8,12 +8,14 @@ from typing import Any
 
 from fastapi import APIRouter, Request
 
+from gpt2giga.app.providers import bind_gigachat_profile
+from gpt2giga.app_state import get_request_transformer
 from gpt2giga.app_state import (
     get_gigachat_client,
     get_resource_store,
 )
 from gpt2giga.common.exceptions import exceptions_handler
-from gpt2giga.common.files import file_content, stored_file
+from gpt2giga.common.files import file_content, stored_file, validate_model_attachments
 from gpt2giga.common.request_json import read_request_json
 from gpt2giga.core.context import update_request_context
 from gpt2giga.openapi_tags import OPENAPI_TAG_GEMINI_BATCHES
@@ -25,7 +27,6 @@ from gpt2giga.protocols.gemini import (
     normalized_chat_response_to_gemini,
 )
 from gpt2giga.providers.gigachat.adapter import (
-    normalized_chat_to_openai_payload,
     gigachat_response_to_normalized,
 )
 from gpt2giga.providers.gigachat.batches import (
@@ -100,6 +101,12 @@ async def _create(request: Request, model: str, *, embeddings: bool):
     native_model = resolve_batch_model(
         request, model.removeprefix("models/"), embeddings=embeddings
     )
+    profile_id = getattr(request.state, "batch_provider_profile", None)
+    if profile_id is not None:
+        await bind_gigachat_profile(request, profile_id)
+    for entry in entries:
+        if isinstance(entry, dict) and isinstance(entry.get("request"), dict):
+            await validate_model_attachments(request, entry["request"])
     adapter = GeminiProtocolAdapter()
     rows = []
     for index, entry in enumerate(entries):
@@ -134,9 +141,11 @@ async def _create(request: Request, model: str, *, embeddings: bool):
             if any(tool.kind.value == "hosted" for tool in normalized.tools):
                 raise batch_error("Hosted tools are not supported in batches.")
             await resolve_file_references(request, normalized)
-            public = normalized_chat_to_openai_payload(normalized)
-            native = await request.app.state.request_transformer.prepare_chat(
-                public, get_gigachat_client(request)
+            native = await get_request_transformer(request).prepare_normalized(
+                normalized,
+                get_gigachat_client(request),
+                api_mode="v1",
+                forced_model=native_model,
             )
             native["model"] = native_model
         rows.append(
@@ -225,6 +234,16 @@ async def _operation(resource: Resource, request: Request) -> dict[str, Any]:
     }
     if data.get("ended_at"):
         metadata["endTime"] = _rfc3339(data["ended_at"])
+    if data.get("submission_state") == "unknown":
+        return {
+            "name": f"batches/{resource.public_id}",
+            "metadata": metadata,
+            "done": True,
+            "error": {
+                "code": 13,
+                "message": "Submission outcome is unknown; inspect the upstream job before retrying.",
+            },
+        }
     if status in TERMINAL:
         output = data.get("gemini_output")
         if output is None:

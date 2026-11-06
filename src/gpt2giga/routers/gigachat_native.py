@@ -2,6 +2,7 @@
 
 from fastapi import APIRouter, Request
 
+from gpt2giga.app.providers import bind_model_request
 from gpt2giga.app_state import get_gigachat_client
 from gpt2giga.common.client_params import ClientCompatibilityError
 from gpt2giga.common.exceptions import exceptions_handler
@@ -33,6 +34,15 @@ async def count_tokens(request: Request):
             "input must be text or a nonempty list of text.", param="input"
         )
     model = native_operation_model(request, data.get("model"))
+    registry = getattr(request.app.state, "provider_registry", None)
+    requested_alias = data.get("model")
+    await bind_model_request(
+        request,
+        requested_alias
+        if registry is not None and requested_alias in registry.public_aliases()
+        else model,
+        None,
+    )
     options = extract_gigachat_request_options(request, data)
     async with gigachat_request_options(
         get_gigachat_client(request), options, include_body=False
@@ -84,6 +94,15 @@ async def check_ai(request: Request):
             "input must be a nonempty string.", param="input"
         )
     model = native_operation_model(request, data.get("model"))
+    registry = getattr(request.app.state, "provider_registry", None)
+    requested_alias = data.get("model")
+    await bind_model_request(
+        request,
+        requested_alias
+        if registry is not None and requested_alias in registry.public_aliases()
+        else model,
+        None,
+    )
     options = extract_gigachat_request_options(request, data)
     async with gigachat_request_options(
         get_gigachat_client(request), options, include_body=False

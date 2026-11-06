@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncGenerator, Mapping
+from contextlib import nullcontext
 import json
 from types import SimpleNamespace
 from typing import Any, Literal
@@ -12,6 +13,10 @@ import gigachat
 from starlette.requests import Request
 
 from gpt2giga.common.streaming_response import closing_stream
+from gpt2giga.common.reasoning import (
+    extract_reasoning_from_content,
+    merge_reasoning_text,
+)
 
 from gpt2giga.common.cache_session import apply_cache_session_id
 from gpt2giga.common.gigachat_options import gigachat_request_options
@@ -28,6 +33,8 @@ from gpt2giga.common.tools import (
 )
 from gpt2giga.core.context import RequestContext, update_request_context
 from gpt2giga.models.config import ProxyConfig
+from gpt2giga.logger import rquid_context
+from gpt2giga.protocol.request.transformer import normalized_message_fields
 from gpt2giga.protocol.response import (
     adapt_chat_completion_chunk_to_chat_chunk_shape,
     adapt_chat_completion_to_chat_shape,
@@ -36,7 +43,6 @@ from gpt2giga.protocol.response import (
 from gpt2giga.protocols.normalized import (
     NormalizedChatRequest,
     NormalizedChoice,
-    NormalizedContentPart,
     NormalizedMessage,
     NormalizedResponse,
     NormalizedStreamEvent,
@@ -72,6 +78,7 @@ class GigaChatProviderAdapter:
         giga_client: Any,
         model_limiter: ModelConcurrencyLimiter,
         request_options: Any = None,
+        request_data: dict | None = None,
         cache_session_request: Request | None = None,
         response_processor: Any = None,
         api_mode: Literal["v1", "v2"] | None = None,
@@ -83,6 +90,7 @@ class GigaChatProviderAdapter:
         self.giga_client = giga_client
         self.model_limiter = model_limiter
         self.request_options = request_options
+        self.request_data = request_data
         self.cache_session_request = cache_session_request
         self.response_processor = response_processor
         self.api_mode = api_mode
@@ -143,11 +151,23 @@ class GigaChatProviderAdapter:
         context: RequestContext | None = None,
     ) -> NormalizedResponse:
         """Execute a non-streaming normalized chat request."""
-        payload = normalized_chat_to_openai_payload(request)
         mode = self._resolve_api_mode()
         if mode == "v2":
-            return await self._chat_completion(payload, request, context=context)
-        return await self._chat(payload, request, context=context)
+            response = await self._chat_completion(request, context=context)
+        else:
+            response = await self._chat(request, context=context)
+        if self.request_data is not None and self.response_processor is not None:
+            processor = self.response_processor
+            called_tools = processor._extract_chat_messages_called_tool_items(
+                self.request_data
+            )
+            called_tools.extend(
+                processor._extract_called_tool_items_from_metadata(
+                    response.metadata.pop("gigachat_called_tools", None)
+                )
+            )
+            response.metadata.update(processor._called_tools_metadata(called_tools))
+        return response
 
     async def stream_chat(
         self,
@@ -156,22 +176,24 @@ class GigaChatProviderAdapter:
         context: RequestContext | None = None,
         is_disconnected: Any = None,
         logger: Any = None,
+        prepared_request: tuple | None = None,
+        acquired_model_limit: Any = None,
     ) -> AsyncGenerator[NormalizedStreamEvent, None]:
         """Execute a streaming normalized chat request."""
         if self.response_processor is None:
             raise RuntimeError("response_processor is required for streaming")
 
         try:
-            payload = normalized_chat_to_openai_payload(request)
             mode = self._resolve_api_mode()
             if mode == "v2":
                 async with closing_stream(
                     self._stream_chat_completion(
-                        payload,
                         request,
                         context=context,
                         is_disconnected=is_disconnected,
                         logger=logger,
+                        prepared_request=prepared_request,
+                        acquired_model_limit=acquired_model_limit,
                     )
                 ) as delegated_stream:
                     async for event in delegated_stream:
@@ -180,11 +202,12 @@ class GigaChatProviderAdapter:
 
             async with closing_stream(
                 self._stream_chat(
-                    payload,
                     request,
                     context=context,
                     is_disconnected=is_disconnected,
                     logger=logger,
+                    prepared_request=prepared_request,
+                    acquired_model_limit=acquired_model_limit,
                 )
             ) as delegated_stream:
                 async for event in delegated_stream:
@@ -252,33 +275,33 @@ class GigaChatProviderAdapter:
                 }
             )
 
+    async def _prepare_request(self, request: NormalizedChatRequest, context):
+        async with gigachat_request_options(
+            self.giga_client, self.request_options, include_body=False
+        ) as request_client:
+            chat_payload = await self.request_transformer.prepare_normalized(
+                request,
+                request_client,
+                api_mode=self._resolve_api_mode(),
+                forced_model=self.forced_model,
+            )
+        resolution = self._resolve_model(chat_payload)
+        chat_payload = apply_model_override(
+            chat_payload, resolution.model if resolution.source == "forced" else None
+        )
+        request_options = self._cache_session_options(chat_payload, resolution)
+        self._record_model_resolution(resolution, context)
+        return chat_payload, resolution, request_options
+
     async def _chat(
         self,
-        payload: dict[str, Any],
         request: NormalizedChatRequest,
         *,
         context: RequestContext | None,
     ) -> NormalizedResponse:
-        async with gigachat_request_options(
-            self.giga_client, self.request_options, include_body=False
-        ) as request_client:
-            chat_payload = await self.request_transformer.prepare_chat(
-                payload,
-                request_client,
-                **(
-                    {"forced_model": self.forced_model}
-                    if self.forced_model is not None
-                    and self.config.proxy_settings.normalize_tool_schemas
-                    else {}
-                ),
-            )
-        resolution = self._resolve_model(chat_payload)
-        chat_payload = apply_model_override(
-            chat_payload,
-            resolution.model if resolution.source == "forced" else None,
+        chat_payload, resolution, request_options = await self._prepare_request(
+            request, context
         )
-        request_options = self._cache_session_options(chat_payload, resolution)
-        self._record_model_resolution(resolution, context)
         async with self.model_limiter.limit(
             resolution.limiter_key,
             provider=self.provider_label,
@@ -296,31 +319,13 @@ class GigaChatProviderAdapter:
 
     async def _chat_completion(
         self,
-        payload: dict[str, Any],
         request: NormalizedChatRequest,
         *,
         context: RequestContext | None,
     ) -> NormalizedResponse:
-        async with gigachat_request_options(
-            self.giga_client, self.request_options, include_body=False
-        ) as request_client:
-            chat_payload = await self.request_transformer.prepare_chat_completion(
-                payload,
-                request_client,
-                **(
-                    {"forced_model": self.forced_model}
-                    if self.forced_model is not None
-                    and self.config.proxy_settings.normalize_tool_schemas
-                    else {}
-                ),
-            )
-        resolution = self._resolve_model(chat_payload)
-        chat_payload = apply_model_override(
-            chat_payload,
-            resolution.model if resolution.source == "forced" else None,
+        chat_payload, resolution, request_options = await self._prepare_request(
+            request, context
         )
-        request_options = self._cache_session_options(chat_payload, resolution)
-        self._record_model_resolution(resolution, context)
         async with self.model_limiter.limit(
             resolution.limiter_key,
             provider=self.provider_label,
@@ -346,33 +351,17 @@ class GigaChatProviderAdapter:
 
     async def _stream_chat(
         self,
-        payload: dict[str, Any],
         request: NormalizedChatRequest,
         *,
         context: RequestContext | None,
         is_disconnected: Any,
         logger: Any,
+        prepared_request: tuple | None = None,
+        acquired_model_limit: Any = None,
     ):
-        async with gigachat_request_options(
-            self.giga_client, self.request_options, include_body=False
-        ) as request_client:
-            chat_payload = await self.request_transformer.prepare_chat(
-                payload,
-                request_client,
-                **(
-                    {"forced_model": self.forced_model}
-                    if self.forced_model is not None
-                    and self.config.proxy_settings.normalize_tool_schemas
-                    else {}
-                ),
-            )
-        resolution = self._resolve_model(chat_payload)
-        chat_payload = apply_model_override(
-            chat_payload,
-            resolution.model if resolution.source == "forced" else None,
+        chat_payload, resolution, request_options = (
+            prepared_request or await self._prepare_request(request, context)
         )
-        request_options = self._cache_session_options(chat_payload, resolution)
-        self._record_model_resolution(resolution, context)
         mapper = self._stream_mapper(
             request,
             context,
@@ -382,10 +371,14 @@ class GigaChatProviderAdapter:
         pending_terminal_events = []
 
         try:
-            async with self.model_limiter.limit(
-                resolution.limiter_key,
-                provider=self.provider_label,
-            ):
+            limit = (
+                nullcontext()
+                if acquired_model_limit is not None
+                else self.model_limiter.limit(
+                    resolution.limiter_key, provider=self.provider_label
+                )
+            )
+            async with limit:
                 async with gigachat_request_options(
                     self.giga_client,
                     request_options,
@@ -454,33 +447,17 @@ class GigaChatProviderAdapter:
 
     async def _stream_chat_completion(
         self,
-        payload: dict[str, Any],
         request: NormalizedChatRequest,
         *,
         context: RequestContext | None,
         is_disconnected: Any,
         logger: Any,
+        prepared_request: tuple | None = None,
+        acquired_model_limit: Any = None,
     ):
-        async with gigachat_request_options(
-            self.giga_client, self.request_options, include_body=False
-        ) as request_client:
-            chat_payload = await self.request_transformer.prepare_chat_completion(
-                payload,
-                request_client,
-                **(
-                    {"forced_model": self.forced_model}
-                    if self.forced_model is not None
-                    and self.config.proxy_settings.normalize_tool_schemas
-                    else {}
-                ),
-            )
-        resolution = self._resolve_model(chat_payload)
-        chat_payload = apply_model_override(
-            chat_payload,
-            resolution.model if resolution.source == "forced" else None,
+        chat_payload, resolution, request_options = (
+            prepared_request or await self._prepare_request(request, context)
         )
-        request_options = self._cache_session_options(chat_payload, resolution)
-        self._record_model_resolution(resolution, context)
         mapper = self._stream_mapper(
             request,
             context,
@@ -490,10 +467,14 @@ class GigaChatProviderAdapter:
         pending_terminal_events = []
 
         try:
-            async with self.model_limiter.limit(
-                resolution.limiter_key,
-                provider=self.provider_label,
-            ):
+            limit = (
+                nullcontext()
+                if acquired_model_limit is not None
+                else self.model_limiter.limit(
+                    resolution.limiter_key, provider=self.provider_label
+                )
+            )
+            async with limit:
                 async with gigachat_request_options(
                     self.giga_client,
                     request_options,
@@ -576,8 +557,15 @@ class GigaChatProviderAdapter:
         return GigaChatNormalizedStreamMapper(
             response_processor=self.response_processor,
             requested_model=effective_model,
-            response_id=context.request_id if context is not None else "stream",
-            request_data=normalized_chat_to_openai_payload(request),
+            response_id=(
+                context.request_id
+                if context is not None
+                else rquid_context.get()
+                if self.cache_session_request is not None
+                else "stream"
+            ),
+            request_data=self.request_data
+            or {"tools": [_tool_to_openai(tool) for tool in request.tools]},
         )
 
 
@@ -629,6 +617,14 @@ def normalized_chat_to_openai_payload(
         if isinstance(reasoning, Mapping):
             payload["reasoning"] = dict(reasoning)
 
+    if request.reasoning is not None:
+        reasoning = dict(request.reasoning.raw_extensions)
+        if request.reasoning.effort is not None:
+            reasoning["effort"] = request.reasoning.effort
+        if request.reasoning.max_tokens is not None:
+            reasoning["max_tokens"] = request.reasoning.max_tokens
+        payload["reasoning"] = reasoning
+
     if request.protocol == "openai":
         payload.update(request.raw_extensions)
     additional_fields = _gigachat_additional_fields(request.provider_metadata)
@@ -672,52 +668,20 @@ def gigachat_response_to_normalized(
 
 
 def _message_to_openai(message: NormalizedMessage) -> dict[str, Any]:
-    payload: dict[str, Any] = {
-        "role": message.role,
-        "content": _content_to_openai(message.content),
-    }
-    if message.name is not None:
-        payload["name"] = message.name
-    if message.tool_call_id is not None:
-        payload["tool_call_id"] = message.tool_call_id
-    if message.tool_calls:
-        payload["tool_calls"] = [
-            _tool_call_to_openai(tool_call) for tool_call in message.tool_calls
-        ]
-    payload.update(message.raw_extensions)
-    return {key: value for key, value in payload.items() if value is not None}
-
-
-def _content_to_openai(
-    content: str | list[NormalizedContentPart] | None,
-) -> str | list[dict[str, Any]] | None:
-    if content is None or isinstance(content, str):
-        return content
-    return [_content_part_to_openai(part) for part in content]
-
-
-def _content_part_to_openai(part: NormalizedContentPart) -> dict[str, Any]:
-    payload = {"type": part.type}
-    if part.type == "text":
-        payload["text"] = part.text or ""
-    elif part.type == "image_reference" and part.image_reference is not None:
-        payload = {
-            "type": "image_url",
-            "image_url": {"url": part.image_reference.uri},
-        }
-    elif part.type == "image_url":
-        payload["image_url"] = part.data
-    elif part.type == "file":
-        payload["file"] = part.data
-    else:
-        payload["data"] = part.data
-    payload.update(part.raw_extensions)
-    return payload
+    """Compatibility preview of the fields used by shared message preparation."""
+    return normalized_message_fields(message)
 
 
 def _tool_to_openai(
     tool: NormalizedTool,
 ) -> dict[str, Any] | None:
+    if tool.kind is NormalizedToolKind.NAMESPACE:
+        return {
+            "type": "namespace",
+            "name": tool.name,
+            **tool.configuration,
+            **tool.raw_extensions,
+        }
     raw_extensions = dict(tool.raw_extensions)
     builtin_field_name = normalize_gigachat_builtin_tool_type(tool.type)
     if builtin_field_name is not None:
@@ -746,23 +710,6 @@ def _tool_to_openai(
         payload["function"].update(dict(function_extensions))
     payload.update(raw_extensions)
     return payload
-
-
-def _tool_call_to_openai(tool_call: NormalizedToolCall) -> dict[str, Any]:
-    raw_extensions = dict(tool_call.raw_extensions)
-    payload: dict[str, Any] = {
-        "id": tool_call.id,
-        "type": tool_call.type,
-        "function": {
-            "name": tool_call.name,
-            "arguments": tool_call.arguments,
-        },
-    }
-    function_extensions = raw_extensions.pop("function", None)
-    if isinstance(function_extensions, Mapping):
-        payload["function"].update(dict(function_extensions))
-    payload.update(raw_extensions)
-    return {key: value for key, value in payload.items() if value is not None}
 
 
 def _gigachat_additional_fields(provider_metadata: Mapping[str, Any]) -> dict[str, Any]:
@@ -850,9 +797,16 @@ def _response_message_to_normalized(value: Any) -> NormalizedMessage | None:
                     message_state_id=_explicit_backend_state_id(value),
                 )
             )
+    content = value.get("content")
+    reasoning = value.get("reasoning_content")
+    if isinstance(content, str):
+        parsed = extract_reasoning_from_content(content)
+        content = parsed.content
+        reasoning = merge_reasoning_text(reasoning, parsed.reasoning_content)
     return NormalizedMessage(
         role=str(value.get("role", "assistant")),
-        content=value.get("content"),
+        content=content,
+        reasoning_content=reasoning,
         tool_calls=tool_calls,
         raw_extensions={
             key: item
@@ -861,6 +815,7 @@ def _response_message_to_normalized(value: Any) -> NormalizedMessage | None:
             not in {
                 "role",
                 "content",
+                "reasoning_content",
                 "function_call",
                 "tool_calls",
             }

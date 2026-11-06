@@ -16,6 +16,7 @@ from gpt2giga.common.files import (
     file_content,
     file_metadata,
     file_not_found,
+    list_stored_files,
     remove_file,
     upload_file_resource,
 )
@@ -23,7 +24,11 @@ from gpt2giga.common.request_json import read_request_json
 from gpt2giga.core.context import update_request_context
 from gpt2giga.openapi_tags import OPENAPI_TAG_GEMINI_FILES
 from gpt2giga.openapi_specs.gemini import gemini_files_openapi_extra
-from gpt2giga.storage.resources import ResourceLimitError, ResourceStoreError
+from gpt2giga.storage.resources import (
+    ResourceConflictError,
+    ResourceLimitError,
+    ResourceNotFoundError,
+)
 
 router = APIRouter(tags=[OPENAPI_TAG_GEMINI_FILES])
 upload_router = APIRouter(tags=[OPENAPI_TAG_GEMINI_FILES])
@@ -127,7 +132,11 @@ async def resumable_upload(request: Request):
         raise _invalid("Final upload length does not match the declared file length.")
     try:
         if content:
-            await store.append_blob(owner, "upload", session_id, content, offset=offset)
+            appended = await store.append_blob(
+                owner, "upload", session_id, content, offset=offset
+            )
+            if appended is None:
+                raise file_not_found()
         if "finalize" not in command:
             return Response(
                 headers={
@@ -156,6 +165,7 @@ async def resumable_upload(request: Request):
                 filename=session.metadata["filename"],
                 mime_type=session.metadata["mime_type"],
                 protocol="gemini",
+                upload_session_id=session_id,
             )
             metadata["display_name"] = session.metadata["display_name"]
             await store.update(
@@ -172,8 +182,10 @@ async def resumable_upload(request: Request):
             await store.delete(owner, "upload", session_id)
     except ResourceLimitError as exc:
         raise _invalid(str(exc), 413) from exc
-    except ResourceStoreError as exc:
-        raise _invalid("Upload state could not be updated.", 409) from exc
+    except ResourceConflictError as exc:
+        raise _invalid("Upload state changed concurrently.", 409) from exc
+    except ResourceNotFoundError as exc:
+        raise file_not_found() from exc
 
 
 async def _start_upload(request: Request) -> Response:
@@ -240,9 +252,7 @@ async def create_file(request: Request):
 async def list_files(request: Request):
     """List owned durable Files with stable page tokens."""
     _context()
-    records = await get_resource_store(request).list(
-        get_resource_owner(request), "file"
-    )
+    records = await list_stored_files(request)
     try:
         limit = int(request.query_params.get("pageSize", "100"))
     except ValueError as exc:

@@ -21,6 +21,13 @@ def get_gigachat_client(request: Request):
     return getattr(request_state, "gigachat_client", app_state.gigachat_client)
 
 
+def get_request_transformer(request: Request):
+    """Return preparation bound to the selected profile's configuration."""
+    return getattr(
+        request.state, "request_transformer", request.app.state.request_transformer
+    )
+
+
 def get_gigachat_model_catalog(request: Request) -> GigaChatModelCatalog:
     """Return the application-scoped dynamic GigaChat model catalog."""
     app_state = request.app.state
@@ -88,7 +95,13 @@ def get_resource_owner(
             if settings.enable_api_key_auth or settings.mode == "PROD"
             else "anonymous"
         ) or "anonymous"
-    upstream = config.gigachat_settings
+    runtime = getattr(request.app.state, "bridge_provider_runtime", None)
+    profile = profile or getattr(request.state, "provider_profile_id", None)
+    upstream = (
+        runtime._giga_settings.get(profile, config.gigachat_settings)
+        if runtime is not None
+        else config.gigachat_settings
+    )
     credential_context = {}
     for key in ("base_url", "scope", "credentials", "access_token", "user", "password"):
         value = getattr(upstream, key, None)

@@ -5,6 +5,8 @@ import time
 
 from fastapi import APIRouter, Request
 
+from gpt2giga.app.providers import bind_model_request
+from gpt2giga.app_state import get_request_transformer
 from gpt2giga.app_state import get_gigachat_client, get_model_concurrency_limiter
 from gpt2giga.common.api_mode import resolve_gigachat_api_mode
 from gpt2giga.common.client_params import ClientCompatibilityError
@@ -55,22 +57,29 @@ async def generate_image(request: Request):
                 f"Only {key}={supported!r} is supported.", param=key
             )
     model = native_operation_model(request, data.get("model"), image=True)
+    registry = getattr(request.app.state, "provider_registry", None)
+    requested_alias = data.get("model")
+    await bind_model_request(
+        request,
+        requested_alias
+        if registry is not None and requested_alias in registry.public_aliases()
+        else model,
+        None,
+    )
     client = get_gigachat_client(request)
     async with get_model_concurrency_limiter(request).limit(model, provider="openai"):
         async with gigachat_request_options(
             client, options, include_body=False
         ) as scoped:
-            payload = (
-                await request.app.state.request_transformer.prepare_chat_completion(
-                    {
-                        "model": model,
-                        "messages": [{"role": "user", "content": prompt}],
-                        "tools": [{"type": "image_generation"}],
-                        "tool_choice": "required",
-                    },
-                    scoped,
-                    forced_model=model,
-                )
+            payload = await get_request_transformer(request).prepare_chat_completion(
+                {
+                    "model": model,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "tools": [{"type": "image_generation"}],
+                    "tool_choice": "required",
+                },
+                scoped,
+                forced_model=model,
             )
             result = await scoped.with_options(max_retries=0).achat.create(payload)
             metadata = extract_chat_completion_message_metadata(result)

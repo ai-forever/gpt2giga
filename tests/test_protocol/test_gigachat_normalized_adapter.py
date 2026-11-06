@@ -92,6 +92,15 @@ class FakeTransformer:
         self.calls = []
         self.chat_completion_calls = []
 
+    async def prepare_normalized(
+        self, request, giga_client=None, *, api_mode, **kwargs
+    ):
+        data = normalized_chat_to_openai_payload(request)
+        prepare = (
+            self.prepare_chat_completion if api_mode == "v2" else self.prepare_chat
+        )
+        return await prepare(data, giga_client)
+
     async def prepare_chat(self, data, giga_client=None):
         self.calls.append((data, giga_client))
         return {"model": data["model"], "messages": data["messages"]}
@@ -749,6 +758,7 @@ async def test_stream_preparation_sdk_timeout_becomes_safe_error(mode):
             raise APITimeoutError("secret request body", request_id="upstream-id")
 
         prepare_chat_completion = prepare_chat
+        prepare_normalized = prepare_chat
 
     adapter = GigaChatProviderAdapter(
         config=ProxyConfig(proxy=ProxySettings(gigachat_api_mode=mode)),

@@ -62,6 +62,11 @@ class CountingGigachat:
 
 
 class FakeTransformer:
+    async def prepare_normalized(
+        self, request, giga_client=None, *, api_mode, forced_model=None
+    ):
+        return {"model": forced_model or request.model or "GigaChat", "messages": []}
+
     async def prepare_chat(self, data, giga_client=None):
         return {"model": data.get("model", "GigaChat"), "messages": []}
 
@@ -85,8 +90,11 @@ def _make_app(
 
 
 async def _wait_for_calls(gigachat: CountingGigachat, count: int) -> None:
-    while len(gigachat.calls) < count:
-        await asyncio.sleep(0)
+    async def wait():
+        while len(gigachat.calls) < count:
+            await asyncio.sleep(0)
+
+    await asyncio.wait_for(wait(), timeout=2)
 
 
 async def _post_chat(client: httpx.AsyncClient, model: str):

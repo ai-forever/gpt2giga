@@ -48,7 +48,7 @@ def normalized_chat_response_to_anthropic(
 
     choice = response.choices[0] if response.choices else NormalizedChoice()
     message = choice.message or NormalizedMessage(role="assistant", content="")
-    content = _message_content(message)
+    content = _message_content(message, decoded=response.provider == "gigachat")
     stop_reason = _stop_reason(choice, has_tool_calls=bool(message.tool_calls))
     response_id = _response_id(response, context)
     return {
@@ -65,9 +65,11 @@ def normalized_chat_response_to_anthropic(
 
 def _message_content(
     message: NormalizedMessage,
+    *,
+    decoded: bool = False,
 ) -> list[dict[str, Any]]:
     content: list[dict[str, Any]] = []
-    text, reasoning = _normalized_text_and_reasoning(message)
+    text, reasoning = _normalized_text_and_reasoning(message, decoded=decoded)
     if reasoning:
         content.append({"type": "thinking", "thinking": reasoning})
     if text:
@@ -78,19 +80,22 @@ def _message_content(
 
 def _normalized_text_and_reasoning(
     message: NormalizedMessage,
+    *,
+    decoded: bool = False,
 ) -> tuple[str, str | None]:
     text = _content_text(message.content)
-    parsed = extract_reasoning_from_content(text)
     reasoning = merge_reasoning_text(
-        merge_reasoning_text(
-            message.reasoning_content,
-            _string_or_none(message.raw_extensions.get("reasoning_content")),
-        ),
-        parsed.reasoning_content,
+        message.reasoning_content,
+        _string_or_none(message.raw_extensions.get("reasoning_content")),
     )
+    if not decoded:
+        # Compatibility for non-Giga providers and callers constructing raw IR.
+        parsed = extract_reasoning_from_content(text)
+        text = parsed.content
+        reasoning = merge_reasoning_text(reasoning, parsed.reasoning_content)
     inline_data = message.raw_extensions.get("inline_data")
     rendered = render_text_with_sources(
-        parsed.content,
+        text,
         inline_data if isinstance(inline_data, dict) else {},
     )
     return rendered, reasoning

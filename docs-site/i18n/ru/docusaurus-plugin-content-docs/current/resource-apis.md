@@ -25,3 +25,21 @@ SDK acreate_batch получает raw JSONL, aget_batches выполняет po
 POST /responses/input_tokens возвращает object=response.input_tokens и input_tokens. Подсчитывается текст, instructions, function names/arguments/schemas и response schema через tokens/count, без chat и uploads. Files/images/stateful input/hosted tools отклоняются. Это текстовая оценка, не точный OpenAI tokenizer и не полная стоимость мультимодального запроса.
 
 Явный prompt_cache_key преобразуется в hashed X-Session-ID с разделением owner/profile/model даже при выключенном автоматическом prefix cache. Приоритет: пользовательский session header, глобальный GIGACHAT session, prompt_cache_key, затем включённый automatic prefix cache. В session ID нет raw prompt/API key. OpenAI retention TTL не обещается; usage берётся только из upstream.
+
+
+### Отказы и владение ресурсами
+
+До batch POST сохраняется durable intent. Если хранилище недоступно, POST не выполняется.
+Неопределённый результат отправки или ошибка сохранения native ID оставляет failed intent
+с `submission_outcome_unknown`; polling не отправляет job заново. Перед новым submit
+оператор должен сверить запись с провайдером. Общей транзакции SQLite и провайдера нет.
+Каждый terminal batch учитывает все input ID ровно один раз, сохраняя подтверждённые
+частичные результаты и явные ошибки отсутствующих строк. После restart используется
+сохранённый profile и соответствующий credential namespace пользователя.
+
+Перед генерацией проверяется владение registered ID в native `attachments`, headers
+и protocol-specific ссылках. Ошибка обязательного download/upload останавливает запрос.
+Cache вложений разделён по provider/profile/credentials и хранит размер и тип.
+Anthropic `expires_in_seconds` отклоняется до upload, пока native expiry не поддержан.
+Гонка resumable-записей на одном offset даёт один success и один HTTP 409.
+Finalize локального JSONL переносит blob без повторного расходования квоты.

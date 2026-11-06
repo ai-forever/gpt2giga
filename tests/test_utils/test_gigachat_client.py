@@ -22,6 +22,13 @@ from gpt2giga.providers.gigachat.request_options import (
 )
 
 
+@pytest.fixture(autouse=True)
+def isolated_ca_environment(monkeypatch):
+    """Keep default-CA tests independent of dotenv loaded by other tests."""
+    monkeypatch.delenv("SSL_CERT_FILE", raising=False)
+    monkeypatch.delenv("SSL_CERT_DIR", raising=False)
+
+
 async def test_configured_session_header_and_request_override(monkeypatch):
     monkeypatch.setenv("GIGACHAT_SESSION_ID", "configured-session")
     for key in ("CREDENTIALS", "USER", "PASSWORD"):

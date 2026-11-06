@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 
 from gpt2giga.api_server import create_app
 from gpt2giga.models.config import ProxyConfig, ProxySettings
+from gpt2giga.protocol import RequestTransformer
 
 
 class MockResponse:
@@ -146,20 +147,6 @@ class FakeGigaChat:
         return None
 
 
-class FakeRequestTransformer:
-    async def prepare_chat(self, data, giga_client=None):
-        return {
-            "model": data.get("model", "GigaChat"),
-            "messages": data.get("messages", []),
-            "tools": data.get("tools"),
-            "tool_choice": data.get("tool_choice"),
-            "max_tokens": data.get("max_tokens"),
-        }
-
-    async def prepare_chat_completion(self, data, giga_client=None):
-        return await self.prepare_chat(data, giga_client)
-
-
 def make_app(monkeypatch):
     fake_client = FakeGigaChat()
     monkeypatch.setattr(
@@ -179,7 +166,9 @@ def make_app(monkeypatch):
 
 
 def install_fake_transformer(app):
-    app.state.request_transformer = FakeRequestTransformer()
+    app.state.request_transformer = RequestTransformer(
+        app.state.config, app.state.logger
+    )
 
 
 def test_gemini_v1beta_generate_count_embed_and_models(monkeypatch):

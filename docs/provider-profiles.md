@@ -183,3 +183,17 @@ The support decision for each client-protocol/provider combination is described
 in [Bridge compatibility, loss, and errors](bridge-compatibility.md).
 Startup preflight, supervisor lifecycle, migration, and rollback are described
 in [0.3 migration and supervisor integration](migration-0-3.md).
+
+
+### GigaChat client binding
+
+Each explicit GigaChat profile binds its own `base_url` and OAuth `credential_env`
+through the existing SDK client factory. Transport/TLS settings are inherited from the
+GigaChat configuration; default-account authentication is cleared. A profile without a
+credential is deliberately keyless. Pass-through auth overrides credentials inside the
+selected profile, retaining its endpoint. Dynamic models use the configured dynamic
+GigaChat profile. Known aliases never fall through to the default client.
+
+The Chat Completions facade to an OpenAI-compatible upstream remains blocked by the
+executable loss matrix and rejects before upstream I/O. Responses, Anthropic Messages
+and Gemini GenerateContent retain their admitted external bridge paths.

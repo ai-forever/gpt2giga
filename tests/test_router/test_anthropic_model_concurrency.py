@@ -80,6 +80,20 @@ class GateAnthropicGigachat:
 
 
 class RecordingTransformer:
+    async def prepare_normalized(
+        self, request, giga_client=None, *, api_mode, forced_model=None
+    ):
+        from gpt2giga.providers.gigachat.adapter import (
+            normalized_chat_to_openai_payload,
+        )
+
+        payload = await self.prepare_chat(
+            normalized_chat_to_openai_payload(request), giga_client
+        )
+        if forced_model is not None:
+            payload["model"] = forced_model
+        return payload
+
     def __init__(self, upstream_model: str = "GigaChat"):
         self.upstream_model = upstream_model
         self.prepared_count = 0
@@ -168,13 +182,19 @@ async def _post_message(client: httpx.AsyncClient, model: str = "claude-visible"
 
 
 async def _wait_for_chat_count(gigachat: GateAnthropicGigachat, count: int) -> None:
-    while gigachat.chat_call_count < count:
-        await asyncio.sleep(0)
+    async def wait():
+        while gigachat.chat_call_count < count:
+            await asyncio.sleep(0)
+
+    await asyncio.wait_for(wait(), timeout=2)
 
 
 async def _wait_for_token_count(gigachat: GateAnthropicGigachat, count: int) -> None:
-    while gigachat.token_call_count < count:
-        await asyncio.sleep(0)
+    async def wait():
+        while gigachat.token_call_count < count:
+            await asyncio.sleep(0)
+
+    await asyncio.wait_for(wait(), timeout=2)
 
 
 async def test_anthropic_count_tokens_timeout_returns_429() -> None:

@@ -291,30 +291,22 @@ Assistants или Threads.
 
 ## Флаги нормализованного слоя
 
-Режим нормализации управляет встроенными GigaChat-путями OpenAI Chat
-Completions и Anthropic Messages и по умолчанию сохраняет их прежнее поведение:
+Значения конфигурации по умолчанию сохранены:
 
 ```dotenv
 GPT2GIGA_NORMALIZATION_MODE=off
 GPT2GIGA_LEGACY_CHAT_FALLBACK=True
 ```
 
-Неиспользуемый ключ `GPT2GIGA_EXPERIMENTAL_NORMALIZED_LAYER` удалён. Для
-детерминированной миграции используйте `GPT2GIGA_NORMALIZATION_MODE=on`, чтобы
-выполнять запросы через нормализованный путь, `shadow` только для диагностики
-перевода или `off`, чтобы сохранить прежний путь.
-`GPT2GIGA_LEGACY_CHAT_FALLBACK` настраивается независимо.
+`off`, `shadow` и `on` — совместимые режимы одного ядра исполнения.
+`shadow` добавляет диагностику формы декодированного запроса без его содержимого.
+Флаг legacy fallback принимается для совместимости config/admin schema;
+он не повторяет dispatch и не включает вторую реализацию исполнения.
+Устаревший `GPT2GIGA_EXPERIMENTAL_NORMALIZED_LAYER` не поддерживается.
 
-- `off`: OpenAI Chat Completions и Anthropic Messages идут через прежние пути;
-- `shadow`: строит нормализованную диагностику рядом с прежней обработкой OpenAI Chat без изменения ответов клиенту;
-- `on`: переводит OpenAI Chat, принятое подмножество Anthropic Messages v1 и
-  Gemini `countTokens` на нормализованный путь с откатом к прежнему до старта
-  ответа, если откат включён.
-
-Эти флаги не переопределяют явный внешний маршрут. Модель из профиля
-`openai_compatible` всегда проходит через нормализованный адаптер для Responses,
-Chat Completions, Anthropic Messages и Gemini GenerateContent. Отката на
-постороннюю модель GigaChat нет.
+Выбор provider выполняется до подготовки. External aliases используют допустимые
+Responses, Anthropic Messages или Gemini пути; Chat Completions к OpenAI-compatible
+остаётся blocked в executable loss matrix.
 
 Gemini GenerateContent использует свой выделенный адаптер Gemini-в-нормализованное и
 путь провайдера GigaChat независимо от этих флагов. Его принятое bridge-
@@ -687,3 +679,15 @@ Namespace определяется стабильным HMAC от настрое
 `GPT2GIGA_RESPONSES_STORAGE_MODE=native|gateway` по умолчанию равен `native`. Режим `gateway` включает owner-scoped immutable снимки Responses и Conversations в общем resource store с его retention policy. См. [Хранение ответов](response-storage.md).
 
 После удаления/истечения срока остаётся только небольшой маркер kind/ID без владельца и контента. Он не позволяет ранее зарегистрированным upstream IDs обходить ownership через fallback для старых файлов.
+
+
+Metadata ограничены отдельно от blobs: `GPT2GIGA_RESOURCE_MAX_METADATA_BYTES=67108864`
+и `GPT2GIGA_RESOURCE_MAX_RESOURCES=100000`. Это общие бюджеты хранилища.
+Запись, включая workload только со snapshots Responses, удаляет ограниченную порцию
+просроченных записей перед проверкой бюджета. Tombstones зарегистрированных ID
+сохраняются: foreign/expired ID не становятся неизвестными native ID.
+
+
+Token counting сохраняет узкое различие совместимости при подготовке текста: `on`
+учитывает normalized tool/schema text, а `off`/`shadow` сохраняют tolerant legacy subset.
+Все режимы используют общий token-count dispatch, client binding, limiter и cleanup.

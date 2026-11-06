@@ -10,6 +10,10 @@ from gpt2giga.app.responses_execution import (
     NativeGigaChatResponsesExecutor,
     NormalizedBridgeResponsesExecutor,
 )
+from gpt2giga.app.providers import bind_model_request
+from gpt2giga.common.files import validate_model_attachments
+from gpt2giga.protocols.normalized import PublicProtocol
+from gpt2giga.app_state import get_request_transformer
 from gpt2giga.app_state import get_gigachat_client, get_model_concurrency_limiter
 from gpt2giga.common.gigachat_options import extract_gigachat_request_options
 from gpt2giga.core.context import get_request_context
@@ -52,6 +56,9 @@ router = APIRouter(tags=[OPENAPI_TAG_OPENAI_RESPONSES])
 async def input_tokens(request: Request):
     """Estimate supported textual input using GigaChat's token-count API."""
     data = await read_request_json(request)
+    await bind_model_request(
+        request, data.get("model"), PublicProtocol.OPENAI_RESPONSES
+    )
     options = extract_gigachat_request_options(request, data)
     for key in ("previous_response_id", "conversation", "store", "background"):
         if data.get(key):
@@ -89,7 +96,7 @@ async def input_tokens(request: Request):
         )
     provider = GigaChatProviderAdapter(
         config=request.app.state.config,
-        request_transformer=request.app.state.request_transformer,
+        request_transformer=get_request_transformer(request),
         giga_client=get_gigachat_client(request),
         model_limiter=get_model_concurrency_limiter(request),
         request_options=options,
@@ -111,6 +118,10 @@ async def responses(request: Request):
     data = await read_request_json(request)
     state = request.app.state
     try:
+        await bind_model_request(
+            request, data.get("model"), PublicProtocol.OPENAI_RESPONSES
+        )
+        await validate_model_attachments(request, data)
         selection = select_responses_execution(
             state,
             requested_model=data.get("model"),

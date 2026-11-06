@@ -287,7 +287,11 @@ async def test_ambiguous_submit_timeout_is_not_replayed(tmp_path):
         assert response.status_code == 504
         assert "private input" not in response.text
         assert len(native.calls) == 1
-        assert not await app.state.resource_store.list("any", "batch")
+        listed = (await client.get("/v1/batches")).json()["data"]
+        assert len(listed) == 1
+        assert listed[0]["status"] == "failed"
+        assert listed[0]["request_counts"]["failed"] == 2
+        assert len(native.calls) == 1
 
 
 @pytest.mark.parametrize(
@@ -325,9 +329,7 @@ async def test_invalid_batch_has_no_submission(tmp_path, change):
     assert native.calls == []
 
 
-@pytest.mark.parametrize(
-    "problem", ["unknown_status", "duplicate", "missing", "wrong_id"]
-)
+@pytest.mark.parametrize("problem", ["unknown_status", "duplicate", "wrong_id"])
 async def test_invalid_upstream_results_are_502(tmp_path, problem):
     native = NativeBatches()
     async with app_client(tmp_path, native) as (_, client):
@@ -492,3 +494,308 @@ async def test_batch_ownership_hides_guessed_ids_and_outputs(tmp_path):
         ).status_code == 404
         assert (await client.get("/v1/batches")).json()["data"] == []
         assert len(native.calls) == before
+
+
+@pytest.mark.parametrize("failure_phase", ["intent", "mapping"])
+async def test_submit_failure_keeps_intent_or_prevents_io(
+    tmp_path, monkeypatch, failure_phase
+):
+    from gpt2giga.storage.resources import ResourceStoreError
+
+    native = NativeBatches()
+    async with app_client(tmp_path, native) as (app, client):
+        file_id = await upload(client, openai_rows())
+        store = app.state.resource_store
+        original = store.put if failure_phase == "intent" else store.update
+
+        async def fail_batch(owner, kind, *args, **kwargs):
+            if kind == "batch":
+                raise ResourceStoreError("synthetic storage failure")
+            return await original(owner, kind, *args, **kwargs)
+
+        with monkeypatch.context() as patch:
+            patch.setattr(
+                store, "put" if failure_phase == "intent" else "update", fail_batch
+            )
+            response = await client.post(
+                "/v1/batches",
+                json={
+                    "input_file_id": file_id,
+                    "endpoint": "/v1/chat/completions",
+                    "completion_window": "24h",
+                },
+            )
+        assert response.status_code == 500
+        assert len(native.calls) == (0 if failure_phase == "intent" else 1)
+        listed = (await client.get("/v1/batches")).json()["data"]
+        if failure_phase == "intent":
+            assert listed == []
+        else:
+            assert len(listed) == 1
+            assert listed[0]["status"] == "failed"
+            assert listed[0]["request_counts"] == {
+                "total": 2,
+                "completed": 0,
+                "failed": 2,
+            }
+            assert listed[0]["error_file_id"] is None
+            assert (
+                listed[0]["errors"]["data"][0]["code"] == "submission_outcome_unknown"
+            )
+            assert len(native.calls) == 1
+
+
+@pytest.mark.parametrize("status", ["failed", "completed"])
+async def test_terminal_partial_batch_preserves_success_and_accounts_missing(
+    tmp_path, status
+):
+    native = NativeBatches()
+    original_batch = native.batch
+    native.batch = lambda value: {
+        **original_batch(value),
+        "output_file_id": "native-output" if value == status else None,
+    }
+    async with app_client(tmp_path, native) as (_, client):
+        file_id = await upload(client, openai_rows())
+        created = await client.post(
+            "/v1/batches",
+            json={
+                "input_file_id": file_id,
+                "endpoint": "/v1/chat/completions",
+                "completion_window": "24h",
+            },
+        )
+        native.status = status
+        native.outputs = [{"id": "one", "result": native.result()}]
+        batch = (await client.get(f"/v1/batches/{created.json()['id']}")).json()
+        assert batch["status"] == status
+        assert batch["request_counts"] == {"total": 2, "completed": 1, "failed": 1}
+        success = await client.get(f"/v1/files/{batch['output_file_id']}/content")
+        error = await client.get(f"/v1/files/{batch['error_file_id']}/content")
+        assert json.loads(success.content)["custom_id"] == "one"
+        assert json.loads(error.content)["custom_id"] == "two"
+
+
+@pytest.mark.parametrize("override", [False, True])
+async def test_profile_batch_binding_survives_restart_and_request_token(
+    tmp_path, monkeypatch, override
+):
+    import time
+
+    profile_path = tmp_path / "providers.json"
+    profile_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "gpt2giga.provider-profiles.v3",
+                "profiles": [
+                    {
+                        "profile_id": "second",
+                        "provider_kind": "gigachat",
+                        "base_url": "https://second.giga.example/v1",
+                        "credential_env": "SECOND_GIGA_CREDENTIAL",
+                        "network_policy_ref": "public-openai",
+                        "tls_policy_ref": "system-default",
+                        "models": [
+                            {
+                                "public_alias": "second/model",
+                                "upstream_model": "fixture-upstream-model",
+                                "capability_profile": "fixture",
+                                "support_status": "technical_preview",
+                            }
+                        ],
+                    }
+                ],
+            }
+        )
+    )
+    monkeypatch.setenv("SECOND_GIGA_CREDENTIAL", "second-synthetic-credential")
+    native = NativeBatches()
+    auth_calls = []
+
+    def handle(request):
+        if (
+            request.url.host == "default.giga.example"
+            and request.url.path == "/v1/files"
+        ):
+            return httpx2.Response(200, json={"data": []})
+        if request.url.host == "auth.test":
+            auth_calls.append(request)
+            assert (
+                request.headers["authorization"] == "Basic second-synthetic-credential"
+            )
+            return httpx2.Response(
+                200,
+                json={
+                    "access_token": "second-synthetic-token",
+                    "expires_at": int((time.time() + 3600) * 1000),
+                },
+            )
+        assert request.url.host == "second.giga.example"
+        assert request.headers["authorization"] == (
+            "Bearer override-token" if override else "Bearer second-synthetic-token"
+        )
+        return native(request)
+
+    async with httpx2.AsyncClient(
+        transport=httpx2.MockTransport(handle), trust_env=False
+    ) as wire:
+
+        def injected(**kwargs):
+            return GigaChat(
+                **kwargs, async_http_client=wire, auth_async_http_client=wire
+            )
+
+        monkeypatch.setattr("gpt2giga.providers.gigachat.client.GigaChat", injected)
+
+        def configured_app():
+            return create_app(
+                ProxyConfig(
+                    config=str(profile_path),
+                    proxy=ProxySettings(
+                        mode="DEV",
+                        pass_model=True,
+                        pass_token=override,
+                        resource_store_path=str(tmp_path / "store"),
+                    ),
+                    gigachat={
+                        "base_url": "https://default.giga.example/v1",
+                        "auth_url": "https://auth.test/oauth",
+                        "access_token": "default-synthetic-token",
+                        "credentials": "",
+                        "trust_env": False,
+                        "user": "",
+                        "password": "",
+                        "max_retries": 0,
+                    },
+                    _env_file=None,
+                )
+            )
+
+        headers = (
+            {"Authorization": "Bearer giga-auth-override-token"} if override else {}
+        )
+        app = configured_app()
+        async with app.router.lifespan_context(app):
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app),
+                base_url="http://gateway.test",
+                headers=headers,
+            ) as client:
+                rows = openai_rows()
+                for row in rows:
+                    row["body"]["model"] = "second/model"
+                file_id = await upload(client, rows)
+                created = await client.post(
+                    "/v1/batches",
+                    json={
+                        "input_file_id": file_id,
+                        "endpoint": "/v1/chat/completions",
+                        "completion_window": "24h",
+                    },
+                )
+                assert created.status_code == 200, created.text
+                batch_id = created.json()["id"]
+                assert all(
+                    row["request"]["model"] == "fixture-upstream-model"
+                    for row in native.rows
+                )
+        app = configured_app()
+        async with app.router.lifespan_context(app):
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app),
+                base_url="http://gateway.test",
+                headers=headers,
+            ) as client:
+                result = await client.get(f"/v1/batches/{batch_id}")
+                assert result.status_code == 200, result.text
+                assert result.json()["status"] == "completed"
+                output_id = result.json()["output_file_id"]
+                content = await client.get(f"/v1/files/{output_id}/content")
+                assert content.status_code == 200, content.text
+                assert len(content.content.splitlines()) == 2
+                await app.state.resource_store.put(
+                    "foreign-owner",
+                    "file",
+                    "file_g2g_foreign",
+                    {"id": "file_g2g_foreign"},
+                )
+                listed = (await client.get("/v1/files")).json()["data"]
+                assert output_id in {item["id"] for item in listed}
+                assert "file_g2g_foreign" not in {item["id"] for item in listed}
+                gemini_files = (await client.get("/v1beta/files")).json()["files"]
+                assert f"files/{output_id}" in {item["name"] for item in gemini_files}
+                assert "files/file_g2g_foreign" not in {
+                    item["name"] for item in gemini_files
+                }
+                again = await client.get(f"/v1/batches/{batch_id}")
+                assert again.status_code == 200
+        assert sum(request.method == "POST" for request in native.calls) == 1
+        assert len(auth_calls) == (0 if override else 2)
+
+
+async def test_listing_pending_submission_cannot_materialize_stale_errors(tmp_path):
+    import asyncio
+
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    class PendingNative(NativeBatches):
+        async def __call__(self, request):
+            if request.method == "POST" and request.url.path == "/v1/batches":
+                entered.set()
+                await release.wait()
+            return super().__call__(request)
+
+    native = PendingNative()
+    async with app_client(tmp_path, native) as (_, client):
+        file_id = await upload(client, openai_rows())
+        submit = asyncio.create_task(
+            client.post(
+                "/v1/batches",
+                json={
+                    "input_file_id": file_id,
+                    "endpoint": "/v1/chat/completions",
+                    "completion_window": "24h",
+                },
+            )
+        )
+        await entered.wait()
+        try:
+            pending = (await client.get("/v1/batches")).json()["data"][0]
+            assert pending["errors"]["data"][0]["code"] == "submission_outcome_unknown"
+            assert pending["error_file_id"] is None
+        finally:
+            release.set()
+        created = await submit
+        assert created.status_code == 200, created.text
+        batch = (await client.get(f"/v1/batches/{created.json()['id']}")).json()
+        assert batch["request_counts"] == {"total": 2, "completed": 2, "failed": 0}
+        assert batch["errors"] is None and batch["error_file_id"] is None
+        content = await client.get(f"/v1/files/{batch['output_file_id']}/content")
+        assert len(content.content.splitlines()) == 2
+
+
+async def test_batch_native_foreign_attachment_rejected_before_submit(tmp_path):
+    native = NativeBatches()
+    async with app_client(tmp_path, native) as (app, client):
+        await app.state.resource_store.put(
+            "foreign-owner",
+            "file",
+            "native-foreign",
+            {
+                "upstream_id": "native-foreign",
+                "local": False,
+            },
+        )
+        rows = openai_rows()
+        rows[1]["body"]["messages"][0]["attachments"] = ["native-foreign"]
+        file_id = await upload(client, rows)
+        response = await client.post(
+            "/v1/batches",
+            json={
+                "input_file_id": file_id,
+                "endpoint": "/v1/chat/completions",
+                "completion_window": "24h",
+            },
+        )
+        assert response.status_code == 404, response.text
+        assert native.calls == []

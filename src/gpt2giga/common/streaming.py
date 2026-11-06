@@ -25,6 +25,7 @@ from gpt2giga.common.model_concurrency import (
     ModelConcurrencyTimeoutError,
 )
 from gpt2giga.common.reasoning import ReasoningContentParser
+from gpt2giga.common.response_storage import finish_snapshot, project_snapshot_response
 from gpt2giga.common.sources import (
     SourceMarkerStreamRenderer,
     extract_sources,
@@ -775,7 +776,18 @@ async def stream_responses_generator(
         effort = request_data.get("reasoning_effort") if request_data else None
         return {"effort": effort, "summary": None}
 
+    snapshot_turn = getattr(request.state, "gateway_snapshot_turn", None)
+    observer = getattr(request.state, "responses_stream_observer", None)
+
     def sse_event(event_type: str, data: dict) -> str:
+        if observer is not None:
+            try:
+                observer.observe_payload(event_type, data)
+            except Exception as exc:
+                if logger is not None:
+                    logger.warning(
+                        "OpenAI Responses stream observability observe failed: {}", exc
+                    )
         return f"event: {event_type}\ndata: {json.dumps(data)}\n\n"
 
     def update_response_identity() -> None:
@@ -790,42 +802,49 @@ async def stream_responses_generator(
         fc_id = f"fc_{response_id}"
 
     def build_response_obj(status: str, output: list = None, usage: dict = None):
-        return {
-            "id": f"resp_{response_id}",
-            "object": "response",
-            "created_at": created_at,
-            "status": status,
-            "error": None,
-            "incomplete_details": (
-                {"reason": incomplete_reason} if status == "incomplete" else None
-            ),
-            "instructions": request_data.get("instructions") if request_data else None,
-            "max_output_tokens": (
-                request_data.get("max_output_tokens") if request_data else None
-            ),
-            "model": model,
-            "output": output or [],
-            "parallel_tool_calls": parallel_tool_calls_enabled(chat_messages),
-            "previous_response_id": (
-                request_data.get("previous_response_id") if request_data else None
-            ),
-            "reasoning": build_reasoning_config(),
-            "store": request_data.get("store", False) if request_data else False,
-            "temperature": request_data.get("temperature") if request_data else None,
-            "text": {"format": {"type": "text"}},
-            "tool_choice": request_data.get("tool_choice", "auto")
-            if request_data
-            else "auto",
-            "tools": request_data.get("tools", []) if request_data else [],
-            "top_p": request_data.get("top_p") if request_data else None,
-            "truncation": "disabled",
-            "usage": usage,
-            "user": None,
-            "metadata": merge_openai_response_metadata(
-                request_data.get("metadata", {}) if request_data else {},
-                response_metadata,
-            ),
-        }
+        return project_snapshot_response(
+            snapshot_turn,
+            {
+                "id": f"resp_{response_id}",
+                "object": "response",
+                "created_at": created_at,
+                "status": status,
+                "error": None,
+                "incomplete_details": (
+                    {"reason": incomplete_reason} if status == "incomplete" else None
+                ),
+                "instructions": request_data.get("instructions")
+                if request_data
+                else None,
+                "max_output_tokens": (
+                    request_data.get("max_output_tokens") if request_data else None
+                ),
+                "model": model,
+                "output": output or [],
+                "parallel_tool_calls": parallel_tool_calls_enabled(chat_messages),
+                "previous_response_id": (
+                    request_data.get("previous_response_id") if request_data else None
+                ),
+                "reasoning": build_reasoning_config(),
+                "store": request_data.get("store", False) if request_data else False,
+                "temperature": request_data.get("temperature")
+                if request_data
+                else None,
+                "text": {"format": {"type": "text"}},
+                "tool_choice": request_data.get("tool_choice", "auto")
+                if request_data
+                else "auto",
+                "tools": request_data.get("tools", []) if request_data else [],
+                "top_p": request_data.get("top_p") if request_data else None,
+                "truncation": "disabled",
+                "usage": usage,
+                "user": None,
+                "metadata": merge_openai_response_metadata(
+                    request_data.get("metadata", {}) if request_data else {},
+                    response_metadata,
+                ),
+            },
+        )
 
     def response_start_events() -> list[str]:
         nonlocal sequence_number
@@ -1472,10 +1491,7 @@ async def stream_responses_generator(
                     async for event in _delegated_stream:
                         yield event
 
-        if (
-            getattr(getattr(request, "state", None), "gateway_snapshot", False)
-            and not upstream_terminal
-        ):
+        if not upstream_terminal:
             yield sse_event(
                 "error",
                 {
@@ -1516,6 +1532,40 @@ async def stream_responses_generator(
         if flushed_reasoning.reasoning_content:
             reasoning_text += flushed_reasoning.reasoning_content
 
+        async def complete_response(output):
+            result = build_response_obj(final_status, output=output, usage=final_usage)
+            if await request.is_disconnected():
+                return None
+            await finish_snapshot(request, snapshot_turn, result)
+            callback = getattr(request.state, "responses_stream_completed", None)
+            if callback is not None:
+                await callback(result)
+            return result
+
+        async def final_frame(output):
+            try:
+                result = await complete_response(output)
+            except Exception:
+                # No completed event/history after a failed durable commit.
+                return sse_event(
+                    "error",
+                    {
+                        "type": "error",
+                        "code": "response_storage_error",
+                        "message": "The response could not be completed or stored.",
+                        "param": None,
+                        "sequence_number": sequence_number,
+                        **(
+                            {"response_id": snapshot_turn.response_id}
+                            if snapshot_turn
+                            else {}
+                        ),
+                    },
+                )
+            if result is None:
+                return None
+            return emit_sequenced_event(final_event_type, {"response": result})
+
         final_status = "incomplete" if incomplete_reason else "completed"
         final_event_type = f"response.{final_status}"
         if function_calls:
@@ -1553,14 +1603,10 @@ async def stream_responses_generator(
                     {"output_index": output_index, "item": done_item},
                 )
                 final_output.append(done_item)
-            yield emit_sequenced_event(
-                final_event_type,
-                {
-                    "response": build_response_obj(
-                        final_status, output=final_output, usage=final_usage
-                    )
-                },
-            )
+            frame = await final_frame(final_output)
+            if frame is not None:
+                yield frame
+
         else:
             metadata_message = {
                 "content": full_text,
@@ -1666,16 +1712,9 @@ async def stream_responses_generator(
                         "content": [output_text_part],
                     }
                 )
-            yield sse_event(
-                final_event_type,
-                {
-                    "type": final_event_type,
-                    "response": build_response_obj(
-                        final_status, output=final_output, usage=final_usage
-                    ),
-                    "sequence_number": sequence_number,
-                },
-            )
+            frame = await final_frame(final_output)
+            if frame is not None:
+                yield frame
 
     except ModelConcurrencyTimeoutError:
         error_response = {

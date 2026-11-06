@@ -1,8 +1,6 @@
 """Opt-in immutable Responses snapshots and durable conversation items."""
 
-import json
 import uuid
-import codecs
 from copy import deepcopy
 from dataclasses import dataclass
 
@@ -15,8 +13,6 @@ from gpt2giga.app_state import (
     get_gigachat_model_catalog_profile_id,
 )
 from gpt2giga.common.client_params import ClientCompatibilityError
-from gpt2giga.common.streaming_response import closing_stream
-from gpt2giga.logger import rquid_context
 from gpt2giga.storage.resources import ResourceConflictError, ResourceNotFoundError
 
 
@@ -190,6 +186,41 @@ class SnapshotTurn:
     conversation_id: str | None = None
     revision: int | None = None
     conversation_owner: str | None = None
+    previous_response_id: str | None = None
+
+
+def _validate_snapshot_context(request: Request, data: dict) -> None:
+    """Reject context that cannot be represented by the stored text/function items."""
+    if request.headers.get("x-gpt2giga-attachment-ids"):
+        raise ClientCompatibilityError(
+            "Gateway snapshots cannot replay attachment headers.", param="attachments"
+        )
+
+    def validate(payload):
+        if not isinstance(payload, dict):
+            return
+        for field in ("storage", "assistant_id", "attachments", "attachment_ids"):
+            if payload.get(field) is not None:
+                raise ClientCompatibilityError(
+                    "Gateway snapshots cannot replay native attachments or mutable state.",
+                    param=field,
+                )
+        for field in ("extra_body", "additional_fields"):
+            extra = payload.get(field)
+            validate(extra)
+            if isinstance(extra, dict):
+                for override in ("input", "messages", "tools", "reasoning"):
+                    if override in extra:
+                        raise ClientCompatibilityError(
+                            "Gateway snapshot input must be expressed in the public request fields.",
+                            param=override,
+                        )
+        for item in (
+            payload.get("input", []) if isinstance(payload.get("input"), list) else []
+        ):
+            validate(item)
+
+    validate(data)
 
 
 async def prepare_snapshot(
@@ -223,6 +254,7 @@ async def prepare_snapshot(
     if previous and prior is None:
         # Previously issued native IDs retain their original continuation path.
         return data, None
+    _validate_snapshot_context(request, data)
     for key in ("background",):
         if data.get(key):
             raise ClientCompatibilityError(
@@ -280,7 +312,9 @@ async def prepare_snapshot(
         conversation_id,
         revision,
         conversation_owner,
+        previous,
     )
+    request.state.gateway_snapshot_turn = turn
     return expanded, turn
 
 
@@ -328,78 +362,22 @@ async def _save_snapshot(request: Request, turn: SnapshotTurn, response: dict) -
         raise HTTPException(404, detail="Conversation no longer exists.") from exc
 
 
-async def finish_snapshot(request: Request, turn: SnapshotTurn | None, result):
-    """Replace response IDs and persist only a confirmed completed response."""
-    if turn is None:
-        return result
-
-    def project(response):
+def project_snapshot_response(turn: SnapshotTurn | None, response: dict) -> dict:
+    """Apply the public snapshot identity to a structured response."""
+    if turn is not None:
         response["id"] = turn.response_id
         response["store"] = turn.store
+        response["previous_response_id"] = turn.previous_response_id
         if turn.conversation_id:
             response["conversation"] = {"id": turn.conversation_id}
-        return response
+    return response
 
+
+async def finish_snapshot(request: Request, turn: SnapshotTurn | None, result):
+    """Persist confirmed structured results before terminal SSE serialization."""
+    if turn is None or isinstance(result, StreamingResponse):
+        return result
     if isinstance(result, dict):
-        project(result)
+        project_snapshot_response(turn, result)
         await _save_snapshot(request, turn, result)
-        return result
-    if not isinstance(result, StreamingResponse):
-        return result
-    original = result.body_iterator
-
-    async def projected_events():
-        buffer = ""
-        decoder = codecs.getincrementaldecoder("utf-8")()
-        async with closing_stream(original):
-            async for chunk in original:
-                buffer += (
-                    decoder.decode(chunk) if isinstance(chunk, bytes) else str(chunk)
-                )
-                while "\n\n" in buffer:
-                    frame, buffer = buffer.split("\n\n", 1)
-                    lines = frame.splitlines()
-                    for index, line in enumerate(lines):
-                        if not line.startswith("data: ") or line == "data: [DONE]":
-                            continue
-                        event = json.loads(line[6:])
-                        if isinstance(event.get("response"), dict):
-                            project(event["response"])
-                        if "response_id" in event:
-                            event["response_id"] = turn.response_id
-                        if event.get("type") == "response.completed":
-                            await _save_snapshot(request, turn, event["response"])
-                        lines[index] = "data: " + json.dumps(event, ensure_ascii=False)
-                    yield "\n".join(lines) + "\n\n"
-            if buffer:
-                yield buffer
-
-    async def events():
-        sequence = 0
-        projected = projected_events()
-        try:
-            async with closing_stream(projected):
-                async for frame in projected:
-                    for line in frame.splitlines():
-                        if line.startswith("data: ") and line != "data: [DONE]":
-                            event = json.loads(line[6:])
-                            sequence = event.get("sequence_number", sequence) + 1
-                    yield frame
-        except Exception:
-            # Headers are already sent. Preserve the SSE contract and expose no
-            # stored prompt, schema, SQL, filesystem path, or upstream details.
-            event = {
-                "type": "error",
-                "code": "response_storage_error",
-                "message": "The response could not be completed or stored.",
-                "param": None,
-                "sequence_number": sequence,
-                "response_id": turn.response_id,
-            }
-            request_id = rquid_context.get()
-            if request_id:
-                event["request_id"] = request_id
-            yield "event: error\ndata: " + json.dumps(event) + "\n\n"
-
-    result.body_iterator = events()
     return result

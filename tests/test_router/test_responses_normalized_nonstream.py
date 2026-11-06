@@ -10,6 +10,7 @@ from gpt2giga.models.config import ProxyConfig, ProxySettings
 from gpt2giga.protocol import ResponseProcessor
 from gpt2giga.protocols.openai import OpenAIProtocolAdapter
 from gpt2giga.providers.gigachat import GigaChatProviderAdapter
+from gpt2giga.providers.gigachat.adapter import normalized_chat_to_openai_payload
 from gpt2giga.routers.openai.responses import router
 
 
@@ -73,6 +74,11 @@ class _Transformer:
         self.chat_calls = []
         self.native_responses_calls = []
         self.allow_native = allow_native
+
+    async def prepare_normalized(self, request, giga_client=None, **kwargs):
+        return await self.prepare_chat(
+            normalized_chat_to_openai_payload(request), giga_client
+        )
 
     async def prepare_chat(self, data, giga_client=None, **kwargs):
         self.chat_calls.append(data)
@@ -275,3 +281,126 @@ def test_responses_stream_uses_normalized_events_without_native_fallback() -> No
     assert transformer.native_responses_calls == []
     assert giga_client.calls == []
     assert len(giga_client.stream_calls) == 1
+
+
+async def _executor_response(app):
+    from fastapi import Request
+    from gpt2giga.app.responses_execution import NormalizedBridgeResponsesExecutor
+
+    async def receive():
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    request = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/responses",
+            "scheme": "http",
+            "server": ("gateway.test", 80),
+            "headers": [],
+            "query_string": b"",
+            "app": app,
+        },
+        receive=receive,
+    )
+    return await NormalizedBridgeResponsesExecutor()._stream_response(
+        request,
+        {"input": "hello", "model": "bridge/codex-test", "stream": True},
+        protocol_adapter=OpenAIProtocolAdapter(),
+    )
+
+
+async def test_normalized_executor_close_closes_retained_provider_iterator(monkeypatch):
+    from types import SimpleNamespace
+    from gpt2giga.protocols.normalized import NormalizedStreamEvent
+    import gpt2giga.app.responses_execution as execution
+
+    closed, committed = [], []
+
+    async def provider_stream():
+        try:
+            yield NormalizedStreamEvent(type="message_start", sequence=0)
+            yield NormalizedStreamEvent(
+                type="message_end", sequence=1, finish_reason="stop"
+            )
+        finally:
+            closed.append(True)
+
+    async def commit(*args):
+        committed.append(True)
+
+    retained = provider_stream()
+    app, _, _ = _app()
+    app.state.responses_provider_adapter = SimpleNamespace(
+        name="external", stream_chat=lambda *args, **kwargs: retained
+    )
+    monkeypatch.setattr(execution, "commit_responses_response", commit)
+    response = await _executor_response(app)
+    assert "response.created" in await anext(response.body_iterator)
+    await response.body_iterator.aclose()
+    assert closed == [True]
+    assert committed == []
+
+
+@pytest.mark.parametrize("commit_failure", [False, True])
+async def test_normalized_stream_commits_structured_result_before_terminal(
+    monkeypatch, commit_failure
+):
+    import gpt2giga.app.responses_execution as execution
+    from gpt2giga.sinks.observability.responses import OpenAIResponseStreamObserver
+
+    commits, parsed, spans = [], [], []
+
+    class Sink:
+        async def emit(self, name, attributes=None, **kwargs):
+            spans.append(attributes)
+
+    async def commit(request, turn, result):
+        assert result["status"] == "completed"
+        assert result["output"][0]["content"][0]["text"] == "normalized"
+        if commit_failure:
+            raise RuntimeError("synthetic storage failure")
+        commits.append(result)
+
+    monkeypatch.setattr(execution, "commit_responses_response", commit)
+    monkeypatch.setattr(
+        OpenAIResponseStreamObserver,
+        "observe_chunk",
+        lambda self, chunk: parsed.append(chunk),
+    )
+    app, _, _ = _app()
+    app.state.observability_sink = Sink()
+    response = await _executor_response(app)
+    frames = []
+    async for frame in response.body_iterator:
+        if "event: response.completed" in frame:
+            assert len(commits) == 1
+        frames.append(frame)
+    body = "".join(frames)
+    assert parsed == []
+    assert bool(commits) is not commit_failure
+    assert ("event: response.completed" in body) is not commit_failure
+    assert body.count("event: error") == int(commit_failure)
+    if commit_failure:
+        assert "response_storage_error" in body
+        assert "synthetic storage failure" not in body
+    assert len(spans) == 1
+    assert spans[0]["status"] == ("failed" if commit_failure else "ok")
+
+
+async def test_normalized_stream_observer_failure_does_not_interrupt_response(
+    monkeypatch,
+):
+    from gpt2giga.sinks.observability.responses import OpenAIResponseStreamObserver
+
+    def broken_observer(*args):
+        raise RuntimeError("synthetic diagnostics failure")
+
+    monkeypatch.setattr(
+        OpenAIResponseStreamObserver, "observe_payload", broken_observer
+    )
+    app, _, _ = _app()
+    response = await _executor_response(app)
+    body = "".join([frame async for frame in response.body_iterator])
+    assert body.count("event: response.completed") == 1
+    assert "event: error" not in body

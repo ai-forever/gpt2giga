@@ -1487,3 +1487,82 @@ def test_tls_and_proxy_refs_require_an_injected_policy_owned_client():
             credential=None,
             authorize_network=_NetworkAuthorizer(),
         )
+
+
+async def test_outer_stream_close_closes_retained_upstream_iterator(monkeypatch):
+    closed = []
+
+    async def inner(**kwargs):
+        try:
+            yield {"choices": [{"index": 0, "delta": {"content": "partial"}}]}
+            yield None
+        finally:
+            closed.append(True)
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda _: None)
+    ) as client:
+        adapter = OpenAICompatibleProviderAdapter(
+            _profile(),
+            credential="synthetic",
+            authorize_network=_NetworkAuthorizer(),
+            http_client=client,
+        )
+        retained = inner()
+        monkeypatch.setattr(adapter, "_stream_json", lambda **kwargs: retained)
+        stream = adapter.stream_chat(
+            NormalizedChatRequest(
+                protocol="openai",
+                operation="responses",
+                model="fixture-model",
+                stream=True,
+                messages=[NormalizedMessage(role="user", content="hello")],
+            ),
+            downstream=DownstreamProtocol.OPENAI,
+            downstream_capabilities=_all_downstream_capabilities(),
+            input_token_count=7,
+        )
+        assert (await anext(stream)).type == "message_start"
+        await stream.aclose()
+        assert closed == [True]
+
+
+async def test_bound_stream_close_releases_inner_iterator_and_model_slot():
+    from types import SimpleNamespace
+    from gpt2giga.app.providers import _BoundOpenAICompatibleAdapter
+    from gpt2giga.common.model_concurrency import (
+        ModelConcurrencyLimiter,
+        ModelConcurrencyTimeoutError,
+    )
+    from gpt2giga.protocols.normalized import NormalizedStreamEvent, PublicProtocol
+
+    closed = []
+
+    async def inner():
+        try:
+            yield NormalizedStreamEvent(type="message_start")
+            yield NormalizedStreamEvent(type="message_end", finish_reason="stop")
+        finally:
+            closed.append(True)
+
+    retained = inner()
+    limiter = ModelConcurrencyLimiter({"fixture-model": 1}, acquire_timeout=0)
+    adapter = _BoundOpenAICompatibleAdapter(
+        SimpleNamespace(stream_chat=lambda *args, **kwargs: retained),
+        public_alias="public",
+        upstream_model="fixture-model",
+        public_protocol=PublicProtocol.OPENAI_RESPONSES,
+        downstream_capabilities=frozenset(),
+        model_limiter=limiter,
+    )
+    stream = adapter.stream_chat(
+        _request(stream=True).model_copy(update={"model": "public"})
+    )
+    assert (await anext(stream)).type == "message_start"
+    with pytest.raises(ModelConcurrencyTimeoutError):
+        async with limiter.limit("fixture-model"):
+            pass
+    await stream.aclose()
+    assert closed == [True]
+    async with limiter.limit("fixture-model"):
+        pass

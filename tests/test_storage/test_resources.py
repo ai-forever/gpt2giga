@@ -9,6 +9,7 @@ from gpt2giga.app_state import get_resource_owner, get_resource_store
 from gpt2giga.models.config import ProxyConfig, ProxySettings
 from gpt2giga.storage.resources import (
     ResourceLimitError,
+    ResourceConflictError,
     ResourceStore,
     ResourceStoreError,
 )
@@ -63,7 +64,7 @@ async def test_retention_is_separate_from_batch_deadline_and_cleans_blobs(tmp_pa
     assert await store.get("one", "batch", "batch-one") is None
     assert await store.read_blob("one", "batch", "batch-one") is None
     assert await store.purge_expired() == 1
-    assert await store.is_registered("batch", "batch-one")
+    assert not await store.is_registered("batch", "batch-one")
     assert list((tmp_path / "blobs").iterdir()) == []
     await store.aclose()
 
@@ -189,12 +190,16 @@ def test_resource_settings_from_environment(monkeypatch, tmp_path):
     monkeypatch.setenv("GPT2GIGA_RESOURCE_RETENTION_SECONDS", "100")
     monkeypatch.setenv("GPT2GIGA_RESOURCE_MAX_BLOB_BYTES", "200")
     monkeypatch.setenv("GPT2GIGA_RESOURCE_MAX_TOTAL_BLOB_BYTES", "500")
+    monkeypatch.setenv("GPT2GIGA_RESOURCE_MAX_METADATA_BYTES", "800")
+    monkeypatch.setenv("GPT2GIGA_RESOURCE_MAX_RESOURCES", "10")
     monkeypatch.setenv("GPT2GIGA_RESOURCE_TRUSTED_IDENTITY", "service-account")
     config = ProxySettings(_env_file=None)
     assert config.resource_store_path == str(tmp_path)
     assert config.resource_retention_seconds == 100
     assert config.resource_max_blob_bytes == 200
     assert config.resource_max_total_blob_bytes == 500
+    assert config.resource_max_metadata_bytes == 800
+    assert config.resource_max_resources == 10
     assert config.resource_trusted_identity == "service-account"
 
 
@@ -202,14 +207,14 @@ async def test_resumable_offset_finalize_and_quota(tmp_path):
     store = await ResourceStore.open(tmp_path, max_blob_bytes=4)
     await store.put("owner", "upload", "session", {"status": "active"}, blob=b"")
     await store.append_blob("owner", "upload", "session", b"ab", offset=0)
-    with pytest.raises(ValueError, match="offset"):
+    with pytest.raises(ResourceConflictError, match="offset"):
         await store.append_blob("owner", "upload", "session", b"cd", offset=0)
     with pytest.raises(ResourceLimitError):
         await store.append_blob("owner", "upload", "session", b"cde", offset=2)
     assert await store.read_blob("owner", "upload", "session") == b"ab"
     await store.append_blob("owner", "upload", "session", b"cd", offset=2)
     await store.update("owner", "upload", "session", {"status": "finalizing"})
-    with pytest.raises(ValueError, match="no longer"):
+    with pytest.raises(ResourceConflictError, match="no longer"):
         await store.append_blob("owner", "upload", "session", b"", offset=4)
     assert await store.read_blob("owner", "upload", "session") == b"abcd"
     assert await store.append_blob("other", "upload", "session", b"", offset=0) is None
@@ -256,4 +261,97 @@ async def test_failed_old_blob_cleanup_preserves_committed_append(
     store = await ResourceStore.open(tmp_path)
     assert not old_blob.exists()
     assert await store.read_blob("owner", "upload", "session") == b"ab"
+    await store.aclose()
+
+
+async def test_response_only_writes_bound_metadata_without_tombstone_growth(tmp_path):
+    now = [100.0]
+    store = await ResourceStore.open(
+        tmp_path, retention_seconds=1, clock=lambda: now[0]
+    )
+    for index in range(20):
+        await store.commit_response("owner", f"resp_g2g_{index}", {"text": "x" * 8192})
+        now[0] += 2
+    with sqlite3.connect(tmp_path / "resources.sqlite3") as db:
+        assert db.execute("SELECT public_id FROM resources").fetchall() == [
+            ("resp_g2g_19",)
+        ]
+        assert (
+            db.execute("SELECT COUNT(*) FROM registered_resources").fetchone()[0] == 0
+        )
+    await store.aclose()
+
+
+async def test_metadata_and_resource_limits_are_independent_of_blobs(tmp_path):
+    store = await ResourceStore.open(tmp_path, max_metadata_bytes=100, max_resources=2)
+    await store.commit_response("owner-a", "first", {"text": "x" * 40})
+    with pytest.raises(ResourceLimitError):
+        await store.commit_response("owner-b", "too-large", {"text": "x" * 60})
+    await store.put("owner-b", "file", "second", {})
+    with pytest.raises(ResourceLimitError):
+        await store.put("owner-a", "file", "third", {})
+    with pytest.raises(ResourceLimitError):
+        await store.update("owner-b", "file", "second", {"text": "x" * 60})
+    assert await store.get("owner-b", "response", "first") is None
+    assert (await store.get("owner-b", "file", "second")).metadata == {}
+    await store.aclose()
+
+
+async def test_same_offset_race_has_typed_conflict(tmp_path):
+    from gpt2giga.storage.resources import ResourceConflictError
+
+    one = await ResourceStore.open(tmp_path)
+    two = await ResourceStore.open(tmp_path)
+    await one.put("owner", "upload", "session", {"status": "active"}, blob=b"")
+    results = await asyncio.gather(
+        one.append_blob("owner", "upload", "session", b"ab", offset=0),
+        two.append_blob("owner", "upload", "session", b"ab", offset=0),
+        return_exceptions=True,
+    )
+    assert sum(isinstance(result, ResourceConflictError) for result in results) == 1
+    assert await one.read_blob("owner", "upload", "session") == b"ab"
+    await one.aclose()
+    await two.aclose()
+
+
+async def test_promote_blob_uses_one_quota_and_retains_owner(tmp_path):
+    store = await ResourceStore.open(tmp_path, max_total_blob_bytes=6)
+    await store.put(
+        "owner", "upload", "session", {"status": "finalizing"}, blob=b"abcd"
+    )
+    result = await store.promote_blob(
+        "owner", "upload", "session", "file", "final", {"local": True}
+    )
+    assert result.blob_size == 4
+    assert await store.get("owner", "upload", "session") is None
+    assert await store.read_blob("owner", "file", "final") == b"abcd"
+    assert await store.read_blob("other", "file", "final") is None
+    assert len(list((tmp_path / "blobs").iterdir())) == 1
+    await store.aclose()
+
+
+async def test_startup_discards_redundant_tombstones_but_keeps_native_file_gate(
+    tmp_path,
+):
+    store = await ResourceStore.open(tmp_path)
+    await store.put("owner", "file", "native-file", {})
+    await store.delete("owner", "file", "native-file")
+    await store.aclose()
+    with sqlite3.connect(tmp_path / "resources.sqlite3") as db:
+        db.executemany(
+            "INSERT INTO registered_resources VALUES (?, ?)",
+            [
+                ("response", "resp_g2g_old"),
+                ("batch", "batch_g2g_old"),
+                ("upload", "old-session"),
+                ("conversation", "conv_old"),
+                ("file", "file_g2g_old"),
+            ],
+        )
+    store = await ResourceStore.open(tmp_path)
+    assert await store.is_registered("file", "native-file")
+    with sqlite3.connect(tmp_path / "resources.sqlite3") as db:
+        assert db.execute(
+            "SELECT kind, public_id FROM registered_resources"
+        ).fetchall() == [("file", "native-file")]
     await store.aclose()

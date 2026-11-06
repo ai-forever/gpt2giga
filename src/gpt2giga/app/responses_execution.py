@@ -8,6 +8,7 @@ from fastapi.responses import StreamingResponse
 
 from gpt2giga.app_state import (
     get_gigachat_client,
+    get_request_transformer,
     get_gigachat_model_catalog,
     get_gigachat_model_catalog_profile_id,
     get_model_concurrency_limiter,
@@ -19,7 +20,6 @@ from gpt2giga.common.client_params import ClientCompatibilityError
 from gpt2giga.common.conversation import (
     commit_responses_response,
     stitch_responses_payload,
-    stitch_responses_stream,
 )
 from gpt2giga.common.gigachat_options import (
     extract_gigachat_request_options,
@@ -29,7 +29,10 @@ from gpt2giga.common.streaming import (
     stream_responses_chat_completion_generator,
     stream_responses_generator,
 )
-from gpt2giga.common.streaming_response import ModelLimitedStreamingResponse
+from gpt2giga.common.streaming_response import (
+    ModelLimitedStreamingResponse,
+    closing_stream,
+)
 from gpt2giga.capabilities.resolver import provider_capability_states
 from gpt2giga.core.context import get_request_context, update_request_context
 from gpt2giga.logger import rquid_context
@@ -52,6 +55,7 @@ from gpt2giga.routers.openai.helpers import request_attachment_ids
 from gpt2giga.sinks.observability.responses import (
     emit_openai_response_observability,
     observe_openai_response_stream,
+    OpenAIResponseStreamObserver,
 )
 
 
@@ -69,19 +73,38 @@ class NativeGigaChatResponsesExecutor:
         model_limiter = get_model_concurrency_limiter(request)
         mode = resolve_gigachat_api_mode(request)
         conversation_turn = await stitch_responses_payload(request, data, mode=mode)
+        observer = None
+        if stream:
+            observer = OpenAIResponseStreamObserver(
+                settings=state.config.proxy_settings
+            )
+            request.state.responses_stream_observer = observer
 
+            async def completed(result):
+                if result.get("status") == "completed":
+                    await commit_responses_response(request, conversation_turn, result)
+
+            request.state.responses_stream_completed = completed
+
+        upstream_model = getattr(request.state, "upstream_model", None)
+        provider_data = (
+            {**data, "model": upstream_model} if upstream_model is not None else data
+        )
         attachment_ids = request_attachment_ids(request)
         attachment_kwargs = {"attachment_ids": attachment_ids} if attachment_ids else {}
+        forced_model = getattr(request.state, "upstream_model", None)
+        if forced_model is not None:
+            attachment_kwargs["forced_model"] = forced_model
         if mode == "v2":
             async with gigachat_request_options(
                 giga_client, request_options, include_body=False
             ) as request_client:
-                chat_request = (
-                    await state.request_transformer.prepare_response_chat_completion(
-                        data,
-                        request_client,
-                        **attachment_kwargs,
-                    )
+                chat_request = await get_request_transformer(
+                    request
+                ).prepare_response_chat_completion(
+                    provider_data,
+                    request_client,
+                    **attachment_kwargs,
                 )
             model_resolution = resolve_upstream_model(
                 chat_request,
@@ -122,6 +145,7 @@ class NativeGigaChatResponsesExecutor:
                         ),
                         request_payload=data,
                         context=get_request_context(),
+                        observer=observer,
                     ),
                     media_type="text/event-stream",
                     acquired_model_limit=acquired_model_limit,
@@ -168,8 +192,10 @@ class NativeGigaChatResponsesExecutor:
         async with gigachat_request_options(
             giga_client, request_options, include_body=False
         ) as request_client:
-            chat_messages = await state.request_transformer.prepare_response_chat(
-                data,
+            chat_messages = await get_request_transformer(
+                request
+            ).prepare_response_chat(
+                provider_data,
                 request_client,
                 **attachment_kwargs,
             )
@@ -233,13 +259,10 @@ class NativeGigaChatResponsesExecutor:
         return ModelLimitedStreamingResponse(
             observe_openai_response_stream(
                 state,
-                stitch_responses_stream(
-                    request,
-                    conversation_turn,
-                    response_stream,
-                ),
+                response_stream,
                 request_payload=data,
                 context=get_request_context(),
+                observer=observer,
             ),
             media_type="text/event-stream",
             acquired_model_limit=acquired_model_limit,
@@ -359,6 +382,18 @@ class NormalizedBridgeResponsesExecutor:
             if context is not None and context.request_id
             else rquid_context.get()
         )
+        observer = OpenAIResponseStreamObserver(settings=state.config.proxy_settings)
+
+        def observe_payload(event_type, payload):
+            try:
+                observer.observe_payload(event_type, payload)
+            except Exception as exc:
+                log = getattr(state, "logger", None)
+                if log is not None:
+                    log.warning(
+                        "OpenAI Responses stream observability observe failed: {}", exc
+                    )
+
         projector = ResponsesStreamProjector(
             request_payload=data,
             requested_model=(
@@ -367,39 +402,58 @@ class NormalizedBridgeResponsesExecutor:
                 else data["model"]
             ),
             response_id=response_id,
+            observe_payload=observe_payload,
             default_parallel_tool_calls=(
                 getattr(provider_adapter, "name", None) != "gigachat"
             ),
         )
 
+        async def project_event(event):
+            frames = projector.project(event)
+            result = projector.terminal_response
+            if result is not None:
+                if await request.is_disconnected():
+                    return []
+                if result.get("status") == "completed":
+                    try:
+                        await commit_responses_response(
+                            request, conversation_turn, result
+                        )
+                    except Exception:
+                        return [projector.completion_error_frame()]
+            return frames
+
         async def emit_stream():
             pending_message_end = None
             try:
-                async for event in provider_adapter.stream_chat(
-                    normalized_request,
-                    context=context,
-                    is_disconnected=request.is_disconnected,
-                    logger=getattr(state, "logger", None),
-                ):
-                    if event.type == "message_end":
-                        if pending_message_end is not None:
-                            raise ResponsesStreamProtocolError(
-                                "duplicate normalized message_end"
+                async with closing_stream(
+                    provider_adapter.stream_chat(
+                        normalized_request,
+                        context=context,
+                        is_disconnected=request.is_disconnected,
+                        logger=getattr(state, "logger", None),
+                    )
+                ) as provider_stream:
+                    async for event in provider_stream:
+                        if event.type == "message_end":
+                            if pending_message_end is not None:
+                                raise ResponsesStreamProtocolError(
+                                    "duplicate normalized message_end"
+                                )
+                            pending_message_end = event
+                            continue
+                        if event.type == "usage" and pending_message_end is not None:
+                            pending_message_end = pending_message_end.model_copy(
+                                update={
+                                    "sequence": event.sequence,
+                                    "usage": event.usage,
+                                }
                             )
-                        pending_message_end = event
-                        continue
-                    if event.type == "usage" and pending_message_end is not None:
-                        pending_message_end = pending_message_end.model_copy(
-                            update={
-                                "sequence": event.sequence,
-                                "usage": event.usage,
-                            }
-                        )
-                        continue
-                    for frame in projector.project(event):
-                        yield frame
+                            continue
+                        for frame in await project_event(event):
+                            yield frame
                 if pending_message_end is not None:
-                    for frame in projector.project(pending_message_end):
+                    for frame in await project_event(pending_message_end):
                         yield frame
                 if await request.is_disconnected():
                     return
@@ -409,17 +463,13 @@ class NormalizedBridgeResponsesExecutor:
                     raise
                 yield projector.protocol_error_frame()
 
-        response_stream = stitch_responses_stream(
-            request,
-            conversation_turn,
-            emit_stream(),
-        )
         return StreamingResponse(
             observe_openai_response_stream(
                 state,
-                response_stream,
+                emit_stream(),
                 request_payload=data,
                 context=context,
+                observer=observer,
             ),
             media_type="text/event-stream",
         )
@@ -459,7 +509,7 @@ async def _normalized_provider_adapter(
     )
     return GigaChatProviderAdapter(
         config=state.config,
-        request_transformer=state.request_transformer,
+        request_transformer=get_request_transformer(request),
         giga_client=get_gigachat_client(request),
         model_limiter=get_model_concurrency_limiter(request),
         request_options=request_options,

@@ -63,7 +63,7 @@ OpenAI-compatible Chat Completions server.
 |---|---|---|
 | `GET /models` | Поддерживается | Возвращается в форме Anthropic, когда запрос содержит заголовки Anthropic SDK. |
 | `GET /models/{model_id}` | Поддерживается | Возвращается в форме Anthropic, когда запрос содержит заголовки Anthropic SDK. |
-| `POST /messages` | Поддерживается | Messages API, потоковая передача, локальные инструменты, сопоставление с GigaChat v2 для совместимых провайдерских инструментов Anthropic и нативный структурированный вывод. При `GPT2GIGA_NORMALIZATION_MODE=on` принятое подмножество v1 использует нормализованное ядро запросов, ответов и SSE. |
+| `POST /messages` | Поддерживается | Messages API, потоковая передача, локальные инструменты, сопоставление с GigaChat v2 для совместимых провайдерских инструментов Anthropic и нативный структурированный вывод. Все compatibility modes используют общее ядро запросов, ответов и SSE. |
 | `POST /messages/count_tokens` | Зависит от провайдера | GigaChat умеет считать текст сообщений, system, tools и structured output. Внешний алиас только с Chat Completions отклоняет операцию: точного token-count API у него нет. |
 | `POST /messages/batches`, `GET /messages/batches*` | Поддержанное подмножество | Реальное выполнение и per-item results; native cancel отсутствует. |
 | Files API beta | Поддержанное подмножество | Явные Anthropic headers выбирают общий `/files`; upload без purpose и file references в Messages. |
@@ -387,3 +387,17 @@ Batch API требует доступа GigaChat pay-as-you-go. В одном jo
 OpenAI `completion_window="24h"` и Anthropic `expires_at` означают **срок принятия результатов шлюзом**, а не обещание срока native processing. Poll до deadline сохраняет подтверждённые результаты. При первом poll после deadline неразрешённые строки навсегда получают expired; подтверждённые success/error доступны до истечения resource retention. Если первый poll выполнен поздно, gateway может признать expired и job, который backend завершил вовремя: SDK `updated_at` не подтверждает момент завершения. Поздние native результаты не заменяют expired. GigaChat job может продолжаться и тарифицироваться после gateway expiry; cancel/delete возвращают 501 и не останавливают upstream. Те же ограничения действуют для примеров.
 
 Submission после неоднозначного timeout автоматически не повторяется: native job уже мог быть создан. Output/error files и соответствие строк сохраняются после restart/смены worker при сохранении resource volume. Для OpenAI проверяйте `output_file_id` и `error_file_id`, для Anthropic — `type` каждого результата. Успешный HTTP poll не означает успех всех строк.
+
+
+### Границы исполнения и ресурсов
+
+Известные GigaChat aliases связывают endpoint, credentials и upstream model до подготовки,
+в том числе при отключённом пробросе модели. Request token override сохраняет endpoint.
+Публичный Chat Completions к OpenAI-compatible остаётся blocked и не переходит на GigaChat.
+Подробнее: [provider profiles](provider-profiles.md).
+
+Ошибка обязательного вложения останавливает генерацию. Проверка владельца registered ID
+применяется к raw native ID, headers и protocol-specific ссылкам, включая batch rows.
+Подробнее: [гарантии ресурсов](resource-apis.md#отказы-и-владение-ресурсами).
+Responses stream требует semantic completion; gateway snapshots отклоняют невоспроизводимые
+attachments/native state до I/O. Подробнее: [response storage](response-storage.md).

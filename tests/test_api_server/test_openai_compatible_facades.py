@@ -1271,3 +1271,257 @@ def test_gemini_cli_runtime_envelope_reaches_chat(tmp_path: Path) -> None:
     assert '"text": "facade-"' in response.text
     assert '"text": "stream"' in response.text
     assert len(observed) == 1
+
+
+@pytest.mark.parametrize("normalization", ["off", "on"])
+def test_chat_external_alias_is_blocked_before_any_upstream(tmp_path, normalization):
+    from unittest.mock import AsyncMock
+
+    seen = []
+    app = _app(tmp_path, lambda request: seen.append(request))
+    app.state.config.proxy_settings.normalization_mode = normalization
+    with TestClient(app) as client:
+        app.state.gigachat_client.achat = AsyncMock(
+            side_effect=AssertionError("wrong upstream")
+        )
+        response = client.post(
+            "/v1/chat/completions",
+            json={
+                "model": MODEL_ALIAS,
+                "messages": [{"role": "user", "content": "hello"}],
+            },
+        )
+        assert response.status_code == 400, response.text
+        assert response.json()["error"]["code"] == "unsupported_semantic"
+        app.state.gigachat_client.achat.assert_not_called()
+    assert seen == []
+
+
+@pytest.mark.parametrize("normalization", ["off", "on"])
+@pytest.mark.parametrize("api_mode", ["v1", "v2"])
+@pytest.mark.parametrize("pass_token", [False, True])
+def test_gigachat_alias_binds_endpoint_credentials_and_model(
+    tmp_path, monkeypatch, normalization, api_mode, pass_token
+):
+    import httpx2
+    from gigachat import GigaChat
+    from gpt2giga.providers.gigachat import client as client_module
+
+    seen = []
+    models = {"first": "GigaChat-2-Max", "second": "GigaChat-2-Pro"}
+    schema = {
+        "type": "object",
+        "properties": {"value": {"anyOf": [{"type": "string"}, {"type": "integer"}]}},
+    }
+
+    def wire_handler(request):
+        seen.append(request)
+        if request.url.path.endswith("/oauth"):
+            credential = request.headers["authorization"].removeprefix("Basic ")
+            return httpx2.Response(
+                200,
+                json={
+                    "access_token": f"token-{credential}",
+                    "expires_at": 4102444800000,
+                },
+            )
+        if request.url.path.endswith("/embeddings"):
+            return httpx2.Response(
+                200,
+                json={
+                    "object": "list",
+                    "model": json.loads(request.content)["model"],
+                    "data": [
+                        {
+                            "object": "embedding",
+                            "index": 0,
+                            "embedding": [0.1, 0.2],
+                            "usage": {"prompt_tokens": 1},
+                        }
+                    ],
+                    "usage": {"prompt_tokens": 1, "total_tokens": 1},
+                },
+            )
+        if request.url.path.endswith("/tokens/count"):
+            return httpx2.Response(
+                200, json=[{"tokens": 1, "characters": 5, "object": "tokens"}]
+            )
+        if request.url.path.endswith("/chat/completions"):
+            body = json.loads(request.content)
+            if api_mode == "v2":
+                return httpx2.Response(
+                    200,
+                    json={
+                        "messages": [
+                            {"role": "assistant", "content": [{"text": "bound-ok"}]}
+                        ],
+                        "finish_reason": "stop",
+                        "model": body["model"],
+                        "usage": {"input_tokens": 1, "output_tokens": 1},
+                    },
+                )
+            content = "bound-ok"
+            return httpx2.Response(
+                200,
+                json={
+                    "model": body["model"],
+                    "object": "chat.completion",
+                    "created": 1,
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {"role": "assistant", "content": content},
+                            "finish_reason": "stop",
+                        }
+                    ],
+                    "usage": {
+                        "prompt_tokens": 1,
+                        "completion_tokens": 1,
+                        "total_tokens": 2,
+                    },
+                },
+            )
+        raise AssertionError(f"Unexpected fixture request: {request.url.path}")
+
+    wires = []
+
+    def sdk_factory(**kwargs):
+        wire = httpx2.AsyncClient(
+            transport=httpx2.MockTransport(wire_handler), trust_env=False
+        )
+        wires.append(wire)
+        return GigaChat(
+            **{
+                **kwargs,
+                "async_http_client": wire,
+                "auth_async_http_client": wire,
+                "max_retries": 0,
+            }
+        )
+
+    monkeypatch.setattr(client_module, "GigaChat", sdk_factory)
+    profiles = []
+    for name in ("first", "second"):
+        monkeypatch.setenv(f"FIXTURE_{name.upper()}_CREDENTIAL", f"credential-{name}")
+        profiles.append(
+            {
+                "profile_id": name,
+                "provider_kind": "gigachat",
+                "base_url": f"https://{name}.giga.example/v1",
+                "credential_env": f"FIXTURE_{name.upper()}_CREDENTIAL",
+                "network_policy_ref": "public-gigachat",
+                "tls_policy_ref": "system-default",
+                "models": [
+                    {
+                        "public_alias": f"{name}/model",
+                        "upstream_model": models[name],
+                        "capability_profile": "native-gigachat-v1",
+                        "support_status": "stable",
+                    }
+                ],
+            }
+        )
+    path = tmp_path / "giga-profiles.json"
+    path.write_text(
+        json.dumps(
+            {"schema_version": "gpt2giga.provider-profiles.v3", "profiles": profiles}
+        )
+    )
+    config = ProxyConfig(
+        config=str(path),
+        proxy={
+            "normalization_mode": normalization,
+            "pass_model": False,
+            "pass_token": pass_token,
+            "legacy_chat_fallback": False,
+            "normalize_tool_schemas": True,
+            "resource_store_path": str(tmp_path / "resources"),
+        },
+        gigachat={
+            "access_token": "default-token",
+            "base_url": "https://api.giga.chat/v1",
+            "auth_url": "https://auth.giga.example/oauth",
+            "verify_ssl_certs": False,
+            "max_retries": 0,
+        },
+    )
+    app = create_app(config)
+    with TestClient(app) as gateway:
+        headers = (
+            {"Authorization": "Bearer giga-auth-request-token"} if pass_token else {}
+        )
+        for name in ("first", "second"):
+            for endpoint, body in (
+                (
+                    "chat/completions",
+                    {
+                        "messages": [{"role": "user", "content": "hello"}],
+                        "tools": [
+                            {
+                                "type": "function",
+                                "function": {"name": "check", "parameters": schema},
+                            }
+                        ],
+                    },
+                ),
+                ("responses", {"input": "hello"}),
+                (
+                    "messages",
+                    {
+                        "messages": [{"role": "user", "content": "hello"}],
+                        "max_tokens": 10,
+                    },
+                ),
+            ):
+                response = gateway.post(
+                    f"/{api_mode}/{endpoint}",
+                    json={"model": f"{name}/model", **body},
+                    headers=headers,
+                )
+                assert response.status_code == 200, response.text
+                assert response.json()["model"] == f"{name}/model"
+            response = gateway.post(
+                f"/{api_mode}/v1beta/models/{name}/model:generateContent",
+                json={"contents": [{"role": "user", "parts": [{"text": "hello"}]}]},
+                headers=headers,
+            )
+            assert response.status_code == 200, response.text
+            if api_mode == "v1" and normalization == "off":
+                for path, payload in (
+                    ("/v1/embeddings", {"model": f"{name}/model", "input": "hello"}),
+                    (
+                        "/bridge/gigachat/tokens/count",
+                        {"model": f"{name}/model", "input": "hello"},
+                    ),
+                    (
+                        f"/v1beta/models/{name}/model:embedContent",
+                        {"content": {"parts": [{"text": "hello"}]}},
+                    ),
+                ):
+                    extra = gateway.post(path, json=payload, headers=headers)
+                    assert extra.status_code == 200, extra.text
+                    assert seen[-1].url.host == f"{name}.giga.example"
+                    assert json.loads(seen[-1].content)["model"] == models[name]
+                    token = (
+                        "request-token" if pass_token else f"token-credential-{name}"
+                    )
+                    assert seen[-1].headers["authorization"] == f"Bearer {token}"
+        chats = [r for r in seen if r.url.path.endswith("/chat/completions")]
+        assert len(chats) == 8
+        for name, group in (("first", chats[:4]), ("second", chats[4:])):
+            for request in group:
+                assert request.url.host == f"{name}.giga.example"
+                assert json.loads(request.content)["model"] == models[name]
+                token = "request-token" if pass_token else f"token-credential-{name}"
+                assert request.headers["authorization"] == f"Bearer {token}"
+        for request in (chats[0], chats[4]):
+            body = json.loads(request.content)
+            functions = body.get("functions") or [
+                spec
+                for t in body["tools"]
+                for spec in t.get("functions", {}).get("specifications", [])
+            ]
+            assert functions[0]["parameters"] == schema
+        # Injected transports are fixture-owned; close on the app's event loop.
+        for wire in wires:
+            gateway.portal.call(wire.aclose)

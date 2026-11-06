@@ -290,29 +290,22 @@ on v2 routes. User function/local tools are mapped independently.
 
 ## Normalized layer flags
 
-The normalized mode controls the built-in GigaChat OpenAI Chat Completions and
-Anthropic Messages paths and by default keeps their legacy behavior:
+The configuration defaults remain unchanged:
 
 ```dotenv
 GPT2GIGA_NORMALIZATION_MODE=off
 GPT2GIGA_LEGACY_CHAT_FALLBACK=True
 ```
 
-The inert `GPT2GIGA_EXPERIMENTAL_NORMALIZED_LAYER` key was removed. Replace it
-deterministically with `GPT2GIGA_NORMALIZATION_MODE=on` to execute through the
-normalized path, `shadow` for diagnostics-only translation, or `off` to retain
-the legacy path. Configure `GPT2GIGA_LEGACY_CHAT_FALLBACK` independently.
+`off`, `shadow`, and `on` are compatibility modes of one execution core.
+`shadow` adds content-free diagnostics from the decoded request. The legacy
+fallback setting remains accepted for config/admin schema compatibility; it
+never retries dispatch or selects a second execution implementation.
+The obsolete `GPT2GIGA_EXPERIMENTAL_NORMALIZED_LAYER` key remains unsupported.
 
-- `off`: OpenAI Chat Completions and Anthropic Messages go through the legacy paths;
-- `shadow`: builds normalized diagnostics alongside the legacy OpenAI Chat handling without changing client responses;
-- `on`: switches OpenAI Chat, the accepted Anthropic Messages v1 subset, and
-  Gemini `countTokens` to the normalized path, with a legacy fallback before the
-  response starts if the fallback is enabled.
-
-These flags do not override an explicit external provider route. A model that
-resolves to an `openai_compatible` profile always uses the normalized adapter
-for Responses, Chat Completions, Anthropic Messages, and Gemini
-GenerateContent. It never falls back to an unrelated GigaChat model.
+Provider selection always precedes preparation. External aliases use their
+admitted Responses, Anthropic Messages or Gemini path; Chat Completions to
+OpenAI-compatible remains blocked by the executable loss matrix.
 
 Gemini GenerateContent uses its own dedicated Gemini-to-normalized adapter and
 GigaChat provider path independently of these flags. Its admitted bridge subset
@@ -685,3 +678,15 @@ Ownership uses a persistent HMAC over the configured authenticated identity, pro
 `GPT2GIGA_RESPONSES_STORAGE_MODE=native|gateway` defaults to `native`. Select `gateway` for owner-scoped immutable Responses snapshots and Conversations over the same resource store and retention policy. See [Response storage](response-storage.md).
 
 After deletion or expiry, the store retains only a small kind/ID registration marker. It contains no owner or content and prevents old upstream IDs from bypassing ownership through the legacy-file fallback.
+
+
+Resource metadata has independent limits: `GPT2GIGA_RESOURCE_MAX_METADATA_BYTES=67108864`
+and `GPT2GIGA_RESOURCE_MAX_RESOURCES=100000`. These are store-wide admission budgets,
+not per-file blob limits. Writes, including response-only snapshot workloads, purge
+expired records in bounded batches before checking the budget. Registered-ID tombstones
+remain so expired/foreign resources cannot fall back to native lookup.
+
+
+Token counting retains one narrow input-projection compatibility difference: `on` includes
+normalized tool/schema text, while `off`/`shadow` retain the tolerant legacy text subset.
+All modes share the same token-count dispatch, client binding, limiter and cleanup.
