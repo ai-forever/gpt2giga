@@ -1,4 +1,3 @@
-import base64
 import json
 
 from fastapi import FastAPI
@@ -47,10 +46,6 @@ class FakeBatches(BaseModel):
     batches: list[FakeBatch]
 
 
-class FakeFileContent(BaseModel):
-    content: str
-
-
 class FakeGigaChat:
     def __init__(self):
         self.files = {}
@@ -97,9 +92,7 @@ class FakeGigaChat:
         return FakeDeletedFile(id=file, deleted=True)
 
     async def aget_file_content(self, file_id):
-        return FakeFileContent(
-            content=base64.b64encode(self.files[file_id]["content"]).decode("utf-8")
-        )
+        return self.files[file_id]["content"]
 
     async def acreate_batch(self, file, method):
         self.last_batch_content = file

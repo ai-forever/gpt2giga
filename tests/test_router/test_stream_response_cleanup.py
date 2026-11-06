@@ -67,10 +67,10 @@ class _StreamingChat:
         return self._chunks("v2")
 
 
-def _make_app(outcome):
+def _make_app(outcome, *, pass_token=False):
     app = create_app(
         config=ProxyConfig(
-            proxy=ProxySettings(mode="DEV", pass_model=True),
+            proxy=ProxySettings(mode="DEV", pass_model=True, pass_token=pass_token),
             gigachat={"model": "GigaChat-2-Max"},
         )
     )
@@ -282,3 +282,234 @@ async def test_stream_close_failure_surfaces_without_an_active_exception():
     with pytest.raises(RuntimeError, match="synthetic upstream close failure"):
         async with closing_stream(chunks()) as stream:
             assert await anext(stream) == "first"
+
+
+@pytest.mark.parametrize("mode", ["v1", "v2"])
+@pytest.mark.parametrize(
+    "protocol,normalized",
+    [
+        ("chat/completions", True),
+        ("messages", True),
+        ("messages", False),
+        ("v1beta/models/GigaChat-2-Max:streamGenerateContent", True),
+    ],
+)
+@pytest.mark.parametrize(
+    "failure",
+    ["headers", "body", "cancel", "complete", "asgi2", "early_close", "converter"],
+)
+async def test_real_sdk_stream_closed_before_model_slot_release(
+    mode, protocol, normalized, failure, monkeypatch
+):
+    import httpx2
+    from gigachat import GigaChat
+
+    app, _, limiter = _make_app("complete", pass_token=True)
+    app.state.logger = logger
+    app.state.config.proxy_settings.normalization_mode = "on" if normalized else "off"
+    calls = []
+    held = []
+    outgoing = []
+    delegates = []
+    from contextlib import asynccontextmanager
+    import importlib
+    from gpt2giga.providers.gigachat.pool import GigaChatClientPool
+    from starlette.requests import Request
+
+    @asynccontextmanager
+    async def tracked_closing(stream):
+        delegates.append(stream)
+        async with closing_stream(stream):
+            yield stream
+
+    for module in (
+        "providers.gigachat.adapter",
+        "protocol.anthropic.streaming",
+        "routers.openai.chat_completions",
+        "routers.anthropic.messages",
+        "routers.gemini.generate_content",
+        "sinks.observability.anthropic",
+        "common.conversation",
+        "common.streaming_response",
+    ):
+        monkeypatch.setattr(
+            importlib.import_module("gpt2giga." + module),
+            "closing_stream",
+            tracked_closing,
+        )
+    if failure == "converter":
+
+        def fail_conversion(*args, **kwargs):
+            raise RuntimeError("synthetic stream converter failure")
+
+        if protocol == "messages" and not normalized:
+            target = "gpt2giga.protocol.anthropic.streaming"
+            monkeypatch.setattr(
+                importlib.import_module(target), "_delta_text", fail_conversion
+            )
+        else:
+            target = "gpt2giga.providers.gigachat.streaming"
+            monkeypatch.setattr(
+                importlib.import_module(target).GigaChatNormalizedStreamMapper,
+                "chunk_to_events",
+                fail_conversion,
+            )
+
+    class TrackedStream(httpx2.AsyncByteStream):
+        closed = False
+
+        async def __aiter__(self):
+            if mode == "v1":
+                chunk = {
+                    "choices": [
+                        {
+                            "index": 0,
+                            "delta": {"role": "assistant", "content": "answer"},
+                            "finish_reason": None,
+                        }
+                    ],
+                    "created": 1,
+                    "model": "GigaChat-2-Max",
+                    "object": "chat.completion.chunk",
+                }
+            else:
+                chunk = {
+                    "event": "response.message.delta",
+                    "model": "GigaChat-2-Max",
+                    "messages": [
+                        {"role": "assistant", "content": [{"text": "answer"}]}
+                    ],
+                }
+            yield ("data: " + json.dumps(chunk) + "\n\n").encode()
+            if mode == "v2":
+                yield b'event: response.message.done\ndata: {"event":"response.message.done","model":"GigaChat-2-Max","messages":[],"finish_reason":"stop"}\n\n'
+            else:
+                yield b"data: [DONE]\n\n"
+
+        async def aclose(self):
+            with pytest.raises(ModelConcurrencyTimeoutError):
+                async with limiter.limit("GigaChat-2-Max"):
+                    pytest.fail("slot released before SDK response")
+            assert next(iter(pool._entries.values())).active_requests == 1
+            self.closed = True
+
+    async def handler(request):
+        calls.append(request)
+        stream = TrackedStream()
+        held.append(stream)
+        return httpx2.Response(
+            200, headers={"content-type": "text/event-stream"}, stream=stream
+        )
+
+    async with httpx2.AsyncClient(
+        transport=httpx2.MockTransport(handler), trust_env=False
+    ) as http:
+        owner = GigaChat(
+            access_token="synthetic",
+            base_url="https://gigachat.test",
+            async_http_client=http,
+            trust_env=False,
+        )
+        app.state.gigachat_client = owner
+        pool = GigaChatClientPool(
+            app.state.config.gigachat_settings, client_factory=lambda *_: owner
+        )
+        app.state.gigachat_pool = pool
+        app.state.config.proxy_settings.pass_token = True
+        scope, _ = _request(mode, protocol)
+        scope["headers"].append((b"authorization", b"Bearer giga-auth-synthetic"))
+        disconnected = asyncio.Event()
+        if failure == "asgi2":
+            scope["asgi"]["spec_version"] = "2.0"
+        if protocol == "messages":
+            body = json.dumps(
+                {
+                    "model": "GigaChat-2-Max",
+                    "max_tokens": 20,
+                    "stream": True,
+                    "messages": [{"role": "user", "content": "hello"}],
+                }
+            ).encode()
+        elif protocol.startswith("v1beta"):
+            body = json.dumps(
+                {"contents": [{"role": "user", "parts": [{"text": "hello"}]}]}
+            ).encode()
+        else:
+            body = json.dumps(
+                {
+                    "model": "GigaChat-2-Max",
+                    "stream": True,
+                    "messages": [{"role": "user", "content": "hello"}],
+                }
+            ).encode()
+
+        async def receive():
+            nonlocal body
+            if body is not None:
+                data, body = body, None
+                return {"type": "http.request", "body": data}
+            if failure == "asgi2":
+                await disconnected.wait()
+                return {"type": "http.disconnect"}
+            await asyncio.Event().wait()
+
+        async def send(message):
+            outgoing.append(message)
+            if failure == "headers" and message["type"] == "http.response.start":
+                raise OSError("synthetic headers disconnect")
+            if calls and message["type"] == "http.response.body":
+                if failure == "asgi2":
+                    disconnected.set()
+                    await asyncio.sleep(0)
+                if failure == "body":
+                    raise OSError("synthetic body disconnect")
+                if failure == "cancel":
+                    raise asyncio.CancelledError
+
+        if failure == "early_close":
+            scope["app"] = app
+            scope["state"] = {"gigachat_client": owner}
+            request = Request(scope, receive)
+            async with pool.acquire("giga-auth-synthetic"):
+                if protocol == "messages":
+                    endpoint = importlib.import_module(
+                        "gpt2giga.routers.anthropic.messages"
+                    ).messages
+                    response = await endpoint(request)
+                elif protocol.startswith("v1beta"):
+                    endpoint = importlib.import_module(
+                        "gpt2giga.routers.gemini.generate_content"
+                    ).stream_generate_content
+                    response = await endpoint("GigaChat-2-Max", request)
+                else:
+                    endpoint = importlib.import_module(
+                        "gpt2giga.routers.openai.chat_completions"
+                    ).chat_completions
+                    response = await endpoint(request)
+                outer = response.body_iterator
+                delegates.append(outer)
+                while not calls:
+                    await anext(outer)
+                await outer.aclose()
+        elif failure in {"complete", "asgi2", "converter"}:
+            await app(scope, receive, send)
+        else:
+            with pytest.raises(
+                asyncio.CancelledError if failure == "cancel" else ClientDisconnect
+            ):
+                await app(scope, receive, send)
+        assert len(calls) == (0 if failure == "headers" else 1)
+        assert all(stream.closed for stream in held)
+        wire = b"".join(message.get("body", b"") for message in outgoing)
+        if failure == "converter":
+            assert b"error" in wire
+        elif failure == "complete":
+            assert b"answer" in wire
+            assert b'"error"' not in wire
+        async with limiter.limit("GigaChat-2-Max"):
+            pass
+        assert next(iter(pool._entries.values())).active_requests == 0
+        assert not http.is_closed
+        assert delegates or failure == "headers"
+        assert all(getattr(stream, "ag_frame", None) is None for stream in delegates)
+        await pool.aclose()

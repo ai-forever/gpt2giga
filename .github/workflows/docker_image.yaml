@@ -30,7 +30,7 @@ jobs:
         python-version: ['3.10', '3.11', '3.12', '3.13', '3.14']
         include:
           - python-version: '3.15'
-            python-image: '3.15-rc'
+            python-image: '3.15'
             preview: true
 
     steps:
@@ -57,6 +57,8 @@ jobs:
         fi
 
         echo "VERSION=$VERSION" >> "$GITHUB_OUTPUT"
+        PRERELEASE="$(PYTHONPATH=scripts python3 -c 'import sys; from gateway_release_guard import _is_prerelease; print(str(_is_prerelease(sys.argv[1])).lower())' "$VERSION")"
+        echo "PRERELEASE=$PRERELEASE" >> "$GITHUB_OUTPUT"
 
     - name: Log in to Docker Hub
       uses: docker/login-action@v4.7.0
@@ -78,7 +80,7 @@ jobs:
         PYTHON_VERSION="${{ matrix.python-version }}"
         VERSION="${{ steps.get_version.outputs.VERSION }}"
         SUFFIX="python${PYTHON_VERSION}"
-        if [ "${{ matrix.preview }}" = "true" ]; then
+        if [ "${{ matrix.preview }}" = "true" ] || [ "${{ steps.get_version.outputs.PRERELEASE }}" = "true" ]; then
           SUFFIX="${SUFFIX}-preview"
         fi
 
@@ -93,7 +95,9 @@ jobs:
           fi
           if [ "${PYTHON_VERSION}" = "3.13" ]; then
             echo "${IMAGE_NAME}:${VERSION}"
-            echo "${IMAGE_NAME}:latest"
+            if [ "${{ steps.get_version.outputs.PRERELEASE }}" != "true" ]; then
+              echo "${IMAGE_NAME}:latest"
+            fi
           fi
           echo "EOF"
         } >> "$GITHUB_OUTPUT"

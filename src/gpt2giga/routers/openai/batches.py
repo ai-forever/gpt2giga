@@ -62,23 +62,27 @@ async def create_batch(request: Request):
 
     target = get_batch_target(data.get("endpoint", ""))
     giga_client = get_gigachat_client(request)
-    async with gigachat_request_options(giga_client, request_options):
-        file_content = await giga_client.aget_file_content(file_id=input_file_id)
-
-    import base64
+    async with gigachat_request_options(
+        giga_client, request_options, include_body=False
+    ) as request_client:
+        file_content = await request_client.aget_file_content(file_id=input_file_id)
 
     proxy_settings = request.app.state.config.proxy_settings
-    async with gigachat_request_options(giga_client, request_options):
+    async with gigachat_request_options(
+        giga_client, request_options, include_body=False
+    ) as request_client:
         transformed_content = await transform_batch_input_file(
-            base64.b64decode(file_content.content),
+            file_content,
             target=target,
             request_transformer=request.app.state.request_transformer,
-            giga_client=giga_client,
+            giga_client=request_client,
             embeddings_model=proxy_settings.embeddings,
             pass_model=proxy_settings.pass_model,
         )
-    async with gigachat_request_options(giga_client, request_options):
-        batch = await giga_client.acreate_batch(
+    async with gigachat_request_options(
+        giga_client, request_options, include_body=False
+    ) as request_client:
+        batch = await request_client.acreate_batch(
             transformed_content,
             method=target.method,
         )
@@ -112,8 +116,10 @@ async def list_batches(
     )
     batch_store = get_batch_store(request)
     file_store = get_file_store(request)
-    async with gigachat_request_options(giga_client, request_options):
-        batches = await giga_client.aget_batches()
+    async with gigachat_request_options(
+        giga_client, request_options, include_body=False
+    ) as request_client:
+        batches = await request_client.aget_batches()
     data = []
     for batch in batches.batches:
         metadata = batch_store.get(batch.id_) or {
@@ -138,8 +144,10 @@ async def retrieve_batch(batch_id: str, request: Request):
     request_options = extract_gigachat_request_options(request)
     batch_store = get_batch_store(request)
     file_store = get_file_store(request)
-    async with gigachat_request_options(giga_client, request_options):
-        batches = await giga_client.aget_batches(batch_id=batch_id)
+    async with gigachat_request_options(
+        giga_client, request_options, include_body=False
+    ) as request_client:
+        batches = await request_client.aget_batches(batch_id=batch_id)
     if not batches.batches:
         raise HTTPException(
             status_code=404,

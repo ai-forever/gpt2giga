@@ -337,17 +337,21 @@ async def create_message_batch(request: Request):
     ).encode("utf-8")
     giga_client = get_gigachat_client(request)
     proxy_settings = request.app.state.config.proxy_settings
-    async with gigachat_request_options(giga_client, request_options):
+    async with gigachat_request_options(
+        giga_client, request_options, include_body=False
+    ) as request_client:
         transformed_content = await transform_batch_input_file(
             raw_input,
             target=target,
             request_transformer=request.app.state.request_transformer,
-            giga_client=giga_client,
+            giga_client=request_client,
             embeddings_model=proxy_settings.embeddings,
             pass_model=proxy_settings.pass_model,
         )
-    async with gigachat_request_options(giga_client, request_options):
-        batch = await giga_client.acreate_batch(
+    async with gigachat_request_options(
+        giga_client, request_options, include_body=False
+    ) as request_client:
+        batch = await request_client.acreate_batch(
             transformed_content,
             method=target.method,
         )
@@ -379,8 +383,10 @@ async def list_message_batches(
     )
     batch_store = get_batch_store(request)
     file_store = get_file_store(request)
-    async with gigachat_request_options(giga_client, request_options):
-        batches = await giga_client.aget_batches()
+    async with gigachat_request_options(
+        giga_client, request_options, include_body=False
+    ) as request_client:
+        batches = await request_client.aget_batches()
 
     data = []
     sorted_batches = sorted(
@@ -427,8 +433,10 @@ async def retrieve_message_batch(message_batch_id: str, request: Request):
 
     giga_client = get_gigachat_client(request)
     request_options = extract_gigachat_request_options(request)
-    async with gigachat_request_options(giga_client, request_options):
-        batches = await giga_client.aget_batches(batch_id=message_batch_id)
+    async with gigachat_request_options(
+        giga_client, request_options, include_body=False
+    ) as request_client:
+        batches = await request_client.aget_batches(batch_id=message_batch_id)
     if not batches.batches:
         return _anthropic_http_exception(
             404,
@@ -497,8 +505,10 @@ async def get_message_batch_results(message_batch_id: str, request: Request):
 
     giga_client = get_gigachat_client(request)
     request_options = extract_gigachat_request_options(request)
-    async with gigachat_request_options(giga_client, request_options):
-        batches = await giga_client.aget_batches(batch_id=message_batch_id)
+    async with gigachat_request_options(
+        giga_client, request_options, include_body=False
+    ) as request_client:
+        batches = await request_client.aget_batches(batch_id=message_batch_id)
     if not batches.batches:
         return _anthropic_http_exception(
             404,
@@ -516,9 +526,13 @@ async def get_message_batch_results(message_batch_id: str, request: Request):
             "Results are not available until message batch processing has ended.",
         )
 
-    async with gigachat_request_options(giga_client, request_options):
-        file_response = await giga_client.aget_file_content(
+    async with gigachat_request_options(
+        giga_client, request_options, include_body=False
+    ) as request_client:
+        file_response = await request_client.aget_file_content(
             file_id=batch.output_file_id
         )
-    content = _build_anthropic_batch_results(file_response.content, metadata)
+    content = _build_anthropic_batch_results(
+        base64.b64encode(file_response).decode("ascii"), metadata
+    )
     return Response(content=content, media_type="application/binary")

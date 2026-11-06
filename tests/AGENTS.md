@@ -27,8 +27,8 @@ contracts. Do not infer coverage from an old directory inventory.
   review the human-readable diff.
 - Keep package-boundary tests strict: gateway installs must not expose
   GigaLoom or `gpt2giga_harness` surfaces.
-- Files/Batches modules exist without public aggregator mounts; tests must not
-  assume that importing a router makes its API public.
+- OpenAI Files is mounted; Batches and Gemini Files remain unmounted. Tests must
+  not assume that importing a router makes its API public.
 - Admin, debug, replay, and metrics route tests must explicitly enable the
   corresponding settings instead of relying on ambient defaults.
 - Markers are selective, not exhaustive. Do not use `pytest -m unit` as a

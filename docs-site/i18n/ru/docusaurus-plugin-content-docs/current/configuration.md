@@ -180,8 +180,7 @@ x-api-key: <GPT2GIGA_API_KEY>
 
 ## Настройки GigaChat
 
-Минимальная поддерживаемая версия GigaChat Python SDK — `0.2.4`; gateway
-остаётся в совместимой ветке `0.2.x`. API base URL SDK по умолчанию —
+Кандидат шлюза фиксирует `gigachat[aiohttp]==0.3.0a1`. API base URL SDK по умолчанию —
 `https://api.giga.chat/v1`.
 
 Частые настройки вышестоящего сервиса:
@@ -661,3 +660,18 @@ GPT2GIGA_ADMIN_API_KEY="<strong-admin-secret>"
 
 `GPT2GIGA_UI_ENABLED` зарезервирован для будущего встроенного интерфейса. Сейчас не
 используйте его как средство контроля безопасности.
+
+### Alpha-кандидат SDK
+
+Шлюз 0.3.3a1 фиксирует `gigachat[aiohttp]==0.3.0a1`; проверяйте локально собранный
+wheel, публикация кандидата не заявляется. По умолчанию используется native HTTPX2.
+`GIGACHAT_ASYNC_BACKEND=aiohttp` или `--gigachat.async-backend aiohttp` включает
+альтернативный backend: HTTP/1.1, без HTTP2/SOCKS, отдельного finite write timeout
+и finite max_keepalive_connections. Явные finite connect/pool timeouts должны
+совпадать; SDK отклоняет неподдерживаемые настройки. Ускорение не обещается.
+
+`GIGACHAT_TRUST_ENV=False` игнорирует proxy/CA из окружения. Explicit CA и SSL
+contexts сохраняют семантику. Bundled trust объединяет certifi и Russian root;
+API mTLS certificate, загруженный factory, не отправляется в OAuth.
+`auth_ssl_context` задаёт отдельную OAuth trust policy. Request credentials
+не наследуют server auth fields.

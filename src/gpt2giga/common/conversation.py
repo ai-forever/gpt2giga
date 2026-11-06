@@ -299,17 +299,18 @@ async def stitch_anthropic_stream(
     body_iterator: AsyncIterator[str],
 ) -> AsyncIterator[str]:
     """Observe Anthropic SSE and save state after successful completion."""
-    if turn is None:
-        async for chunk in body_iterator:
-            yield chunk
-        return
+    async with closing_stream(body_iterator):
+        if turn is None:
+            async for chunk in body_iterator:
+                yield chunk
+            return
 
-    observer = _AnthropicStreamConversationObserver()
-    async for chunk in body_iterator:
-        observer.observe_chunk(chunk)
-        yield chunk
-    if observer.completed:
-        await commit_conversation_turn(request, turn, observer.response_messages())
+        observer = _AnthropicStreamConversationObserver()
+        async for chunk in body_iterator:
+            observer.observe_chunk(chunk)
+            yield chunk
+        if observer.completed:
+            await commit_conversation_turn(request, turn, observer.response_messages())
 
 
 def chat_completion_response_messages(

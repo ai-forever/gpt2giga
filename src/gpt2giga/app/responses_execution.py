@@ -72,11 +72,13 @@ class NativeGigaChatResponsesExecutor:
         attachment_ids = request_attachment_ids(request)
         attachment_kwargs = {"attachment_ids": attachment_ids} if attachment_ids else {}
         if mode == "v2":
-            async with gigachat_request_options(giga_client, request_options):
+            async with gigachat_request_options(
+                giga_client, request_options, include_body=False
+            ) as request_client:
                 chat_request = (
                     await state.request_transformer.prepare_response_chat_completion(
                         data,
-                        giga_client,
+                        request_client,
                         **attachment_kwargs,
                     )
                 )
@@ -127,16 +129,20 @@ class NativeGigaChatResponsesExecutor:
                 model_resolution.limiter_key,
                 provider="openai",
             ):
-                async with gigachat_request_options(giga_client, request_options):
-                    response = await giga_client.achat.create(chat_request)
+                async with gigachat_request_options(
+                    giga_client, request_options
+                ) as request_client:
+                    response = await request_client.achat.create(chat_request)
             adapted = adapt_chat_completion_to_chat_shape(
                 response,
                 default_model=data.get("model") or model_resolution.model or "unknown",
             )
-            async with gigachat_request_options(giga_client, request_options):
+            async with gigachat_request_options(
+                giga_client, request_options, include_body=False
+            ) as request_client:
                 await hydrate_chat_completion_image_files(
                     adapted,
-                    giga_client,
+                    request_client,
                     getattr(state, "logger", None),
                 )
             response_id = extract_chat_completion_thread_id(response) or current_rquid
@@ -158,10 +164,12 @@ class NativeGigaChatResponsesExecutor:
             )
             return result
 
-        async with gigachat_request_options(giga_client, request_options):
+        async with gigachat_request_options(
+            giga_client, request_options, include_body=False
+        ) as request_client:
             chat_messages = await state.request_transformer.prepare_response_chat(
                 data,
-                giga_client,
+                request_client,
                 **attachment_kwargs,
             )
         model_resolution = resolve_upstream_model(
@@ -181,8 +189,10 @@ class NativeGigaChatResponsesExecutor:
                 model_resolution.limiter_key,
                 provider="openai",
             ):
-                async with gigachat_request_options(giga_client, request_options):
-                    response = await giga_client.achat(chat_messages)
+                async with gigachat_request_options(
+                    giga_client, request_options
+                ) as request_client:
+                    response = await request_client.achat(chat_messages)
             result = state.response_processor.process_response_api(
                 {**data, "parallel_tool_calls": False},
                 response,

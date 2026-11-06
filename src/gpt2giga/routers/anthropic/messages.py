@@ -6,6 +6,10 @@ from typing import Any, Dict, List
 from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 
+from gpt2giga.common.streaming_response import ModelLimitedStreamingResponse
+
+from gpt2giga.common.streaming_response import closing_stream
+
 from gpt2giga.app_state import get_gigachat_client, get_model_concurrency_limiter
 from gpt2giga.common.api_mode import resolve_gigachat_api_mode
 from gpt2giga.common.cache_session import apply_cache_session_id
@@ -121,8 +125,10 @@ async def count_tokens(request: Request):
         return {"input_tokens": 0}
 
     async with model_limiter.limit(resolution.limiter_key, provider="anthropic"):
-        async with gigachat_request_options(giga_client, request_options):
-            token_counts = await giga_client.atokens_count(
+        async with gigachat_request_options(
+            giga_client, request_options
+        ) as request_client:
+            token_counts = await request_client.atokens_count(
                 texts,
                 model=resolution.model,
             )
@@ -181,11 +187,13 @@ async def messages(request: Request):
     )
 
     if mode == "v2":
-        async with gigachat_request_options(giga_client, request_options):
+        async with gigachat_request_options(
+            giga_client, request_options, include_body=False
+        ) as request_client:
             try:
                 chat_request = await state.request_transformer.prepare_chat_completion(
                     openai_data,
-                    giga_client,
+                    request_client,
                     **(
                         {"forced_model": pinned_model}
                         if pinned_model is not None
@@ -217,8 +225,10 @@ async def messages(request: Request):
         )
         if not stream:
             async with model_limiter.limit(effective_model, provider="anthropic"):
-                async with gigachat_request_options(giga_client, request_options):
-                    response = await giga_client.achat.create(chat_request)
+                async with gigachat_request_options(
+                    giga_client, request_options
+                ) as request_client:
+                    response = await request_client.achat.create(chat_request)
             giga_dict = adapt_chat_completion_to_chat_shape(
                 response,
                 default_model=model,
@@ -240,7 +250,7 @@ async def messages(request: Request):
             )
             return result
 
-        return StreamingResponse(
+        return ModelLimitedStreamingResponse(
             observe_anthropic_message_stream(
                 state,
                 stitch_anthropic_stream(
@@ -263,11 +273,13 @@ async def messages(request: Request):
             media_type="text/event-stream",
         )
 
-    async with gigachat_request_options(giga_client, request_options):
+    async with gigachat_request_options(
+        giga_client, request_options, include_body=False
+    ) as request_client:
         try:
             chat_messages = await state.request_transformer.prepare_chat(
                 openai_data,
-                giga_client,
+                request_client,
                 **(
                     {"forced_model": pinned_model}
                     if pinned_model is not None
@@ -300,8 +312,10 @@ async def messages(request: Request):
 
     if not stream:
         async with model_limiter.limit(effective_model, provider="anthropic"):
-            async with gigachat_request_options(giga_client, request_options):
-                response = await giga_client.achat(chat_messages)
+            async with gigachat_request_options(
+                giga_client, request_options
+            ) as request_client:
+                response = await request_client.achat(chat_messages)
         giga_dict = response.model_dump()
         result = _build_anthropic_response(
             giga_dict,
@@ -320,7 +334,7 @@ async def messages(request: Request):
         )
         return result
 
-    return StreamingResponse(
+    return ModelLimitedStreamingResponse(
         observe_anthropic_message_stream(
             state,
             stitch_anthropic_stream(
@@ -362,13 +376,12 @@ async def _try_normalized_count_tokens(
             payload,
             context=context,
         )
-        response = await _provider_adapter(
+        provider = _provider_adapter(
             request,
             normalized_request=normalized_request.input,
             request_options=request_options,
             pinned_model=_claude_cli_model_override(request),
-        ).count_tokens(normalized_request, context=context)
-        return {"input_tokens": response.input_tokens}
+        )
     except Exception as exc:
         if (
             external_route is not None
@@ -378,6 +391,9 @@ async def _try_normalized_count_tokens(
             raise
         _log_normalized_fallback(request, exc, event="anthropic_count_tokens_fallback")
         return None
+
+    response = await provider.count_tokens(normalized_request, context=context)
+    return {"input_tokens": response.input_tokens}
 
 
 async def _try_normalized_non_stream_message(
@@ -416,25 +432,12 @@ async def _try_normalized_non_stream_message(
                 .chat_to_normalized({"messages": openai_data["messages"]})
                 .messages
             )
-        normalized_response = await _provider_adapter(
+        provider = _provider_adapter(
             request,
             normalized_request=normalized_request,
             request_options=request_options,
             pinned_model=pinned_model,
-        ).chat(normalized_request, context=context)
-        result = normalized_chat_response_to_anthropic(
-            normalized_response,
-            requested_model=str(payload.get("model") or "unknown"),
-            context=context,
         )
-        await commit_anthropic_response(request, conversation_turn, result)
-        await emit_anthropic_message_observability(
-            request.app.state,
-            openai_data,
-            result,
-            context=context,
-        )
-        return result
     except Exception as exc:
         if (
             external_route is not None
@@ -444,6 +447,21 @@ async def _try_normalized_non_stream_message(
             raise
         _log_normalized_fallback(request, exc, event="anthropic_message_fallback")
         return None
+
+    normalized_response = await provider.chat(normalized_request, context=context)
+    result = normalized_chat_response_to_anthropic(
+        normalized_response,
+        requested_model=str(payload.get("model") or "unknown"),
+        context=context,
+    )
+    await commit_anthropic_response(request, conversation_turn, result)
+    await emit_anthropic_message_observability(
+        request.app.state,
+        openai_data,
+        result,
+        context=context,
+    )
+    return result
 
 
 async def _try_normalized_stream_message(
@@ -497,25 +515,30 @@ async def _try_normalized_stream_message(
 
         async def emit_stream() -> AsyncIterator[str]:
             pending_message_end = None
-            async for event in provider.stream_chat(
-                normalized_request,
-                context=context,
-                is_disconnected=request.is_disconnected,
-                logger=getattr(request.app.state, "logger", None),
-            ):
-                if event.type == "message_end":
-                    pending_message_end = event
-                    continue
-                if event.type == "usage" and pending_message_end is not None:
-                    pending_message_end = pending_message_end.model_copy(
-                        update={
-                            "sequence": event.sequence,
-                            "usage": event.usage,
-                        }
-                    )
-                    continue
-                for frame in projector.project(event):
-                    yield frame
+            async with closing_stream(
+                provider.stream_chat(
+                    normalized_request,
+                    context=context,
+                    is_disconnected=request.is_disconnected,
+                    logger=getattr(request.app.state, "logger", None),
+                )
+            ) as delegated_stream:
+                async for event in delegated_stream:
+                    if event.type == "error":
+                        pending_message_end = None
+                    if event.type == "message_end":
+                        pending_message_end = event
+                        continue
+                    if event.type == "usage" and pending_message_end is not None:
+                        pending_message_end = pending_message_end.model_copy(
+                            update={
+                                "sequence": event.sequence,
+                                "usage": event.usage,
+                            }
+                        )
+                        continue
+                    for frame in projector.project(event):
+                        yield frame
             if pending_message_end is not None:
                 for frame in projector.project(pending_message_end):
                     yield frame
@@ -530,7 +553,9 @@ async def _try_normalized_stream_message(
             request_payload=openai_data,
             context=context,
         )
-        return StreamingResponse(body_iterator, media_type="text/event-stream")
+        return ModelLimitedStreamingResponse(
+            body_iterator, media_type="text/event-stream"
+        )
     except Exception as exc:
         if (
             external_route is not None

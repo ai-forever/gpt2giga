@@ -90,8 +90,10 @@ async def _embed_texts(
     model_limiter = get_model_concurrency_limiter(request)
     request_options = extract_gigachat_request_options(request, original_data)
     async with model_limiter.limit(effective_model, provider="gemini"):
-        async with gigachat_request_options(giga_client, request_options):
-            response = await giga_client.aembeddings(
+        async with gigachat_request_options(
+            giga_client, request_options
+        ) as request_client:
+            response = await request_client.aembeddings(
                 texts=transformed["input"],
                 model=effective_model,
             )

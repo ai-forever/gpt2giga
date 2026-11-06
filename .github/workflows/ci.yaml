@@ -42,7 +42,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.13", "3.14"]
+        python-version: ["3.10", "3.13", "3.14", "3.15"]
     env:
       UV_PYTHON: ${{ matrix.python-version }}
 
@@ -62,7 +62,7 @@ jobs:
         run: uv python install ${{ matrix.python-version }}
 
       - name: Install gateway dependencies
-        run: uv sync --all-extras --dev
+        run: uv sync --locked --all-extras --dev
 
       - name: Lint with Ruff
         if: matrix.python-version == '3.13'
@@ -124,57 +124,6 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  minimum-sdk:
-    name: Gateway minimum SDK / Python ${{ matrix.python-version }}
-    runs-on: ubuntu-latest
-    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
-    timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ["3.10", "3.14"]
-    env:
-      UV_PYTHON: ${{ matrix.python-version }}
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v7
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
-        with:
-          enable-cache: true
-          cache-dependency-glob: |
-            pyproject.toml
-            uv.lock
-
-      - name: Set up Python ${{ matrix.python-version }}
-        run: uv python install ${{ matrix.python-version }}
-
-      - name: Resolve gateway version
-        id: version
-        run: echo "value=$(uv version --short --frozen)" >> "$GITHUB_OUTPUT"
-
-      - name: Build gateway wheel
-        run: uv build --wheel --no-sources --out-dir dist/min-sdk
-
-      - name: Create clean minimum SDK environment
-        run: uv venv --python ${{ matrix.python-version }} .venv-min-sdk
-
-      - name: Install minimum SDK and gateway wheel
-        run: |
-          uv pip install --python .venv-min-sdk/bin/python \
-            "gigachat==0.2.4" dist/min-sdk/gpt2giga-*.whl
-
-      - name: Run minimum-SDK installed contract smoke
-        env:
-          GATEWAY_VERSION: ${{ steps.version.outputs.value }}
-        run: |
-          .venv-min-sdk/bin/python -I scripts/gateway_artifact_smoke.py \
-            --expected-gateway-version "${GATEWAY_VERSION}" \
-            --expected-gigachat-version "0.2.4"
-          .venv-min-sdk/bin/gpt2giga --help
-
   artifact-smoke:
     name: Gateway artifact / Python ${{ matrix.python-version }}
     runs-on: ubuntu-latest
@@ -183,7 +132,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.13", "3.14"]
+        python-version: ["3.10", "3.13", "3.14", "3.15"]
     env:
       UV_PYTHON: ${{ matrix.python-version }}
 
@@ -221,60 +170,8 @@ jobs:
         run: |
           test ! -e gpt2giga
           .venv-artifact/bin/python -I scripts/gateway_artifact_smoke.py \
-            --expected-gateway-version "${GATEWAY_VERSION}"
-          .venv-artifact/bin/gpt2giga --help
-
-  python315-alpha:
-    name: Gateway experimental / Python 3.15 (alpha support)
-    runs-on: ubuntu-latest
-    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
-    timeout-minutes: 25
-    continue-on-error: true
-    env:
-      UV_PYTHON: "3.15"
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v7
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
-        with:
-          enable-cache: true
-          cache-dependency-glob: |
-            pyproject.toml
-            uv.lock
-
-      - name: Set up Python 3.15
-        run: uv python install 3.15
-
-      - name: Install gateway dependencies
-        run: uv sync --locked --all-extras --dev
-
-      - name: Run gateway tests with coverage
-        run: >-
-          uv run --locked pytest tests/ -n 4
-          --cov=. --cov-report=term --cov-fail-under=80
-
-      - name: Resolve gateway version
-        id: version
-        run: echo "value=$(uv version --short --frozen)" >> "$GITHUB_OUTPUT"
-
-      - name: Build gateway wheel and sdist
-        run: uv build --wheel --sdist --no-sources --out-dir dist/python315
-
-      - name: Create clean artifact environment
-        run: uv venv --python 3.15 .venv-artifact
-
-      - name: Install gateway artifact
-        run: uv pip install --python .venv-artifact/bin/python dist/python315/gpt2giga-*.whl
-
-      - name: Smoke installed gateway artifact
-        env:
-          GATEWAY_VERSION: ${{ steps.version.outputs.value }}
-        run: |
-          .venv-artifact/bin/python -I scripts/gateway_artifact_smoke.py \
-            --expected-gateway-version "${GATEWAY_VERSION}"
+            --expected-gateway-version "${GATEWAY_VERSION}" \
+            --expected-gigachat-version "0.3.0a1"
           .venv-artifact/bin/gpt2giga --help
 
   coverage-badge:

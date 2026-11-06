@@ -41,7 +41,7 @@ def test_gateway_resolves_sdk_from_pypi():
 
     assert "gigachat" not in pyproject["tool"].get("uv", {}).get("sources", {})
     sdk = next(package for package in lock["package"] if package["name"] == "gigachat")
-    assert sdk["version"] == "0.2.4"
+    assert sdk["version"] == "0.3.0a1"
     assert sdk["source"] == {"registry": "https://pypi.org/simple"}
     assert all(
         wheel["url"].startswith("https://files.pythonhosted.org/")
@@ -62,7 +62,7 @@ def test_gateway_ci_selects_the_python_version_it_advertises():
     workflow = yaml.safe_load((_WORKFLOW_ROOT / "ci.yaml").read_text(encoding="utf-8"))
     jobs = workflow["jobs"]
 
-    for job_name in ("test", "minimum-sdk", "artifact-smoke"):
+    for job_name in ("test", "artifact-smoke"):
         job = jobs[job_name]
         assert job["env"]["UV_PYTHON"] == "${{ matrix.python-version }}"
         assert not job.get("continue-on-error", False)
@@ -86,7 +86,7 @@ def test_gateway_ci_checks_release_branches_without_updating_their_badges():
     )
 
 
-def test_gateway_python315_is_installable_and_tested_as_experimental():
+def test_gateway_python315_is_installable_and_tested_as_required():
     root = _WORKFLOW_ROOT.parents[1]
     with (root / "pyproject.toml").open("rb") as file:
         project = tomllib.load(file)["project"]
@@ -96,30 +96,21 @@ def test_gateway_python315_is_installable_and_tested_as_experimental():
     assert "3.16" not in supported
 
     workflow = yaml.safe_load((_WORKFLOW_ROOT / "ci.yaml").read_text(encoding="utf-8"))
-    job = workflow["jobs"]["python315-alpha"]
-    assert job["env"]["UV_PYTHON"] == "3.15"
-    assert job["continue-on-error"] is True
-    commands = "\n".join(step.get("run", "") for step in job["steps"])
-    assert "uv sync --locked --all-extras --dev" in commands
-    assert "uv run --locked pytest tests/" in commands
-    assert "uv build --wheel --sdist --no-sources" in commands
-    assert "uv venv --python 3.15 .venv-artifact" in commands
-    assert "uv pip install --python .venv-artifact/bin/python" in commands
-    assert ".venv-artifact/bin/python -I scripts/gateway_artifact_smoke.py" in commands
-    assert ".venv-artifact/bin/gpt2giga --help" in commands
-
-
-def test_gateway_ci_tests_minimum_sdk_from_pypi():
-    workflow = (_WORKFLOW_ROOT / "ci.yaml").read_text(encoding="utf-8")
-
-    assert "Gateway minimum SDK / Python ${{ matrix.python-version }}" in workflow
-    assert 'python-version: ["3.10", "3.14"]' in workflow
-    assert "uv venv --python ${{ matrix.python-version }} .venv-min-sdk" in workflow
-    assert '"gigachat==0.2.4" dist/min-sdk/gpt2giga-*.whl' in workflow
-    assert "dist/min-sdk/gpt2giga-*.whl" in workflow
-    assert "scripts/gateway_artifact_smoke.py" in workflow
-    assert '--expected-gigachat-version "0.2.4"' in workflow
-    assert ".venv-min-sdk/bin/gpt2giga --help" in workflow
+    assert "python315-alpha" not in workflow["jobs"]
+    assert "minimum-sdk" not in workflow["jobs"]
+    for name in ("test", "artifact-smoke"):
+        job = workflow["jobs"][name]
+        assert job["strategy"]["matrix"]["python-version"] == [
+            "3.10",
+            "3.13",
+            "3.14",
+            "3.15",
+        ]
+        assert not job.get("continue-on-error", False)
+    commands = "\n".join(
+        step.get("run", "") for step in workflow["jobs"]["artifact-smoke"]["steps"]
+    )
+    assert '--expected-gigachat-version "0.3.0a1"' in commands
 
 
 def test_gateway_ci_installs_artifact_dependencies_without_global_prerelease_flags():
@@ -197,7 +188,7 @@ def test_container_preview_is_separate_from_stable_tags(tmp_path):
     preview = job["strategy"]["matrix"]["include"][0]
     assert preview == {
         "python-version": "3.15",
-        "python-image": "3.15-rc",
+        "python-image": "3.15",
         "preview": True,
     }
     script = next(s["run"] for s in job["steps"] if s.get("id") == "docker_tags")
@@ -207,6 +198,7 @@ def test_container_preview_is_separate_from_stable_tags(tmp_path):
             script.replace("${{ matrix.python-version }}", python)
             .replace("${{ matrix.preview }}", "true" if is_preview else "")
             .replace("${{ steps.get_version.outputs.VERSION }}", "0.3.1")
+            .replace("${{ steps.get_version.outputs.PRERELEASE }}", "false")
         )
         subprocess.run(
             ["bash", "-eu", "-c", command],
@@ -230,13 +222,16 @@ def test_container_preview_is_separate_from_stable_tags(tmp_path):
     ghcr_job = ghcr["jobs"]["build-and-push"]
     assert ghcr_job["strategy"]["matrix"]["include"][0] == {
         "python": "3.15",
-        "python-image": "3.15-rc",
+        "python-image": "3.15",
         "preview": True,
     }
     metadata = next(s for s in ghcr_job["steps"] if s.get("id") == "meta")
     assert metadata["with"]["flavor"] == "latest=false\n"
     tags = metadata["with"]["tags"]
-    assert "value=latest,enable=${{ matrix.python == '3.13' }}" in tags
+    assert (
+        "value=latest,enable=${{ matrix.python == '3.13' && steps.get_version.outputs.PRERELEASE != 'true' }}"
+        in tags
+    )
     assert "value=preview,enable=${{ matrix.preview == true }}" in tags
     assert "VERSION }}-preview,enable=${{ matrix.preview == true }}" in tags
 
@@ -244,8 +239,82 @@ def test_container_preview_is_separate_from_stable_tags(tmp_path):
 def test_container_preview_is_built_and_booted_in_ci():
     workflow = yaml.safe_load((_WORKFLOW_ROOT / "docker-smoke.yaml").read_text())
     job = workflow["jobs"]["docker-smoke"]
-    assert job["strategy"]["matrix"]["python"] == ["3.13", "3.15-rc"]
+    assert job["strategy"]["matrix"]["python"] == ["3.13", "3.15"]
     assert not job.get("continue-on-error", False)
     commands = "\n".join(step.get("run", "") for step in job["steps"])
     assert "PYTHON_VERSION=${{ matrix.python }}" in commands
     assert "http://127.0.0.1:18090/health" in commands
+
+
+def test_candidate_docker_tags_never_overwrite_stable_aliases(tmp_path):
+    import os
+    import subprocess
+
+    workflow = yaml.safe_load((_WORKFLOW_ROOT / "docker_image.yaml").read_text())
+    script = next(
+        s["run"]
+        for s in workflow["jobs"]["build-and-push"]["steps"]
+        if s.get("id") == "docker_tags"
+    )
+    for python in ("3.10", "3.13", "3.15"):
+        output = tmp_path / python
+        command = (
+            script.replace("${{ matrix.python-version }}", python)
+            .replace("${{ matrix.preview }}", "true" if python == "3.15" else "")
+            .replace("${{ steps.get_version.outputs.VERSION }}", "0.3.3a1")
+            .replace("${{ steps.get_version.outputs.PRERELEASE }}", "true")
+        )
+        subprocess.run(
+            ["bash", "-eu", "-c", command],
+            check=True,
+            env={
+                **os.environ,
+                "GITHUB_OUTPUT": str(output),
+                "IMAGE_NAME": "test/image",
+                "GITHUB_SHA": "abc",
+            },
+        )
+        tags = output.read_text().splitlines()[1:-1]
+        assert "test/image:latest" not in tags
+        assert f"test/image:python{python}" not in tags
+        assert f"test/image:python{python}-preview" in tags
+        assert ("test/image:preview" in tags) == (python == "3.15")
+
+
+def test_ghcr_tags_render_stable_and_candidate_aliases():
+    import re
+
+    job = yaml.safe_load((_WORKFLOW_ROOT / "publish-ghcr.yml").read_text())["jobs"][
+        "build-and-push"
+    ]
+    template = next(step for step in job["steps"] if step.get("id") == "meta")["with"][
+        "tags"
+    ]
+    for version, prerelease in (("0.3.3", False), ("0.3.3a1", True)):
+        for python in ("3.10", "3.13", "3.15"):
+            preview = python == "3.15"
+            values = {
+                "matrix.python": python,
+                "steps.get_version.outputs.VERSION": version,
+                "(matrix.preview || steps.get_version.outputs.PRERELEASE == 'true') && '-preview' || ''": "-preview"
+                if preview or prerelease
+                else "",
+                "matrix.python == '3.13'": str(python == "3.13").lower(),
+                "matrix.preview == true": str(preview).lower(),
+                "matrix.python == '3.13' && steps.get_version.outputs.PRERELEASE != 'true'": str(
+                    python == "3.13" and not prerelease
+                ).lower(),
+            }
+            rendered = re.sub(
+                r"\$\{\{ (.*?) \}\}", lambda match: values[match.group(1)], template
+            )
+            rows = [
+                dict(field.split("=", 1) for field in line.split(","))
+                for line in rendered.splitlines()
+            ]
+            tags = {row["value"] for row in rows if row.get("enable", "true") == "true"}
+            assert ("latest" in tags) == (python == "3.13" and not prerelease)
+            assert (f"py{python}" in tags) == (not preview and not prerelease)
+            assert (f"py{python}-preview" in tags) == (preview or prerelease)
+            assert ("preview" in tags) == preview
+            assert (version in tags) == (python == "3.13")

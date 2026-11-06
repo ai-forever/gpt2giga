@@ -20,7 +20,7 @@ OpenAI-compatible Chat Completions server.
 | Инструменты и структурированный вывод | Схемы функций/инструментов и управление через JSON-схему отличаются между провайдерами и режимами бэкенда. | Сопоставляет локальные инструменты/функции и передаёт схемы структурированного вывода через нативный GigaChat `response_format`. |
 | Авторизация | Клиенты OpenAI/Anthropic работают с API-ключами, а GigaChat требует другого механизма учётных данных и scope. | Разделяет аутентификацию по API-ключу прокси и авторизацию в вышестоящем GigaChat, при необходимости поддерживает сквозную передачу для каждого запроса. |
 | Получение списка моделей | Ответы GigaChat о моделях не совпадают с формой OpenAI/Anthropic/Gemini/LiteLLM. | Переупаковывает список и описание моделей под нужный клиент. |
-| Пакетные маршруты OpenAI/Anthropic/Gemini | У установленного SDK/бэкенда GigaChat нет полного цикла create/list/retrieve/cancel для пакетных API. | Держит роутеры Files/Batches отключёнными, пока они не смогут работать сквозным образом. |
+| Пакетные маршруты OpenAI/Anthropic/Gemini | У установленного SDK/бэкенда GigaChat нет полного цикла create/list/retrieve/cancel для пакетных API. | Держит Batches отключёнными; OpenAI Files подключён. |
 
 ## Подключённые маршруты
 
@@ -48,7 +48,7 @@ OpenAI-compatible Chat Completions server.
 | `POST /responses` | Stable native / normalized preview | Native GigaChat execution сохраняет compatibility surface, включая hosted tools и attachment handoff. Route-selected normalized execution остаётся technical preview и отклоняет semantics, которые выбранные route/model/API mode не сохраняют. |
 | `POST /embeddings` | Поддерживается | Использует модель из запроса или модель прокси по умолчанию для эмбеддингов, в зависимости от конфигурации. |
 | `GET /model/info` | Поддерживается | Эндпоинт информации о модели, совместимый с LiteLLM. |
-| `POST /files`, `GET /files*` | Отключено | Код роутера есть, но он не подключён: files без batches дают неполный пакетный цикл OpenAI. |
+| `POST /files`, `GET /files*`, `DELETE /files/{id}` | Поддерживается | Upload/list/get/delete и binary content; aliases root, `/v1` и `/v2`. |
 | `POST /batches`, `GET /batches*` | Отключено | Отключено до появления create/list/retrieve/cancel для пакетов в SDK/бэкенде GigaChat. |
 | Маршруты сохранённых chat-completion | Не реализовано | Сохранённые completions сейчас вне области поддержки. |
 | Устаревший `POST /completions` | Не реализовано | Устаревшие текстовые completions сейчас вне области поддержки. |
@@ -260,7 +260,7 @@ GigaChat v2.
 
 ## Согласование контрактов SDK
 
-Шлюз устанавливает `gigachat>=0.2.4,<0.3.0` из PyPI; `uv.lock` фиксирует
+Шлюз устанавливает `gigachat[aiohttp]==0.3.0a1` из PyPI; `uv.lock` фиксирует
 разрешённую версию и хэши артефактов. Совместимость шлюза и SDK проверяется
 синтетическими HTTP-ответами; эти проверки не подтверждают качество живой модели,
 права доступа к возможностям, экономию кэша или детерминированность генерации.
@@ -358,3 +358,15 @@ response = client.chat.completions.create(
 можно передать `extra_body={"assistant_id": "<ваш assistant ID>"}`:
 шлюз уберёт `model` из запроса upstream. Это не создаёт assistant и требует
 доступного в вашем аккаунте идентификатора.
+
+### Ошибки транспорта upstream
+
+До начала ответа timeout SDK возвращает 504 (`upstream_timeout`), connection,
+validation и interruption — 502 (`upstream_connection_error`,
+`invalid_upstream_response`, `stream_interrupted`). Gemini использует
+DEADLINE_EXCEEDED для 504 и UNAVAILABLE для 502. После headers ошибка передаётся
+в SSE без изменения HTTP status и без повторного chat. Gateway `X-Request-ID`
+сохраняется; upstream ID передаётся через `X-GigaChat-Request-ID` или
+`error.metadata.gigachat_x_request_id` в SSE (в Responses event:error —
+непосредственно `metadata`). Body и credentials в диагностику не попадают.
+OpenAI Files content возвращает исходные bytes.

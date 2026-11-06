@@ -1,6 +1,6 @@
 [project]
 name = "gpt2giga"
-version = "0.3.2"
+version = "0.3.3a1"
 description = "Утилита для проксирования OpenAI, Anthropic и Gemini запросов в GigaChat"
 authors = [{ name = "Konstantin Krestnikov", email = "rai220@gmail.com" }]
 requires-python = ">=3.10,<3.16"
@@ -9,7 +9,7 @@ license = "MIT"
 dependencies = [
     "certifi>=2024.2.2",
     "python-dotenv>=1.2.2,<2",
-    "aiohttp>=3.14.3,<4",
+    "aiohttp>=3.14.5,<4",
     "httpx>=0.28.1,<1",
     "tiktoken>=0.13.0,<1",
     "pillow>=12.3.0,<13",
@@ -21,7 +21,7 @@ dependencies = [
     "pydantic-settings>=2.14.2,<3",
     "fastapi>=0.140.13,<1",
     "starlette>=1.3.1,<2",
-    "gigachat>=0.2.4,<0.3.0",
+    "gigachat[aiohttp]==0.3.0a1",
     "anthropic>=0.120.2",
     "google-genai>=2.14.0,<3",
     "pyyaml>=6.0.3,<7",

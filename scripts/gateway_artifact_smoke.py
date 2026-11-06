@@ -33,8 +33,11 @@ def _gigachat_specifiers(requirements: list[str] | None) -> set[str]:
     matches = []
     for requirement in requirements or []:
         normalized = requirement.partition(";")[0].replace(" ", "").lower()
-        if normalized.startswith("gigachat"):
-            matches.append(normalized.removeprefix("gigachat"))
+        match = re.fullmatch(
+            r"gigachat(?:\[[^]]+\])?(?P<specifier>(?:[<>=!~@].*)?)", normalized
+        )
+        if match:
+            matches.append(match.group("specifier"))
     if len(matches) != 1:
         raise ArtifactSmokeError(
             "gateway metadata must contain exactly one direct gigachat requirement"
@@ -76,8 +79,15 @@ def verify_installed_gateway(
             f"installed gigachat version {gigachat_version!r} does not match "
             f"{expected_gigachat_version!r}"
         )
-    if _gigachat_specifiers(distribution.requires) != {">=0.2.4", "<0.3.0"}:
-        raise ArtifactSmokeError("gateway metadata must require gigachat>=0.2.4,<0.3.0")
+    if _gigachat_specifiers(distribution.requires) != {"==0.3.0a1"} or not any(
+        re.fullmatch(
+            r"gigachat\[aiohttp\]==0\.3\.0a1", requirement.replace(" ", "").lower()
+        )
+        for requirement in distribution.requires or []
+    ):
+        raise ArtifactSmokeError(
+            "gateway metadata must require gigachat[aiohttp]==0.3.0a1"
+        )
 
     scripts = {
         entry.name: entry.value

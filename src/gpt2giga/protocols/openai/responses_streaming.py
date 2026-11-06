@@ -542,6 +542,16 @@ class ResponsesStreamProjector:
     def _error(self, event: NormalizedStreamEvent) -> list[str]:
         self._terminal = True
         error = event.error
+        request_id = (
+            error.provider_metadata.get("gigachat", {}).get("request_id")
+            if error
+            else None
+        )
+        diagnostics = (
+            {"metadata": {"gigachat_x_request_id": request_id}}
+            if isinstance(request_id, str) and request_id
+            else {}
+        )
         return [
             self._frame(
                 "error",
@@ -553,6 +563,7 @@ class ResponsesStreamProjector:
                         else "Provider stream failed."
                     ),
                     "param": error.param if error is not None else None,
+                    **diagnostics,
                 },
             )
         ]

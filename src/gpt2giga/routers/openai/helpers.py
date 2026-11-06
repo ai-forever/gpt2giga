@@ -1,5 +1,6 @@
 """Shared helpers for OpenAI-compatible API routes."""
 
+import base64
 import re
 from typing import Optional
 
@@ -83,8 +84,10 @@ async def _load_batch_output_content(request: Request, file_id: str) -> bytes:
     """Load file content and post-process batch output files when needed."""
     giga_client = get_gigachat_client(request)
     request_options = extract_gigachat_request_options(request)
-    async with gigachat_request_options(giga_client, request_options):
-        file_response = await giga_client.aget_file_content(file_id=file_id)
+    async with gigachat_request_options(
+        giga_client, request_options, include_body=False
+    ) as request_client:
+        file_response = await request_client.aget_file_content(file_id=file_id)
     batch_store = get_batch_store(request)
     matching_batch = next(
         (
@@ -95,19 +98,19 @@ async def _load_batch_output_content(request: Request, file_id: str) -> bytes:
         None,
     )
     if matching_batch:
-        async with gigachat_request_options(giga_client, request_options):
-            input_file = await giga_client.aget_file_content(
+        async with gigachat_request_options(
+            giga_client, request_options, include_body=False
+        ) as request_client:
+            input_file = await request_client.aget_file_content(
                 file_id=matching_batch["input_file_id"]
             )
         from gpt2giga.protocol.batches import transform_batch_output_file
 
         return await transform_batch_output_file(
-            file_response.content,
+            base64.b64encode(file_response).decode("ascii"),
             batch_metadata=matching_batch,
-            input_content_b64=input_file.content,
+            input_content_b64=base64.b64encode(input_file).decode("ascii"),
             response_processor=request.app.state.response_processor,
         )
 
-    import base64
-
-    return base64.b64decode(file_response.content)
+    return file_response

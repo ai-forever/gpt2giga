@@ -8,7 +8,10 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from fastapi import APIRouter, Request
-from fastapi.responses import StreamingResponse
+
+from gpt2giga.common.streaming_response import ModelLimitedStreamingResponse
+
+from gpt2giga.common.streaming_response import closing_stream
 
 from gpt2giga.app_state import get_gigachat_client, get_model_concurrency_limiter
 from gpt2giga.common.api_mode import resolve_gigachat_api_mode
@@ -178,47 +181,50 @@ async def stream_generate_content(model: str, request: Request):
         emitted_chunk = False
         seen_content_delta = False
         try:
-            async for event in provider_adapter.stream_chat(
-                normalized_request,
-                context=context,
-                is_disconnected=request.is_disconnected,
-                logger=getattr(request.app.state, "logger", None),
-            ):
-                first_content_delta = (
-                    event.type == "content_delta"
-                    and bool(event.content_delta)
-                    and not seen_content_delta
+            async with closing_stream(
+                provider_adapter.stream_chat(
+                    normalized_request,
+                    context=context,
+                    is_disconnected=request.is_disconnected,
+                    logger=getattr(request.app.state, "logger", None),
                 )
-                try:
-                    span_events.extend(
-                        build_stream_span_events(
-                            event,
-                            settings=request.app.state.config.proxy_settings,
-                            first_content_delta=first_content_delta,
-                        )
+            ) as delegated_stream:
+                async for event in delegated_stream:
+                    first_content_delta = (
+                        event.type == "content_delta"
+                        and bool(event.content_delta)
+                        and not seen_content_delta
                     )
-                except Exception as exc:
-                    logger = getattr(request.app.state, "logger", None)
-                    if logger is not None:
-                        logger.warning(
-                            "Gemini stream span event build failed: {}",
-                            exc,
+                    try:
+                        span_events.extend(
+                            build_stream_span_events(
+                                event,
+                                settings=request.app.state.config.proxy_settings,
+                                first_content_delta=first_content_delta,
+                            )
                         )
-                try:
-                    observer.observe(event)
-                except Exception as exc:
-                    logger = getattr(request.app.state, "logger", None)
-                    if logger is not None:
-                        logger.warning(
-                            "Gemini stream observability observe failed: {}",
-                            exc,
-                        )
-                if event.type == "content_delta" and event.content_delta:
-                    seen_content_delta = True
-                chunks = projector.project(event)
-                for chunk in chunks:
-                    emitted_chunk = True
-                    yield chunk
+                    except Exception as exc:
+                        logger = getattr(request.app.state, "logger", None)
+                        if logger is not None:
+                            logger.warning(
+                                "Gemini stream span event build failed: {}",
+                                exc,
+                            )
+                    try:
+                        observer.observe(event)
+                    except Exception as exc:
+                        logger = getattr(request.app.state, "logger", None)
+                        if logger is not None:
+                            logger.warning(
+                                "Gemini stream observability observe failed: {}",
+                                exc,
+                            )
+                    if event.type == "content_delta" and event.content_delta:
+                        seen_content_delta = True
+                    chunks = projector.project(event)
+                    for chunk in chunks:
+                        emitted_chunk = True
+                        yield chunk
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -289,7 +295,7 @@ async def stream_generate_content(model: str, request: Request):
             events=span_events,
         )
 
-    return StreamingResponse(emit_stream(), media_type="text/event-stream")
+    return ModelLimitedStreamingResponse(emit_stream(), media_type="text/event-stream")
 
 
 def _stream_error_event(
@@ -382,8 +388,10 @@ async def count_tokens(model: str, request: Request):
     from gpt2giga.common.gigachat_options import gigachat_request_options
 
     async with model_limiter.limit(resolution.limiter_key, provider="gemini"):
-        async with gigachat_request_options(giga_client, request_options):
-            token_counts = await giga_client.atokens_count(
+        async with gigachat_request_options(
+            giga_client, request_options
+        ) as request_client:
+            token_counts = await request_client.atokens_count(
                 texts,
                 model=effective_model,
             )

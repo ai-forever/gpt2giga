@@ -3,7 +3,10 @@
 import json
 from types import SimpleNamespace
 
-import httpx
+import httpx2 as httpx
+from functools import partial
+from gigachat import GigaChat
+from gigachat.exceptions import StreamInterruptedError
 import pytest
 from loguru import logger
 
@@ -15,28 +18,35 @@ from gpt2giga.providers.gigachat.model_resolution import resolve_upstream_model
 
 
 @pytest.fixture
-def sdk_wire(monkeypatch):
+async def sdk_wire(monkeypatch):
     """Capture SDK HTTP calls without opening a network connection."""
     for key in ("CREDENTIALS", "USER", "PASSWORD"):
         monkeypatch.delenv(f"GIGACHAT_{key}", raising=False)
     seen = []
     replies = []
-    original_client = httpx.AsyncClient
 
     def handle(request):
         seen.append(request)
         return replies.pop(0)
 
-    def mocked_client(**kwargs):
-        return original_client(**kwargs, transport=httpx.MockTransport(handle))
-
-    monkeypatch.setattr(httpx, "AsyncClient", mocked_client)
+    http_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(handle), trust_env=False
+    )
+    monkeypatch.setattr(
+        "gpt2giga.providers.gigachat.client.GigaChat",
+        partial(GigaChat, async_http_client=http_client),
+    )
     settings = GigaChatCLI(
         base_url="https://gigachat.test/v1",
         model="test-model",
         access_token="fixture-token",
     )
-    return build_gigachat_client(settings), seen, replies
+    client = build_gigachat_client(settings)
+    try:
+        yield client, seen, replies
+    finally:
+        await client.aclose()
+        await http_client.aclose()
 
 
 async def test_gateway_v2_request_survives_sdk_wire_serialization(sdk_wire):
@@ -122,6 +132,7 @@ async def test_sdk_eventless_sse_reaches_gateway_stream_processor(sdk_wire):
     chunks = [
         {"messages": [{"role": "assistant", "content": [{"text": "hello"}]}]},
         {
+            "event": "response.message.done",
             "finish_reason": "stop",
             "usage": {
                 "input_tokens": 2,
@@ -251,3 +262,20 @@ async def test_v2_assistant_selector_survives_sdk_without_injected_model(sdk_wir
     body = json.loads(seen[0].content)
     assert body["assistant_id"] == "assistant-1"
     assert "model" not in body
+
+
+@pytest.mark.parametrize("ending", ["", "data: [DONE]\n\n"])
+async def test_v2_stream_requires_terminal_event(sdk_wire, ending):
+    client, seen, replies = sdk_wire
+    replies.append(
+        httpx.Response(
+            200,
+            headers={"Content-Type": "text/event-stream"},
+            text='data: {"messages": [{"role": "assistant", "content": "hi"}]}\n\n'
+            + ending,
+        )
+    )
+    with pytest.raises(StreamInterruptedError):
+        async for _ in client.achat.stream("hello"):
+            pass
+    assert len(seen) == 1

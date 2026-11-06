@@ -6,6 +6,8 @@ import json
 from collections.abc import AsyncIterator, Mapping
 from typing import Any
 
+from gpt2giga.common.streaming_response import closing_stream
+
 from gpt2giga.protocols.normalized import (
     NormalizedChoice,
     NormalizedError,
@@ -83,22 +85,24 @@ async def observe_anthropic_message_stream(
     """Observe Anthropic SSE chunks and emit one final LLM span."""
     sink = getattr(state, "observability_sink", None)
     if not is_sink_active(sink):
-        async for chunk in body_iterator:
-            yield chunk
+        async with closing_stream(body_iterator) as delegated_stream:
+            async for chunk in delegated_stream:
+                yield chunk
         return
 
     observer = AnthropicMessageStreamObserver()
-    async for chunk in body_iterator:
-        try:
-            observer.observe_chunk(chunk)
-        except Exception as exc:
-            logger = getattr(state, "logger", None)
-            if logger is not None:
-                logger.warning(
-                    "Anthropic message stream observability observe failed: {}",
-                    exc,
-                )
-        yield chunk
+    async with closing_stream(body_iterator) as delegated_stream:
+        async for chunk in delegated_stream:
+            try:
+                observer.observe_chunk(chunk)
+            except Exception as exc:
+                logger = getattr(state, "logger", None)
+                if logger is not None:
+                    logger.warning(
+                        "Anthropic message stream observability observe failed: {}",
+                        exc,
+                    )
+            yield chunk
 
     if not observer.has_observed_payload:
         return

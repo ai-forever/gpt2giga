@@ -180,8 +180,7 @@ least-recently-used eviction or shutdown; active streaming requests are never ev
 
 ## GigaChat settings
 
-The minimum supported GigaChat Python SDK version is `0.2.4`; the gateway keeps
-the dependency within the compatible `0.2.x` series. The SDK default API base
+This gateway candidate pins `gigachat[aiohttp]==0.3.0a1`. The SDK default API base
 URL is `https://api.giga.chat/v1`.
 
 Common upstream settings:
@@ -658,3 +657,19 @@ Do not enable them publicly without reverse-proxy controls and a separate admin 
 
 `GPT2GIGA_UI_ENABLED` is reserved for a future built-in UI. For now, do not
 use it as a security control.
+
+### SDK alpha candidate
+
+Gateway 0.3.3a1 pins `gigachat[aiohttp]==0.3.0a1`; install the locally built wheel
+to test this candidate, which is not declared published. Native HTTPX2 remains
+the default. Select `GIGACHAT_ASYNC_BACKEND=aiohttp` or
+`--gigachat.async-backend aiohttp` to opt in. The aiohttp backend uses HTTP/1.1;
+HTTP2, SOCKS, separate finite write timeouts and finite max_keepalive_connections
+are unsupported. Explicit finite connect/pool timeouts must match; the SDK rejects
+unsupported configurations. No throughput improvement is promised.
+
+`GIGACHAT_TRUST_ENV=False` ignores environment proxy and CA overrides. Explicit CA
+and SSL contexts keep their semantics. Bundled trust combines certifi and the
+Russian root; factory-loaded API mTLS certificates are not sent to OAuth. Explicit
+`auth_ssl_context` controls OAuth trust separately. Request credentials do not
+inherit server auth fields.

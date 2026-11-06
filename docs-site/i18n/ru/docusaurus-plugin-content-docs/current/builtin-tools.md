@@ -6,7 +6,7 @@ GigaChat Chat Completions v2. Источник истины для GigaChat зд
 
 ## Источник истины
 
-В `pyproject.toml` пакет требует `gigachat>=0.2.4,<0.3.0`.
+В `pyproject.toml` пакет требует `gigachat[aiohttp]==0.3.0a1`.
 Для этого диапазона канонический список встроенных инструментов берётся из
 SDK-моделей:
 

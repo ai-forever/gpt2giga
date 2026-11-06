@@ -122,11 +122,22 @@ def normalized_stream_event_to_gemini_chunk(
         return None
     if event.type == "error":
         error = event.error
+        request_id = (
+            error.provider_metadata.get("gigachat", {}).get("request_id")
+            if error
+            else None
+        )
+        diagnostics = (
+            {"metadata": {"gigachat_x_request_id": request_id}}
+            if isinstance(request_id, str) and request_id
+            else {}
+        )
         return {
             "error": {
                 "code": error.code if error else "stream_error",
                 "message": error.message if error else "Stream interrupted",
                 "status": error.type if error else "stream_error",
+                **diagnostics,
             }
         }
     if event.type == "usage":

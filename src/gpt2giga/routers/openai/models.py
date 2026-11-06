@@ -198,9 +198,11 @@ async def show_available_models(request: Request):
             request,
             exclude_query_params=_MODEL_PROJECTION_QUERY_PARAMS,
         )
-        async with gigachat_request_options(giga_client, request_options):
+        async with gigachat_request_options(
+            giga_client, request_options, include_body=False
+        ) as request_client:
             snapshot = await catalog.list_models(
-                giga_client,
+                request_client,
                 provider_profile_id=get_gigachat_model_catalog_profile_id(request),
                 refresh=_catalog_refresh_requested(request),
             )
@@ -242,11 +244,13 @@ async def get_model(model: str, request: Request):
             request,
             exclude_query_params=_MODEL_PROJECTION_QUERY_PARAMS,
         )
-        async with gigachat_request_options(giga_client, request_options):
+        async with gigachat_request_options(
+            giga_client, request_options, include_body=False
+        ) as request_client:
             try:
                 descriptor = await catalog.get_model(
                     model,
-                    giga_client,
+                    request_client,
                     provider_profile_id=get_gigachat_model_catalog_profile_id(request),
                     refresh=_catalog_refresh_requested(request),
                 )

@@ -18,6 +18,7 @@ from gpt2giga.common.model_concurrency import (
 )
 from gpt2giga.logger import rquid_context
 from gpt2giga.providers.gigachat.model_resolution import UpstreamModelRequiredError
+from gpt2giga.providers.gigachat.streaming import sdk_request_id, sdk_transport_error
 from gpt2giga.providers.network import ProviderNetworkAuthorizationError
 from gpt2giga.providers.openai_compatible import OpenAICompatibleUpstreamError
 
@@ -114,6 +115,19 @@ def exceptions_handler(func):
                 ),
             )
         except gigachat.exceptions.GigaChatException as e:
+            transport_error = sdk_transport_error(e)
+            if transport_error is not None:
+                status, code, message = transport_error
+                response = _bridge_transport_error_response(
+                    message,
+                    code=code,
+                    request=_request_argument(args, kwargs),
+                    status_code=status,
+                )
+                request_id = sdk_request_id(e)
+                if request_id:
+                    response.headers["X-GigaChat-Request-ID"] = request_id
+                return response
             # Log the exception with context
             from loguru import logger
 
@@ -269,28 +283,29 @@ def _bridge_transport_error_response(
     *,
     code: str,
     request: Request | None,
+    status_code: int = 502,
 ) -> JSONResponse:
     protocol = _public_protocol(request)
     if protocol == "anthropic":
         return anthropic_compatibility_response(
             message,
-            status_code=502,
+            status_code=status_code,
             error_type="api_error",
             code=code,
         )
     if protocol == "gemini":
         return JSONResponse(
-            status_code=502,
+            status_code=status_code,
             content={
                 "error": {
-                    "code": 502,
+                    "code": status_code,
                     "message": message,
-                    "status": "UNAVAILABLE",
+                    "status": _gemini_error_status(status_code),
                 }
             },
         )
     return JSONResponse(
-        status_code=502,
+        status_code=status_code,
         content=openai_error_payload(
             message,
             error_type="api_error",
@@ -304,7 +319,9 @@ def _public_protocol(request: Request | None) -> str:
     path = request.url.path if request is not None else ""
     if "/messages" in path:
         return "anthropic"
-    if "generateContent" in path or "countTokens" in path:
+    if any(
+        path.startswith(prefix) for prefix in ("/v1beta/", "/v1/v1beta/", "/v2/v1beta/")
+    ):
         return "gemini"
     return "openai"
 
@@ -317,4 +334,5 @@ def _gemini_error_status(status_code: int) -> str:
         404: "NOT_FOUND",
         408: "DEADLINE_EXCEEDED",
         429: "RESOURCE_EXHAUSTED",
+        504: "DEADLINE_EXCEEDED",
     }.get(status_code, "UNAVAILABLE" if status_code >= 500 else "UNKNOWN")

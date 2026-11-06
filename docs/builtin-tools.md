@@ -6,8 +6,8 @@ installed `gigachat` SDK, not the website or external documentation.
 
 ## Source of truth
 
-In `pyproject.toml` the package requires `gigachat>=0.2.4,<0.3.0`.
-For this range, the canonical list of built-in tools comes from the SDK models:
+In `pyproject.toml` the package requires `gigachat[aiohttp]==0.3.0a1`.
+For this version, the canonical list of built-in tools comes from the SDK models:
 
 - `gigachat.models.chat_completions.ChatTool`;
 - the SDK shorthand normalizer `_normalize_tool`;

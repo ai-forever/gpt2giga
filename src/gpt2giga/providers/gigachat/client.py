@@ -51,8 +51,7 @@ def build_gigachat_client(
     """Build a client from base settings and optional request auth."""
     client_kwargs = settings.model_dump(exclude_none=True)
     if request_auth is not None:
-        for key in _REQUEST_AUTH_FIELDS:
-            client_kwargs.pop(key, None)
+        client_kwargs.update(dict.fromkeys(_REQUEST_AUTH_FIELDS, ""))
         client_kwargs.update(request_auth)
 
     _validate_username_password_base_url(settings, client_kwargs)
@@ -63,17 +62,43 @@ def build_gigachat_client(
         and not client_kwargs.get("ssl_context")
         and not client_kwargs.get("ca_bundle_file")
     ):
-        context = ssl.create_default_context(
-            cafile=os.environ.get("SSL_CERT_FILE") or certifi.where(),
-            capath=os.environ.get("SSL_CERT_DIR"),
-        )
-        context.load_verify_locations(
-            cadata=files("gpt2giga.providers.gigachat")
-            .joinpath("certs/russian_trusted_root_ca.pem")
-            .read_text(encoding="ascii")
-        )
+        cert_file = client_kwargs.get("cert_file")
+        if not cert_file and (
+            client_kwargs.get("key_file") or client_kwargs.get("key_file_password")
+        ):
+            raise GigaChatClientConfigurationError(
+                "key_file and key_file_password require cert_file"
+            )
+        trust_env = client_kwargs.get("trust_env", True)
+        context = _bundled_ca_context(trust_env=trust_env)
+        if cert_file:
+            context.load_cert_chain(
+                cert_file,
+                client_kwargs.get("key_file") or None,
+                client_kwargs.get("key_file_password") or None,
+            )
+            if not client_kwargs.get("auth_ssl_context"):
+                client_kwargs["auth_ssl_context"] = _bundled_ca_context(
+                    trust_env=trust_env
+                )
+            client_kwargs.update(cert_file="", key_file="", key_file_password="")
         client_kwargs["ssl_context"] = context
     return GigaChat(**client_kwargs)
+
+
+def _bundled_ca_context(*, trust_env: bool) -> ssl.SSLContext:
+    """Create a fresh verified context with public and bundled trust roots."""
+    context = ssl.create_default_context(
+        cafile=(os.environ.get("SSL_CERT_FILE") if trust_env else None)
+        or certifi.where(),
+        capath=os.environ.get("SSL_CERT_DIR") if trust_env else None,
+    )
+    context.load_verify_locations(
+        cadata=files("gpt2giga.providers.gigachat")
+        .joinpath("certs/russian_trusted_root_ca.pem")
+        .read_text(encoding="ascii")
+    )
+    return context
 
 
 def _validate_username_password_base_url(

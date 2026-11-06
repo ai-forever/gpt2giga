@@ -1,6 +1,5 @@
 """Tests for Anthropic Messages API router."""
 
-import base64
 import json
 
 from fastapi import FastAPI
@@ -419,11 +418,6 @@ class FakeBatches:
         self.batches = batches
 
 
-class FakeFileContent:
-    def __init__(self, content):
-        self.content = content
-
-
 class FakeGigachatBatches(FakeGigachat):
     def __init__(self):
         super().__init__()
@@ -460,13 +454,9 @@ class FakeGigachatBatches(FakeGigachat):
                 },
             },
         ]
-        self.files["file-output-1"] = FakeFileContent(
-            base64.b64encode(
-                ("\n".join(json.dumps(row) for row in output_payload) + "\n").encode(
-                    "utf-8"
-                )
-            ).decode("utf-8")
-        )
+        self.files["file-output-1"] = (
+            "\n".join(json.dumps(row) for row in output_payload) + "\n"
+        ).encode("utf-8")
         batch = FakeBatch(
             "batch-1",
             status="completed",

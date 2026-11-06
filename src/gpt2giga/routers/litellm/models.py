@@ -42,11 +42,15 @@ async def get_model_info(request: Request, model: Optional[str] = None):
         request, exclude_query_params=("model",)
     )
     if model:
-        async with gigachat_request_options(giga_client, request_options):
-            response = await giga_client.aget_model(model=model)
+        async with gigachat_request_options(
+            giga_client, request_options, include_body=False
+        ) as request_client:
+            response = await request_client.aget_model(model=model)
         return _model_info_entry(_extract_model_id(response))
-    async with gigachat_request_options(giga_client, request_options):
-        response = await giga_client.aget_models()
+    async with gigachat_request_options(
+        giga_client, request_options, include_body=False
+    ) as request_client:
+        response = await request_client.aget_models()
     return {
         "data": [
             _model_info_entry(_extract_model_id(model_info))

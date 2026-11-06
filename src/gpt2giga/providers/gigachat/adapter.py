@@ -11,6 +11,8 @@ from typing import Any, Literal
 import gigachat
 from starlette.requests import Request
 
+from gpt2giga.common.streaming_response import closing_stream
+
 from gpt2giga.common.cache_session import apply_cache_session_id
 from gpt2giga.common.gigachat_options import gigachat_request_options
 from gpt2giga.common.model_concurrency import (
@@ -45,7 +47,11 @@ from gpt2giga.protocols.normalized import (
     NormalizedToolKind,
     NormalizedUsage,
 )
-from gpt2giga.providers.gigachat.streaming import GigaChatNormalizedStreamMapper
+from gpt2giga.providers.gigachat.streaming import (
+    GigaChatNormalizedStreamMapper,
+    sdk_transport_error,
+    sdk_request_id,
+)
 from gpt2giga.providers.gigachat.model_resolution import (
     ResolvedUpstreamModel,
     resolve_upstream_model,
@@ -120,8 +126,8 @@ class GigaChatProviderAdapter:
             async with gigachat_request_options(
                 self.giga_client,
                 self.request_options,
-            ):
-                counts = await self.giga_client.atokens_count(
+            ) as request_client:
+                counts = await request_client.atokens_count(
                     texts,
                     model=resolution.model,
                 )
@@ -155,27 +161,48 @@ class GigaChatProviderAdapter:
         if self.response_processor is None:
             raise RuntimeError("response_processor is required for streaming")
 
-        payload = normalized_chat_to_openai_payload(request)
-        mode = self._resolve_api_mode()
-        if mode == "v2":
-            async for event in self._stream_chat_completion(
-                payload,
-                request,
-                context=context,
-                is_disconnected=is_disconnected,
-                logger=logger,
-            ):
-                yield event
-            return
+        try:
+            payload = normalized_chat_to_openai_payload(request)
+            mode = self._resolve_api_mode()
+            if mode == "v2":
+                async with closing_stream(
+                    self._stream_chat_completion(
+                        payload,
+                        request,
+                        context=context,
+                        is_disconnected=is_disconnected,
+                        logger=logger,
+                    )
+                ) as delegated_stream:
+                    async for event in delegated_stream:
+                        yield event
+                return
 
-        async for event in self._stream_chat(
-            payload,
-            request,
-            context=context,
-            is_disconnected=is_disconnected,
-            logger=logger,
-        ):
-            yield event
+            async with closing_stream(
+                self._stream_chat(
+                    payload,
+                    request,
+                    context=context,
+                    is_disconnected=is_disconnected,
+                    logger=logger,
+                )
+            ) as delegated_stream:
+                async for event in delegated_stream:
+                    yield event
+        except gigachat.exceptions.GigaChatException as exc:
+            transport_error = sdk_transport_error(exc)
+            if transport_error is None:
+                raise
+            _, code, message = transport_error
+            mapper = self._stream_mapper(
+                request, context, effective_model=request.model or ""
+            )
+            yield mapper.error_event(
+                message=message,
+                error_type="api_error",
+                code=code,
+                request_id=sdk_request_id(exc),
+            )
 
     def _resolve_api_mode(self) -> Literal["v1", "v2"]:
         return self.api_mode or getattr(
@@ -232,10 +259,12 @@ class GigaChatProviderAdapter:
         *,
         context: RequestContext | None,
     ) -> NormalizedResponse:
-        async with gigachat_request_options(self.giga_client, self.request_options):
+        async with gigachat_request_options(
+            self.giga_client, self.request_options, include_body=False
+        ) as request_client:
             chat_payload = await self.request_transformer.prepare_chat(
                 payload,
-                self.giga_client,
+                request_client,
                 **(
                     {"forced_model": self.forced_model}
                     if self.forced_model is not None
@@ -254,8 +283,10 @@ class GigaChatProviderAdapter:
             resolution.limiter_key,
             provider=self.provider_label,
         ):
-            async with gigachat_request_options(self.giga_client, request_options):
-                response = await self.giga_client.achat(chat_payload)
+            async with gigachat_request_options(
+                self.giga_client, request_options
+            ) as request_client:
+                response = await request_client.achat(chat_payload)
         return gigachat_response_to_normalized(
             response,
             request=request,
@@ -270,10 +301,12 @@ class GigaChatProviderAdapter:
         *,
         context: RequestContext | None,
     ) -> NormalizedResponse:
-        async with gigachat_request_options(self.giga_client, self.request_options):
+        async with gigachat_request_options(
+            self.giga_client, self.request_options, include_body=False
+        ) as request_client:
             chat_payload = await self.request_transformer.prepare_chat_completion(
                 payload,
-                self.giga_client,
+                request_client,
                 **(
                     {"forced_model": self.forced_model}
                     if self.forced_model is not None
@@ -292,14 +325,18 @@ class GigaChatProviderAdapter:
             resolution.limiter_key,
             provider=self.provider_label,
         ):
-            async with gigachat_request_options(self.giga_client, request_options):
-                response = await self.giga_client.achat.create(chat_payload)
+            async with gigachat_request_options(
+                self.giga_client, request_options
+            ) as request_client:
+                response = await request_client.achat.create(chat_payload)
         adapted = adapt_chat_completion_to_chat_shape(
             response,
             default_model=request.model or resolution.model or "",
         )
-        async with gigachat_request_options(self.giga_client, request_options):
-            await hydrate_chat_completion_image_files(adapted, self.giga_client)
+        async with gigachat_request_options(
+            self.giga_client, request_options, include_body=False
+        ) as request_client:
+            await hydrate_chat_completion_image_files(adapted, request_client)
         return gigachat_response_to_normalized(
             _ModelDumpWrapper(adapted),
             request=request,
@@ -316,10 +353,12 @@ class GigaChatProviderAdapter:
         is_disconnected: Any,
         logger: Any,
     ):
-        async with gigachat_request_options(self.giga_client, self.request_options):
+        async with gigachat_request_options(
+            self.giga_client, self.request_options, include_body=False
+        ) as request_client:
             chat_payload = await self.request_transformer.prepare_chat(
                 payload,
-                self.giga_client,
+                request_client,
                 **(
                     {"forced_model": self.forced_model}
                     if self.forced_model is not None
@@ -340,6 +379,7 @@ class GigaChatProviderAdapter:
             effective_model=resolution.model or resolution.limiter_key,
         )
         yield mapper.message_start()
+        pending_terminal_events = []
 
         try:
             async with self.model_limiter.limit(
@@ -349,14 +389,26 @@ class GigaChatProviderAdapter:
                 async with gigachat_request_options(
                     self.giga_client,
                     request_options,
-                ):
-                    async for chunk in self.giga_client.astream(chat_payload):
-                        if await _is_disconnected(is_disconnected):
-                            _log_disconnect(logger, context)
-                            break
-                        for event in mapper.chunk_to_events(chunk):
-                            yield event
+                ) as request_client:
+                    async with closing_stream(
+                        request_client.astream(chat_payload)
+                    ) as delegated_stream:
+                        async for chunk in delegated_stream:
+                            if await _is_disconnected(is_disconnected):
+                                _log_disconnect(logger, context)
+                                return
+                            for event in mapper.chunk_to_events(chunk):
+                                if (
+                                    event.type == "message_end"
+                                    or event.finish_reason is not None
+                                    or pending_terminal_events
+                                ):
+                                    pending_terminal_events.append(event)
+                                else:
+                                    yield event
 
+            for event in pending_terminal_events:
+                yield event
             for event in mapper.flush_tool_events():
                 yield event
             for event in mapper.flush_reasoning_events():
@@ -368,12 +420,22 @@ class GigaChatProviderAdapter:
                 code="model_concurrency_limit",
             )
         except gigachat.exceptions.GigaChatException as exc:
-            _log_stream_error(logger, context, exc)
-            yield mapper.error_event(
-                message=str(exc),
-                error_type=type(exc).__name__,
-                code="stream_error",
-            )
+            transport_error = sdk_transport_error(exc)
+            if transport_error is not None:
+                _, code, message = transport_error
+                yield mapper.error_event(
+                    message=message,
+                    error_type="api_error",
+                    code=code,
+                    request_id=sdk_request_id(exc),
+                )
+            else:
+                _log_stream_error(logger, context, exc)
+                yield mapper.error_event(
+                    message=str(exc),
+                    error_type=type(exc).__name__,
+                    code="stream_error",
+                )
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -394,10 +456,12 @@ class GigaChatProviderAdapter:
         is_disconnected: Any,
         logger: Any,
     ):
-        async with gigachat_request_options(self.giga_client, self.request_options):
+        async with gigachat_request_options(
+            self.giga_client, self.request_options, include_body=False
+        ) as request_client:
             chat_payload = await self.request_transformer.prepare_chat_completion(
                 payload,
-                self.giga_client,
+                request_client,
                 **(
                     {"forced_model": self.forced_model}
                     if self.forced_model is not None
@@ -418,6 +482,7 @@ class GigaChatProviderAdapter:
             effective_model=resolution.model or resolution.limiter_key,
         )
         yield mapper.message_start()
+        pending_terminal_events = []
 
         try:
             async with self.model_limiter.limit(
@@ -427,20 +492,32 @@ class GigaChatProviderAdapter:
                 async with gigachat_request_options(
                     self.giga_client,
                     request_options,
-                ):
-                    async for chunk in self.giga_client.achat.stream(chat_payload):
-                        if await _is_disconnected(is_disconnected):
-                            _log_disconnect(logger, context)
-                            break
-                        adapted = adapt_chat_completion_chunk_to_chat_chunk_shape(
-                            chunk,
-                            default_model=request.model or resolution.model or "",
-                        )
-                        for event in mapper.chunk_to_events(
-                            SimpleNamespace(model_dump=lambda: adapted)
-                        ):
-                            yield event
+                ) as request_client:
+                    async with closing_stream(
+                        request_client.achat.stream(chat_payload)
+                    ) as delegated_stream:
+                        async for chunk in delegated_stream:
+                            if await _is_disconnected(is_disconnected):
+                                _log_disconnect(logger, context)
+                                return
+                            adapted = adapt_chat_completion_chunk_to_chat_chunk_shape(
+                                chunk,
+                                default_model=request.model or resolution.model or "",
+                            )
+                            for event in mapper.chunk_to_events(
+                                SimpleNamespace(model_dump=lambda: adapted)
+                            ):
+                                if (
+                                    event.type == "message_end"
+                                    or event.finish_reason is not None
+                                    or pending_terminal_events
+                                ):
+                                    pending_terminal_events.append(event)
+                                else:
+                                    yield event
 
+            for event in pending_terminal_events:
+                yield event
             for event in mapper.flush_tool_events():
                 yield event
             for event in mapper.flush_reasoning_events():
@@ -452,12 +529,22 @@ class GigaChatProviderAdapter:
                 code="model_concurrency_limit",
             )
         except gigachat.exceptions.GigaChatException as exc:
-            _log_stream_error(logger, context, exc)
-            yield mapper.error_event(
-                message=str(exc),
-                error_type=type(exc).__name__,
-                code="stream_error",
-            )
+            transport_error = sdk_transport_error(exc)
+            if transport_error is not None:
+                _, code, message = transport_error
+                yield mapper.error_event(
+                    message=message,
+                    error_type="api_error",
+                    code=code,
+                    request_id=sdk_request_id(exc),
+                )
+            else:
+                _log_stream_error(logger, context, exc)
+                yield mapper.error_event(
+                    message=str(exc),
+                    error_type=type(exc).__name__,
+                    code="stream_error",
+                )
         except asyncio.CancelledError:
             raise
         except Exception as exc:

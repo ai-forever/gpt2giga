@@ -30,14 +30,13 @@ GigaChat не является drop-in заменой OpenAI или Anthropic AP
 - фильтрует транспортные SDK headers, клиентские API keys, cookies и другие небезопасные метаданные перед upstream;
 - отделяет клиентскую API-key авторизацию прокси от GigaChat credentials;
 - отдаёт список моделей в OpenAI-, Anthropic-, Gemini- и LiteLLM-совместимом виде;
-- держит batch/file routes отключёнными, пока их нельзя выполнить end-to-end через GigaChat SDK/backend.
+- поддерживает OpenAI Files; batch routes и Gemini Files остаются отключёнными.
 
 Подробная матрица поддержки и список реальных ограничений вынесены в [API Compatibility](https://ai-forever.github.io/gpt2giga/api-compatibility).
 
 ## Быстрый Старт
 
-Релиз 0.3.1 требует GigaChat SDK
-`>=0.2.4,<0.3.0`. SDK `0.2.4` опубликован в PyPI и устанавливается
+Кандидат 0.3.3a1 требует `gigachat[aiohttp]==0.3.0a1`. SDK опубликован в PyPI и устанавливается
 автоматически вместе со шлюзом через `uv`, pip или при сборке Docker.
 
 Из корня репозитория создайте `.env` из шаблона и заполните GigaChat credentials:
@@ -79,9 +78,8 @@ gpt2giga --help
 python -m pip install gpt2giga
 ```
 
-Поддерживается Python 3.10–3.14. Поддержка Python 3.15 пока экспериментальная
-(preview): отдельный неблокирующий CI-job проверяет тесты, сборку wheel/sdist
-и запуск установленного пакета. Для Postgres, OpenSearch или Phoenix добавьте
+Поддерживается Python 3.10–3.15. Стабильный Python 3.15 входит в обязательные
+CI-проверки тестов и установленного пакета. Для Postgres, OpenSearch или Phoenix добавьте
 соответствующую extra-зависимость. Например, для опубликованного релиза:
 
 ```sh
@@ -99,7 +97,7 @@ docker pull ghcr.io/ai-forever/gpt2giga:0.3.1-preview
 
 Тег `preview` отслеживает текущую preview-сборку. Теги `latest` и `0.3.1`
 используют Python 3.13. Для локальной сборки preview:
-`docker build --build-arg PYTHON_VERSION=3.15-rc -t gpt2giga:preview .`.
+`docker build --build-arg PYTHON_VERSION=3.15 -t gpt2giga:preview .`.
 
 
 Минимальный OpenAI SDK вызов:
@@ -281,3 +279,19 @@ Live-тесты с реальными вызовами GigaChat запускаю
 локальных секретов: см. [Live GigaChat Integration Tests](https://ai-forever.github.io/gpt2giga/live-integration-tests).
 
 Используйте Conventional Commits (`feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `ci:`) и сверяйтесь с [PR template](https://github.com/ai-forever/gpt2giga/blob/main/.github/PULL_REQUEST_TEMPLATE.md).
+
+## Проверка кандидата 0.3.3a1
+
+Кандидат из checkout не объявляется опубликованным релизом. Для проверки wheel:
+
+```sh
+uv build --no-sources
+uv venv /tmp/gpt2giga-candidate
+uv pip install --python /tmp/gpt2giga-candidate/bin/python dist/gpt2giga-0.3.3a1-py3-none-any.whl
+/tmp/gpt2giga-candidate/bin/gpt2giga --help
+```
+
+SDK использует native HTTPX2 по умолчанию. `GIGACHAT_ASYNC_BACKEND=aiohttp`
+включает альтернативный backend; GigaChat v1 остаётся default, v2 — opt-in.
+Alpha-образы получают versioned/preview теги, не обновляя `latest` или стабильные
+Python aliases. Публикация кандидата — отдельный шаг.

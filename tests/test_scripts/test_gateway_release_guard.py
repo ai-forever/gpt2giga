@@ -111,6 +111,7 @@ def test_release_metadata_must_match_project_version(
     "requirement",
     [
         "gigachat>=0.2.3a1,<0.3.0",
+        "gigachat[aiohttp]==0.3.0a1",
         "example==1.0rc1",
         "example>=1.0-alpha1",
     ],
@@ -171,3 +172,16 @@ def test_cli_failure_path_returns_before_using_release_result():
     )
 
     assert result == 2
+
+
+def test_alpha_gateway_accepts_exact_alpha_sdk(tmp_path):
+    result = MODULE.resolve_release(
+        metadata_path=_metadata(
+            tmp_path, version="0.3.3a1", dependencies=("gigachat[aiohttp]==0.3.0a1",)
+        ),
+        event_name="workflow_dispatch",
+        ref_name="main",
+        release_tag="",
+        release_prerelease=None,
+    )
+    assert result["mode"] == "manual"

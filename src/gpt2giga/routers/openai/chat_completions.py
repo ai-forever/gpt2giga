@@ -104,9 +104,11 @@ async def chat_completions(request: Request):
 
     await run_openai_chat_shadow_normalization(request, request_data)
     if mode == "v2":
-        async with gigachat_request_options(giga_client, request_options):
+        async with gigachat_request_options(
+            giga_client, request_options, include_body=False
+        ) as request_client:
             chat_request = await state.request_transformer.prepare_chat_completion(
-                data, giga_client
+                data, request_client
             )
         model_resolution = resolve_upstream_model(
             chat_request,
@@ -151,8 +153,10 @@ async def chat_completions(request: Request):
             model_resolution.limiter_key,
             provider="openai",
         ):
-            async with gigachat_request_options(giga_client, request_options):
-                response = await giga_client.achat.create(chat_request)
+            async with gigachat_request_options(
+                giga_client, request_options
+            ) as request_client:
+                response = await request_client.achat.create(chat_request)
         adapted = adapt_chat_completion_to_chat_shape(
             response,
             default_model=data["model"],
@@ -172,8 +176,12 @@ async def chat_completions(request: Request):
         )
         return result
 
-    async with gigachat_request_options(giga_client, request_options):
-        chat_messages = await state.request_transformer.prepare_chat(data, giga_client)
+    async with gigachat_request_options(
+        giga_client, request_options, include_body=False
+    ) as request_client:
+        chat_messages = await state.request_transformer.prepare_chat(
+            data, request_client
+        )
     model_resolution = resolve_upstream_model(
         chat_messages,
         state.config,
@@ -191,8 +199,10 @@ async def chat_completions(request: Request):
             model_resolution.limiter_key,
             provider="openai",
         ):
-            async with gigachat_request_options(giga_client, request_options):
-                response = await giga_client.achat(chat_messages)
+            async with gigachat_request_options(
+                giga_client, request_options
+            ) as request_client:
+                response = await request_client.achat(chat_messages)
         result = state.response_processor.process_response(
             response, data["model"], current_rquid, request_data=request_data
         )
@@ -266,27 +276,6 @@ async def _try_normalized_non_stream_chat(
             cache_session_request=request,
             api_mode=resolve_gigachat_api_mode(request),
         )
-        normalized_response = await provider_adapter.chat(
-            normalized_request,
-            context=context,
-        )
-        openai_response = normalized_chat_response_to_openai(
-            normalized_response,
-            requested_model=payload["model"],
-            context=context,
-        )
-        await commit_chat_completion_response(
-            request,
-            conversation_turn,
-            openai_response,
-        )
-        await _emit_chat_completion_observability(
-            state,
-            normalized_request,
-            normalized_response,
-            context=context,
-        )
-        return openai_response
     except Exception as exc:
         if not settings.legacy_chat_fallback:
             raise
@@ -299,6 +288,28 @@ async def _try_normalized_non_stream_chat(
                 request_id=getattr(get_request_context(), "request_id", None),
             ).warning("Normalized chat path failed; using legacy fallback")
         return None
+
+    normalized_response = await provider_adapter.chat(
+        normalized_request,
+        context=context,
+    )
+    openai_response = normalized_chat_response_to_openai(
+        normalized_response,
+        requested_model=payload["model"],
+        context=context,
+    )
+    await commit_chat_completion_response(
+        request,
+        conversation_turn,
+        openai_response,
+    )
+    await _emit_chat_completion_observability(
+        state,
+        normalized_request,
+        normalized_response,
+        context=context,
+    )
+    return openai_response
 
 
 async def _try_normalized_stream_chat(
@@ -340,41 +351,44 @@ async def _try_normalized_stream_chat(
 
         async def emit_stream():
             seen_content_delta = False
-            async for event in provider_adapter.stream_chat(
-                normalized_request,
-                context=context,
-                is_disconnected=request.is_disconnected,
-                logger=getattr(state, "logger", None),
-            ):
-                first_content_delta = (
-                    event.type == "content_delta"
-                    and bool(event.content_delta)
-                    and not seen_content_delta
+            async with closing_stream(
+                provider_adapter.stream_chat(
+                    normalized_request,
+                    context=context,
+                    is_disconnected=request.is_disconnected,
+                    logger=getattr(state, "logger", None),
                 )
-                try:
-                    span_events = build_stream_span_events(
-                        event,
-                        settings=settings,
-                        first_content_delta=first_content_delta,
+            ) as delegated_stream:
+                async for event in delegated_stream:
+                    first_content_delta = (
+                        event.type == "content_delta"
+                        and bool(event.content_delta)
+                        and not seen_content_delta
                     )
-                    if span_events:
-                        stream_span_events.extend(span_events)
-                except Exception as exc:
-                    logger = getattr(state, "logger", None)
-                    if logger is not None:
-                        logger.warning(
-                            "Chat completion stream span event build failed: {}",
-                            exc,
+                    try:
+                        span_events = build_stream_span_events(
+                            event,
+                            settings=settings,
+                            first_content_delta=first_content_delta,
                         )
-                if event.type == "content_delta" and event.content_delta:
-                    seen_content_delta = True
-                sse = normalized_stream_event_to_openai_sse(
-                    event,
-                    requested_model=payload["model"],
-                    response_id=response_id,
-                )
-                if sse is not None:
-                    yield sse
+                        if span_events:
+                            stream_span_events.extend(span_events)
+                    except Exception as exc:
+                        logger = getattr(state, "logger", None)
+                        if logger is not None:
+                            logger.warning(
+                                "Chat completion stream span event build failed: {}",
+                                exc,
+                            )
+                    if event.type == "content_delta" and event.content_delta:
+                        seen_content_delta = True
+                    sse = normalized_stream_event_to_openai_sse(
+                        event,
+                        requested_model=payload["model"],
+                        response_id=response_id,
+                    )
+                    if sse is not None:
+                        yield sse
             yield normalized_stream_done_sse()
 
         body_iterator = stitch_chat_completion_stream(
@@ -382,7 +396,7 @@ async def _try_normalized_stream_chat(
             conversation_turn,
             emit_stream(),
         )
-        return StreamingResponse(
+        return ModelLimitedStreamingResponse(
             _observe_chat_completion_stream(
                 state,
                 body_iterator,

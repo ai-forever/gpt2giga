@@ -20,7 +20,7 @@ Below are the practical incompatibilities that the proxy covers.
 | Tools and structured output | Function/tool schemas and JSON-schema controls differ between providers and backend modes. | Maps local tools/functions and forwards structured-output schemas through native GigaChat `response_format`. |
 | Authorization | OpenAI/Anthropic clients work with API keys, while GigaChat requires a different credentials/scope mechanism. | Separates proxy API-key authentication from upstream GigaChat authorization and, if needed, supports per-request pass-through. |
 | Model discovery | GigaChat model responses do not match the OpenAI/Anthropic/Gemini/LiteLLM shape. | Repackages the model list and description for the target client. |
-| OpenAI/Anthropic/Gemini batch routes | The installed GigaChat SDK/backend has no full create/list/retrieve/cancel flow for batch APIs. | Keeps the Files/Batches routers disabled until they can work end-to-end. |
+| OpenAI/Anthropic/Gemini batch routes | The installed GigaChat SDK/backend has no full create/list/retrieve/cancel flow for batch APIs. | Keeps Batches routers disabled until they can work end-to-end; OpenAI Files is mounted. |
 
 ## Mounted routes
 
@@ -47,7 +47,7 @@ Examples:
 | `POST /responses` | Stable native / normalized preview | Native GigaChat execution preserves the compatibility surface, including hosted tools and attachment handoff. Route-selected normalized execution is technical preview and rejects semantics that its selected route/model/API mode cannot preserve. |
 | `POST /embeddings` | Supported | Uses the model from the request or the proxy default for embeddings, depending on the configuration. |
 | `GET /model/info` | Supported | LiteLLM-compatible model info endpoint. |
-| `POST /files`, `GET /files*` | Disabled | Router code exists but is not mounted: files without batches give an incomplete OpenAI batch flow. |
+| `POST /files`, `GET /files*`, `DELETE /files/{id}` | Supported | Upload/list/get/delete and binary content; root, `/v1` and `/v2` aliases. |
 | `POST /batches`, `GET /batches*` | Disabled | Disabled until batch create/list/retrieve/cancel appears in the GigaChat SDK/backend. |
 | Stored chat-completion routes | Not implemented | Stored completions are out of scope for now. |
 | Legacy `POST /completions` | Not implemented | Legacy text completions are out of scope for now. |
@@ -258,7 +258,7 @@ need them can point to `http://localhost:8090/v2`.
 
 ## SDK contract alignment
 
-The gateway installs `gigachat>=0.2.4,<0.3.0` from PyPI; `uv.lock` pins the
+The gateway installs `gigachat[aiohttp]==0.3.0a1` from PyPI; `uv.lock` pins the
 resolved version and artifact hashes. The gateway and SDK are tested together
 with synthetic HTTP responses; these checks do not establish live model quality,
 feature permissions, cache savings, or deterministic generation.
@@ -355,3 +355,15 @@ Here `client` uses `/v2`. To select a configured assistant instead of a model,
 pass `extra_body={"assistant_id": "<your assistant ID>"}`: the gateway removes
 `model` from the upstream request. This does not create an assistant; it requires
 an existing identifier available to your account.
+
+### Upstream transport errors
+
+Before response start, SDK timeouts return 504 (`upstream_timeout`); connection,
+validation and interrupted streams return 502 (`upstream_connection_error`,
+`invalid_upstream_response`, `stream_interrupted`). Gemini uses DEADLINE_EXCEEDED
+for 504 and UNAVAILABLE for 502. After headers, protocol SSE error events preserve
+the already sent HTTP status; failures never replay dispatched chat calls.
+Gateway `X-Request-ID` is unchanged. An available upstream ID is returned as
+`X-GigaChat-Request-ID` in HTTP errors or `error.metadata.gigachat_x_request_id`
+in SSE (Responses error event uses `metadata` directly). No body or credentials
+are copied into diagnostics. OpenAI Files content returns the original bytes.

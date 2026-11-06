@@ -73,6 +73,16 @@ class AnthropicStreamProjector:
             return self._message_end(event)
         if event.type == "error":
             error = event.error
+            request_id = (
+                error.provider_metadata.get("gigachat", {}).get("request_id")
+                if error
+                else None
+            )
+            diagnostics = (
+                {"metadata": {"gigachat_x_request_id": request_id}}
+                if isinstance(request_id, str) and request_id
+                else {}
+            )
             return [
                 _sse(
                     "error",
@@ -80,6 +90,7 @@ class AnthropicStreamProjector:
                         "type": "error",
                         "error": {
                             "type": error.type if error else "api_error",
+                            **diagnostics,
                             "message": (
                                 error.message if error else "Stream interrupted"
                             ),

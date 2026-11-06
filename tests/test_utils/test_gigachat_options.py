@@ -2,7 +2,8 @@ import asyncio
 import json
 from types import SimpleNamespace
 
-import httpx
+import httpx2 as httpx
+from gigachat import GigaChat
 import pytest
 from gigachat.api.utils import build_headers
 from starlette.requests import Request
@@ -11,9 +12,6 @@ from gpt2giga.common.gigachat_options import (
     GigaRequestOptions,
     extract_gigachat_request_options,
     gigachat_request_options,
-)
-from gpt2giga.providers.gigachat.transport_compat import (
-    GigaChatTransportCompatibilityError,
 )
 
 
@@ -131,89 +129,6 @@ async def test_gigachat_request_options_sets_gigachat_header_contextvars():
     assert headers_after_context == {"User-Agent": "GigaChat-python-lib"}
 
 
-async def test_gigachat_request_options_hook_applies_duplicate_query_and_body():
-    captured = {}
-
-    async def handler(request):
-        captured["headers"] = dict(request.headers)
-        captured["query"] = tuple(request.url.params.multi_items())
-        captured["body"] = json.loads(await request.aread())
-        return httpx.Response(200, json={"ok": True})
-
-    transport = httpx.MockTransport(handler)
-    async with httpx.AsyncClient(
-        base_url="https://gigachat.test", transport=transport
-    ) as client:
-        giga_client = SimpleNamespace(_aclient=client)
-        options = GigaRequestOptions(
-            headers={},
-            query=(("beta", "one"), ("beta", "two")),
-            body={"profanity_check": False},
-        )
-        async with gigachat_request_options(giga_client, options):
-            response = await client.post(
-                "/chat/completions?existing=1",
-                json={"model": "GigaChat", "messages": []},
-            )
-
-    assert response.status_code == 200
-    assert captured["query"] == (
-        ("existing", "1"),
-        ("beta", "one"),
-        ("beta", "two"),
-    )
-    assert captured["body"] == {
-        "model": "GigaChat",
-        "messages": [],
-        "profanity_check": False,
-    }
-
-
-@pytest.mark.parametrize("auth_path", ["/oauth", "/token"])
-async def test_gigachat_request_options_hook_skips_auth_requests(auth_path):
-    captured = {}
-
-    async def handler(request):
-        captured["headers"] = dict(request.headers)
-        captured["query"] = tuple(request.url.params.multi_items())
-        captured["body"] = await request.aread()
-        return httpx.Response(200, json={"ok": True})
-
-    transport = httpx.MockTransport(handler)
-    async with httpx.AsyncClient(
-        base_url="https://gigachat.test", transport=transport
-    ) as client:
-        giga_client = SimpleNamespace(_aclient=client)
-        options = GigaRequestOptions(
-            headers={},
-            query=(("beta", "true"),),
-            body={"profanity_check": False},
-        )
-        async with gigachat_request_options(giga_client, options):
-            response = await client.post(auth_path, json={"scope": "GIGACHAT_API_PERS"})
-
-    assert response.status_code == 200
-    assert captured["query"] == ()
-    assert json.loads(captured["body"]) == {"scope": "GIGACHAT_API_PERS"}
-
-
-async def test_gigachat_request_options_hook_guards_non_json_content():
-    captured = {}
-
-    async def handler(request):
-        captured["body"] = await request.aread()
-        return httpx.Response(200, json={"ok": True})
-
-    async with httpx.AsyncClient(
-        base_url="https://gigachat.test", transport=httpx.MockTransport(handler)
-    ) as client:
-        options = GigaRequestOptions(headers={}, query=(), body={"unsafe": True})
-        async with gigachat_request_options(SimpleNamespace(_aclient=client), options):
-            await client.post("/chat/completions", content=b"original")
-
-    assert captured["body"] == b"original"
-
-
 async def test_gigachat_request_options_reset_after_exception():
     options = GigaRequestOptions(
         headers={"x-request-id": "request-before-error"}, query=(), body={}
@@ -227,75 +142,91 @@ async def test_gigachat_request_options_reset_after_exception():
     assert "X-Request-ID" not in build_headers()
 
 
-async def test_gigachat_request_options_isolate_concurrent_tasks():
-    captured = {}
+@pytest.mark.parametrize("include_body", [True, False])
+async def test_public_sdk_options_wire_and_owner_isolation(include_body):
+    captured = []
 
     async def handler(request):
-        await asyncio.sleep(0)
-        captured[request.url.path] = (
-            tuple(request.url.params.multi_items()),
-            json.loads(await request.aread()),
+        captured.append(
+            (
+                tuple(request.url.params.multi_items()),
+                json.loads(await request.aread()),
+                dict(request.headers),
+            )
         )
-        return httpx.Response(200, json={"ok": True})
+        return httpx.Response(
+            200, json=[{"tokens": 1, "characters": 1, "object": "tokens"}]
+        )
 
     async with httpx.AsyncClient(
-        base_url="https://gigachat.test", transport=httpx.MockTransport(handler)
-    ) as client:
-        giga_client = SimpleNamespace(_aclient=client)
+        transport=httpx.MockTransport(handler), trust_env=False
+    ) as http:
+        owner = GigaChat(
+            base_url="https://gigachat.test/api/v1",
+            access_token="tenant",
+            async_http_client=http,
+            trust_env=False,
+        )
 
         async def send(name):
             options = GigaRequestOptions(
-                headers={},
-                query=(("task", name),),
+                headers={"x-request-id": name},
+                query=(("task", name), ("task", "repeated")),
                 body={"task": name},
             )
-            async with gigachat_request_options(giga_client, options):
+            async with gigachat_request_options(
+                owner, options, include_body=include_body
+            ) as client:
                 await asyncio.sleep(0)
-                await client.post(f"/{name}", json={"base": name})
+                await client.atokens_count([name], model="GigaChat")
 
-        await asyncio.gather(send("first"), send("second"))
-
-    assert captured["/first"] == (
-        (("task", "first"),),
-        {"base": "first", "task": "first"},
-    )
-    assert captured["/second"] == (
-        (("task", "second"),),
-        {"base": "second", "task": "second"},
-    )
-
-
-async def test_gigachat_request_options_hook_unavailable_fails_explicitly():
-    options = GigaRequestOptions(
-        headers={}, query=(("secret-key", "secret-value"),), body={}
-    )
-
-    with pytest.raises(GigaChatTransportCompatibilityError) as exc_info:
-        async with gigachat_request_options(SimpleNamespace(), options):
-            pass
-
-    assert "request hook" in str(exc_info.value)
-    assert "secret-key" not in str(exc_info.value)
-    assert "secret-value" not in str(exc_info.value)
+        await asyncio.gather(send("A"), send("B"))
+        await owner.atokens_count(["owner"], model="GigaChat")
+        await owner.aclose()
+        assert not http.is_closed
+    for query, body, headers in captured[:2]:
+        name = body["input"][0]
+        assert query == (("task", name), ("task", "repeated"))
+        assert body.get("task") == (name if include_body else None)
+        assert headers["x-request-id"] == name
+    assert captured[2][0] == ()
+    assert "task" not in captured[2][1]
+    assert "x-request-id" not in captured[2][2]
 
 
-async def test_gigachat_request_options_headers_do_not_require_private_hook():
-    options = GigaRequestOptions(
-        headers={"x-request-id": "public-context"}, query=(), body={}
-    )
+async def test_header_only_yields_owner():
+    owner = SimpleNamespace()
+    async with gigachat_request_options(
+        owner, GigaRequestOptions(headers={"x-request-id": "same"}, query=(), body={})
+    ) as scoped:
+        assert scoped is owner
 
-    async with gigachat_request_options(SimpleNamespace(), options):
-        assert build_headers()["X-Request-ID"] == "public-context"
 
+async def test_stream_body_rejected_before_dispatch():
+    calls = []
 
-async def test_gigachat_request_options_hook_is_installed_once():
-    http_client = SimpleNamespace(event_hooks={"request": []})
-    giga_client = SimpleNamespace(_aclient=http_client)
-    options = GigaRequestOptions(headers={}, query=(("feature", "on"),), body={})
+    async def handler(request):
+        calls.append(request)
+        return httpx.Response(200, json={})
 
-    async with gigachat_request_options(giga_client, options):
-        pass
-    async with gigachat_request_options(giga_client, options):
-        pass
-
-    assert len(http_client.event_hooks["request"]) == 1
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handler), trust_env=False
+    ) as http:
+        owner = GigaChat(
+            base_url="https://gigachat.test",
+            access_token="tenant",
+            async_http_client=http,
+            trust_env=False,
+        )
+        with pytest.raises(ValueError):
+            async with gigachat_request_options(
+                owner, GigaRequestOptions(headers={}, query=(), body={"stream": True})
+            ) as scoped:
+                await scoped.achat(
+                    {
+                        "model": "GigaChat",
+                        "messages": [{"role": "user", "content": "hello"}],
+                    }
+                )
+        assert calls == []
+        await owner.aclose()

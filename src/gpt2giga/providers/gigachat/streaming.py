@@ -6,6 +6,13 @@ from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import Any
 
+from gigachat.exceptions import (
+    APIConnectionError,
+    APIResponseValidationError,
+    APITimeoutError,
+    StreamInterruptedError,
+)
+
 from gpt2giga.protocols.normalized import (
     NormalizedError,
     NormalizedMessage,
@@ -13,6 +20,54 @@ from gpt2giga.protocols.normalized import (
     NormalizedToolCall,
     NormalizedUsage,
 )
+
+
+def sdk_transport_error(error: BaseException) -> tuple[int, str, str] | None:
+    """Classify transport failures without exposing SDK diagnostic contents."""
+    for kind, status, code, message in (
+        (APITimeoutError, 504, "upstream_timeout", "The upstream request timed out."),
+        (
+            StreamInterruptedError,
+            502,
+            "stream_interrupted",
+            "The upstream stream was interrupted.",
+        ),
+        (
+            APIConnectionError,
+            502,
+            "upstream_connection_error",
+            "The upstream connection failed.",
+        ),
+        (
+            APIResponseValidationError,
+            502,
+            "invalid_upstream_response",
+            "The upstream response was invalid.",
+        ),
+    ):
+        if isinstance(error, kind):
+            return status, code, message
+    return None
+
+
+def sdk_request_id(error: BaseException) -> str | None:
+    """Select only a printable request ID from SDK diagnostics."""
+    value = getattr(error, "request_id", None)
+    if (
+        isinstance(value, str)
+        and value
+        and len(value) <= 256
+        and value.isascii()
+        and all(32 <= ord(char) < 127 for char in value)
+    ):
+        return value
+    return None
+
+
+def sdk_error_metadata(error: BaseException) -> dict[str, Any]:
+    """Return the optional public SSE diagnostic extension."""
+    request_id = sdk_request_id(error)
+    return {"metadata": {"gigachat_x_request_id": request_id}} if request_id else {}
 
 
 class GigaChatNormalizedStreamMapper:
@@ -150,6 +205,7 @@ class GigaChatNormalizedStreamMapper:
         error_type: str,
         code: str,
         raw_message: str | None = None,
+        request_id: str | None = None,
     ) -> NormalizedStreamEvent:
         """Build a canonical stream error event."""
         return self._event(
@@ -158,6 +214,9 @@ class GigaChatNormalizedStreamMapper:
                 type=error_type,
                 message=raw_message or message,
                 code=code,
+                provider_metadata={"gigachat": {"request_id": request_id}}
+                if request_id
+                else {},
             ),
         )
 

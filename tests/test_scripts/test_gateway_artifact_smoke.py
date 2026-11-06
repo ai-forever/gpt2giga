@@ -36,8 +36,55 @@ def test_gigachat_metadata_requirement_is_order_independent():
 
 @pytest.mark.parametrize(
     "requirements",
-    [[], ["fastapi>=0.140"], ["gigachat>=0.2.4", "gigachat<0.3.0"]],
+    [
+        [],
+        ["fastapi>=0.140"],
+        ["gigachat>=0.2.4", "gigachat<0.3.0"],
+        ["gigachat[aiohttp]==0.3.0a1", "gigachat"],
+    ],
 )
 def test_gigachat_metadata_requirement_must_be_unique(requirements: list[str]):
     with pytest.raises(MODULE.ArtifactSmokeError):
         MODULE._gigachat_specifiers(requirements)
+
+
+def test_alpha_extra_requirement_parser():
+    assert MODULE._gigachat_specifiers(["gigachat[aiohttp]==0.3.0a1"]) == {"==0.3.0a1"}
+    with pytest.raises(MODULE.ArtifactSmokeError):
+        MODULE._gigachat_specifiers(["gigachat[aiohttp]==0.3.0a1", "gigachat==0.3.0a1"])
+
+
+@pytest.mark.parametrize("gateway_version", ["0.3.3", "0.3.3a1"])
+def test_stable_gateway_rejects_alpha_sdk_but_candidate_proceeds(
+    monkeypatch, gateway_version
+):
+    from types import SimpleNamespace
+
+    class ReachedNextCheck(Exception):
+        pass
+
+    monkeypatch.setattr(
+        MODULE.importlib.metadata,
+        "distribution",
+        lambda name: SimpleNamespace(
+            metadata={"Name": "gpt2giga"},
+            version=gateway_version,
+            requires=["gigachat[aiohttp]==0.3.0a1"],
+        ),
+    )
+    monkeypatch.setattr(MODULE.importlib.metadata, "version", lambda name: "0.3.0a1")
+
+    def next_check(requirements):
+        raise ReachedNextCheck
+
+    monkeypatch.setattr(MODULE, "_gigachat_specifiers", next_check)
+    expected = (
+        ReachedNextCheck
+        if gateway_version.endswith("a1")
+        else MODULE.ArtifactSmokeError
+    )
+    with pytest.raises(expected):
+        MODULE.verify_installed_gateway(
+            expected_gateway_version=gateway_version,
+            expected_gigachat_version="0.3.0a1",
+        )

@@ -38,7 +38,7 @@ class ModelLimitedStreamingResponse(StreamingResponse):
         self,
         content: Any,
         *,
-        acquired_model_limit: AsyncExitStack,
+        acquired_model_limit: AsyncExitStack | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(content, **kwargs)
@@ -52,4 +52,5 @@ class ModelLimitedStreamingResponse(StreamingResponse):
         try:
             await super().__call__(scope, receive, send)
         finally:
-            await self._acquired_model_limit.aclose()
+            if self._acquired_model_limit is not None:
+                await self._acquired_model_limit.aclose()

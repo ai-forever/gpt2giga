@@ -99,7 +99,7 @@ def test_gateway_artifact_contents_and_metadata(
     assert metadata["Version"] == GATEWAY_VERSION
     assert metadata["Summary"] == GATEWAY_DESCRIPTION
     assert metadata["Description-Content-Type"] == "text/markdown"
-    assert "gigachat<0.3.0,>=0.2.4" in metadata.get_all("Requires-Dist")
+    assert "gigachat[aiohttp]==0.3.0a1" in metadata.get_all("Requires-Dist")
     metadata_suffix = (
         ".dist-info/METADATA" if artifact.suffix == ".whl" else "/PKG-INFO"
     )

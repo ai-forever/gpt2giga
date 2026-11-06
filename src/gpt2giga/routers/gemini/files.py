@@ -71,8 +71,10 @@ async def get_file(file_id: str, request: Request):
     if not hasattr(giga_client, "aget_file"):
         raise _not_found(name)
     request_options = extract_gigachat_request_options(request)
-    async with gigachat_request_options(giga_client, request_options):
-        file_obj = await giga_client.aget_file(file=name.removeprefix("files/"))
+    async with gigachat_request_options(
+        giga_client, request_options, include_body=False
+    ) as request_client:
+        file_obj = await request_client.aget_file(file=name.removeprefix("files/"))
     metadata = _gigachat_file_to_gemini(file_obj, stored=None)
     store[name] = metadata
     return metadata
@@ -86,8 +88,10 @@ async def delete_file(file_id: str, request: Request):
     giga_client = get_gigachat_client(request)
     if hasattr(giga_client, "adelete_file"):
         request_options = extract_gigachat_request_options(request)
-        async with gigachat_request_options(giga_client, request_options):
-            await giga_client.adelete_file(file=name.removeprefix("files/"))
+        async with gigachat_request_options(
+            giga_client, request_options, include_body=False
+        ) as request_client:
+            await request_client.adelete_file(file=name.removeprefix("files/"))
     get_file_store(request).pop(name, None)
     return {}
 
@@ -112,8 +116,10 @@ async def _create_multipart_file(request: Request) -> dict[str, Any]:
     uploaded = None
     if hasattr(giga_client, "aupload_file"):
         request_options = extract_gigachat_request_options(request)
-        async with gigachat_request_options(giga_client, request_options):
-            uploaded = await giga_client.aupload_file(
+        async with gigachat_request_options(
+            giga_client, request_options, include_body=False
+        ) as request_client:
+            uploaded = await request_client.aupload_file(
                 (
                     upload["filename"],
                     upload["content"],

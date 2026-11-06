@@ -45,8 +45,10 @@ async def create_file(request: Request):
 
     giga_client = get_gigachat_client(request)
     request_options = extract_gigachat_request_options(request)
-    async with gigachat_request_options(giga_client, request_options):
-        uploaded = await giga_client.aupload_file(
+    async with gigachat_request_options(
+        giga_client, request_options, include_body=False
+    ) as request_client:
+        uploaded = await request_client.aupload_file(
             (upload["filename"], upload["content"]),
             purpose=map_openai_file_purpose(purpose),
         )
@@ -74,8 +76,10 @@ async def list_files(
     request_options = extract_gigachat_request_options(
         request, exclude_query_params=("after", "limit", "order", "purpose")
     )
-    async with gigachat_request_options(giga_client, request_options):
-        files = await giga_client.aget_files()
+    async with gigachat_request_options(
+        giga_client, request_options, include_body=False
+    ) as request_client:
+        files = await request_client.aget_files()
     file_store = get_file_store(request)
     data = [
         _serialize_file_object(file_obj, file_store.get(file_obj.id_))
@@ -98,8 +102,10 @@ async def retrieve_file(file_id: str, request: Request):
     giga_client = get_gigachat_client(request)
     file_store = get_file_store(request)
     request_options = extract_gigachat_request_options(request)
-    async with gigachat_request_options(giga_client, request_options):
-        file_obj = await giga_client.aget_file(file=file_id)
+    async with gigachat_request_options(
+        giga_client, request_options, include_body=False
+    ) as request_client:
+        file_obj = await request_client.aget_file(file=file_id)
     return _serialize_file_object(file_obj, file_store.get(file_id))
 
 
@@ -109,8 +115,10 @@ async def delete_file(file_id: str, request: Request):
     """Delete a file."""
     giga_client = get_gigachat_client(request)
     request_options = extract_gigachat_request_options(request)
-    async with gigachat_request_options(giga_client, request_options):
-        deleted = await giga_client.adelete_file(file=file_id)
+    async with gigachat_request_options(
+        giga_client, request_options, include_body=False
+    ) as request_client:
+        deleted = await request_client.adelete_file(file=file_id)
     get_file_store(request).pop(file_id, None)
     return {
         "id": deleted.id_,

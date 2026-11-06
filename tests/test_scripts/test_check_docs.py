@@ -99,11 +99,11 @@ def test_gigachat_dependency_floor_requires_native_schema_sdk(tmp_path: Path) ->
     issues = docs_module.check_gigachat_dependency_floor(tmp_path)
 
     assert len(issues) == 1
-    assert "native-schema range '>=0.2.4,<0.3.0'" in issues[0].message
+    assert "exact alpha pin 'gigachat[aiohttp]==0.3.0a1'" in issues[0].message
 
     metadata.write_text(
         '[project]\nname = "gpt2giga"\nversion = "1.0.0"\n'
-        'dependencies = ["gigachat>=0.2.4,<0.3.0"]\n',
+        'dependencies = ["gigachat[aiohttp]==0.3.0a1"]\n',
         encoding="utf-8",
     )
 

@@ -52,8 +52,10 @@ async def embeddings(request: Request):
         model=effective_model,
     )
     async with model_limiter.limit(effective_model, provider="openai"):
-        async with gigachat_request_options(giga_client, request_options):
-            response = await giga_client.aembeddings(
+        async with gigachat_request_options(
+            giga_client, request_options
+        ) as request_client:
+            response = await request_client.aembeddings(
                 texts=transformed["input"], model=effective_model
             )
     normalized = normalize_embedding_response(response, model=effective_model)

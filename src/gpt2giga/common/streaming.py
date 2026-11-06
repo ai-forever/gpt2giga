@@ -42,6 +42,10 @@ from gpt2giga.protocol.response import (
 from gpt2giga.protocol.response.processor import ResponseProcessor
 from gpt2giga.providers.gigachat.model_options import parallel_tool_calls_enabled
 from gpt2giga.providers.gigachat.model_resolution import resolve_upstream_model
+from gpt2giga.providers.gigachat.streaming import (
+    sdk_transport_error,
+    sdk_error_metadata,
+)
 
 
 def _deduplicate_tool_call_identity(
@@ -143,9 +147,12 @@ async def stream_chat_generator(
             emitted_tool_identity: set[tuple[int, int, str]] = set()
             call_indexes: dict[tuple[int, str], int] = {}
             known_state_id: Optional[str] = None
-            async with gigachat_request_options(giga_client, request_options):
+            pending_terminal_chunks = []
+            async with gigachat_request_options(
+                giga_client, request_options
+            ) as request_client:
                 async with closing_stream(
-                    giga_client.astream(chat_messages)
+                    request_client.astream(chat_messages)
                 ) as _delegated_stream:
                     async for chunk in _delegated_stream:
                         if await request.is_disconnected():
@@ -153,6 +160,7 @@ async def stream_chat_generator(
                                 logger.info(
                                     f"[{rquid}] Client disconnected during streaming"
                                 )
+                            pending_terminal_chunks.clear()
                             break
                         processed = (
                             request.app.state.response_processor.process_stream_chunk(
@@ -168,8 +176,16 @@ async def stream_chat_generator(
                             call_indexes,
                             known_state_id,
                         )
-                        yield f"data: {json.dumps(processed)}\n\n"
+                        if pending_terminal_chunks or any(
+                            choice.get("finish_reason") is not None
+                            for choice in processed.get("choices", [])
+                        ):
+                            pending_terminal_chunks.append(processed)
+                        else:
+                            yield f"data: {json.dumps(processed)}\n\n"
 
+            for processed in pending_terminal_chunks:
+                yield f"data: {json.dumps(processed)}\n\n"
             response_processor = request.app.state.response_processor
             flush_stream_reasoning = getattr(
                 response_processor, "flush_stream_reasoning", None
@@ -249,17 +265,18 @@ async def stream_chat_generator(
         yield "data: [DONE]\n\n"
 
     except gigachat.exceptions.GigaChatException as e:
-        error_type = type(e).__name__
-        error_message = str(e)
-        if logger:
-            logger.error(
-                f"[{rquid}] GigaChat streaming error: {error_type}: {error_message}"
-            )
+        transport_error = sdk_transport_error(e)
+        error_type = "api_error" if transport_error else type(e).__name__
+        code = transport_error[1] if transport_error else "stream_error"
+        message = transport_error[2] if transport_error else "Upstream service error"
+        if logger and transport_error is None:
+            logger.error(f"[{rquid}] GigaChat streaming error: {error_type}: {e}")
         error_response = {
             "error": {
-                "message": "Upstream service error",
+                "message": message,
                 "type": error_type,
-                "code": "stream_error",
+                "code": code,
+                **sdk_error_metadata(e),
             }
         }
         yield f"data: {json.dumps(error_response)}\n\n"
@@ -317,9 +334,12 @@ async def stream_chat_completion_generator(
             emitted_tool_identity: set[tuple[int, int, str]] = set()
             call_indexes: dict[tuple[int, str], int] = {}
             known_state_id: Optional[str] = None
-            async with gigachat_request_options(giga_client, request_options):
+            pending_terminal_chunks = []
+            async with gigachat_request_options(
+                giga_client, request_options
+            ) as request_client:
                 async with closing_stream(
-                    giga_client.achat.stream(chat_request)
+                    request_client.achat.stream(chat_request)
                 ) as _delegated_stream:
                     async for chunk in _delegated_stream:
                         if await request.is_disconnected():
@@ -327,6 +347,7 @@ async def stream_chat_completion_generator(
                                 logger.info(
                                     f"[{rquid}] Client disconnected during streaming"
                                 )
+                            pending_terminal_chunks.clear()
                             break
                         adapted = adapt_chat_completion_chunk_to_chat_chunk_shape(
                             chunk,
@@ -346,8 +367,16 @@ async def stream_chat_completion_generator(
                             call_indexes,
                             known_state_id,
                         )
-                        yield f"data: {json.dumps(processed)}\n\n"
+                        if pending_terminal_chunks or any(
+                            choice.get("finish_reason") is not None
+                            for choice in processed.get("choices", [])
+                        ):
+                            pending_terminal_chunks.append(processed)
+                        else:
+                            yield f"data: {json.dumps(processed)}\n\n"
 
+            for processed in pending_terminal_chunks:
+                yield f"data: {json.dumps(processed)}\n\n"
             response_processor = request.app.state.response_processor
             flush_stream_reasoning = getattr(
                 response_processor, "flush_stream_reasoning", None
@@ -427,17 +456,18 @@ async def stream_chat_completion_generator(
         yield "data: [DONE]\n\n"
 
     except gigachat.exceptions.GigaChatException as e:
-        error_type = type(e).__name__
-        error_message = str(e)
-        if logger:
-            logger.error(
-                f"[{rquid}] GigaChat streaming error: {error_type}: {error_message}"
-            )
+        transport_error = sdk_transport_error(e)
+        error_type = "api_error" if transport_error else type(e).__name__
+        code = transport_error[1] if transport_error else "stream_error"
+        message = transport_error[2] if transport_error else "Upstream service error"
+        if logger and transport_error is None:
+            logger.error(f"[{rquid}] GigaChat streaming error: {error_type}: {e}")
         error_response = {
             "error": {
-                "message": "Upstream service error",
+                "message": message,
                 "type": error_type,
-                "code": "stream_error",
+                "code": code,
+                **sdk_error_metadata(e),
             }
         }
         yield f"data: {json.dumps(error_response)}\n\n"
@@ -476,19 +506,21 @@ class _ChatCompletionResponsesStreamClient:
         async def gen():
             async with gigachat_request_options(
                 self._giga_client, self._request_options
-            ):
+            ) as request_client:
                 async with closing_stream(
-                    self._giga_client.achat.stream(chat_request)
+                    request_client.achat.stream(chat_request)
                 ) as _delegated_stream:
                     async for chunk in _delegated_stream:
                         adapted = adapt_chat_completion_chunk_to_chat_chunk_shape(
                             chunk,
                             default_model=self._model,
                         )
-                        await hydrate_chat_completion_image_files(
-                            adapted,
-                            self._giga_client,
-                        )
+                        async with gigachat_request_options(
+                            self._giga_client, self._request_options, include_body=False
+                        ) as ancillary_client:
+                            await hydrate_chat_completion_image_files(
+                                adapted, ancillary_client
+                            )
                         yield SimpleNamespace(
                             model_dump=lambda adapted=adapted: adapted
                         )
@@ -496,8 +528,10 @@ class _ChatCompletionResponsesStreamClient:
         return gen()
 
     async def aget_image(self, file_id: str):
-        async with gigachat_request_options(self._giga_client, self._request_options):
-            return await self._giga_client.aget_image(file_id)
+        async with gigachat_request_options(
+            self._giga_client, self._request_options, include_body=False
+        ) as request_client:
+            return await request_client.aget_image(file_id)
 
 
 async def stream_responses_chat_completion_generator(
@@ -1148,9 +1182,11 @@ async def stream_responses_generator(
             output_item_added = True
             return events
 
-        async def iterate_chunks_with_optional_prefetch():
+        async def iterate_chunks_with_optional_prefetch(request_client):
             async with (
-                closing_stream(giga_client.astream(chat_messages)) as upstream_stream,
+                closing_stream(
+                    request_client.astream(chat_messages)
+                ) as upstream_stream,
                 closing_stream(aio_enumerate(upstream_stream)) as stream,
             ):
                 if not response_id_from_stream_metadata:
@@ -1193,9 +1229,11 @@ async def stream_responses_generator(
             nonlocal incomplete_reason
             nonlocal output_item_added, raw_full_text, reasoning_text
             nonlocal sequence_number, source_rendering_enabled, text_output_index
-            async with gigachat_request_options(giga_client, request_options):
+            async with gigachat_request_options(
+                giga_client, request_options
+            ) as request_client:
                 async with closing_stream(
-                    iterate_chunks_with_optional_prefetch()
+                    iterate_chunks_with_optional_prefetch(request_client)
                 ) as _delegated_stream:
                     async for (
                         prebuilt_event,
@@ -1632,16 +1670,17 @@ async def stream_responses_generator(
         yield sse_event("error", error_response)
 
     except gigachat.exceptions.GigaChatException as e:
-        error_type = type(e).__name__
-        error_message = str(e)
-        if logger:
-            logger.error(
-                f"[{rquid}] GigaChat streaming error: {error_type}: {error_message}"
-            )
+        transport_error = sdk_transport_error(e)
+        error_type = "api_error" if transport_error else type(e).__name__
+        code = transport_error[1] if transport_error else "stream_error"
+        message = transport_error[2] if transport_error else "Upstream service error"
+        if logger and transport_error is None:
+            logger.error(f"[{rquid}] GigaChat streaming error: {error_type}: {e}")
         error_response = {
             "type": "error",
-            "code": "stream_error",
-            "message": "Upstream service error",
+            "code": code,
+            "message": message,
+            **sdk_error_metadata(e),
             "param": None,
             "sequence_number": sequence_number,
         }

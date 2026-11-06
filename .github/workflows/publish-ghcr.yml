@@ -30,7 +30,7 @@ jobs:
         python: ["3.10", "3.11", "3.12", "3.13", "3.14"]
         include:
           - python: "3.15"
-            python-image: "3.15-rc"
+            python-image: "3.15"
             preview: true
 
     steps:
@@ -58,6 +58,8 @@ jobs:
           fi
 
           echo "VERSION=$VERSION" >> "$GITHUB_OUTPUT"
+          PRERELEASE="$(PYTHONPATH=scripts python3 -c 'import sys; from gateway_release_guard import _is_prerelease; print(str(_is_prerelease(sys.argv[1])).lower())' "$VERSION")"
+          echo "PRERELEASE=$PRERELEASE" >> "$GITHUB_OUTPUT"
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -80,12 +82,12 @@ jobs:
           flavor: |
             latest=false
           tags: |
-            type=raw,value=py${{ matrix.python }}${{ matrix.preview && '-preview' || '' }}
-            type=raw,value=${{ steps.get_version.outputs.VERSION }}-py${{ matrix.python }}${{ matrix.preview && '-preview' || '' }}
+            type=raw,value=py${{ matrix.python }}${{ (matrix.preview || steps.get_version.outputs.PRERELEASE == 'true') && '-preview' || '' }}
+            type=raw,value=${{ steps.get_version.outputs.VERSION }}-py${{ matrix.python }}${{ (matrix.preview || steps.get_version.outputs.PRERELEASE == 'true') && '-preview' || '' }}
             type=raw,value=${{ steps.get_version.outputs.VERSION }},enable=${{ matrix.python == '3.13' }}
             type=raw,value=preview,enable=${{ matrix.preview == true }}
             type=raw,value=${{ steps.get_version.outputs.VERSION }}-preview,enable=${{ matrix.preview == true }}
-            type=raw,value=latest,enable=${{ matrix.python == '3.13' }}
+            type=raw,value=latest,enable=${{ matrix.python == '3.13' && steps.get_version.outputs.PRERELEASE != 'true' }}
 
       - name: Build and push
         uses: docker/build-push-action@v7

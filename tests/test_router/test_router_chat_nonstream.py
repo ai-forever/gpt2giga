@@ -839,3 +839,38 @@ def test_chat_completions_non_stream_response_api():
     assert resp.status_code == 200
     body = resp.json()
     assert body["object"] == "chat.completion"
+
+
+@pytest.mark.parametrize("failure", ["converter", "storage"])
+def test_normalized_downstream_failure_never_replays_chat(monkeypatch, failure):
+    app = make_app()
+    app.state.config.proxy_settings.normalization_mode = "on"
+    app.state.config.proxy_settings.legacy_chat_fallback = True
+    calls = []
+
+    class RecordingGigachat(FakeGigachat):
+        async def achat(self, payload):
+            calls.append(payload)
+            return await super().achat(payload)
+
+    app.state.gigachat_client = RecordingGigachat()
+
+    def fail_converter(*args, **kwargs):
+        raise RuntimeError("synthetic conversion failure")
+
+    async def fail_storage(*args, **kwargs):
+        raise RuntimeError("synthetic storage failure")
+
+    monkeypatch.setattr(
+        chat_module,
+        "normalized_chat_response_to_openai"
+        if failure == "converter"
+        else "commit_chat_completion_response",
+        fail_converter if failure == "converter" else fail_storage,
+    )
+    response = TestClient(app).post(
+        "/chat/completions",
+        json={"model": "gpt-x", "messages": [{"role": "user", "content": "hello"}]},
+    )
+    assert response.status_code == 500
+    assert len(calls) == 1

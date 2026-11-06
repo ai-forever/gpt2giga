@@ -5,6 +5,11 @@
 Формат основан на [Keep a Changelog](https://keepachangelog.com/ru/1.0.0/),
 и проект придерживается [Семантического версионирования](https://semver.org/lang/ru/).
 
+## [0.3.3a1] - Unreleased
+
+- Подготовлен кандидат с exact SDK alpha, публичными request options, изоляцией auth/TLS, binary Files, безопасными upstream errors и закрытием streams без replay.
+- `gigachat[aiohttp]==0.3.0a1`; required stable Python 3.15 checks; preview-only moving tags for prerelease gateways.
+
 ## [0.3.2] - 2026-11-05
 
 ### Исправлено
