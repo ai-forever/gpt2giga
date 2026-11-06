@@ -279,3 +279,7 @@ and the distinction between runtime logs and captured model content.
 - Keep content capture disabled until redaction, retention, and access policies are approved.
 - Use network isolation around the proxy and storage backends.
 - Monitor `/health`, `/ping`, and the optional `/metrics`.
+
+## Persistent resource volume
+
+`deploy/base.yaml` mounts the named `gpt2giga-resources` volume at `/app/var/resources` and sets `GPT2GIGA_RESOURCE_STORE_PATH` accordingly. Preserve it across container replacement. For custom deployments, mount a writable persistent directory at the configured path and share it between workers of the same gateway. Resource metadata, namespace secret, upload sessions and local result blobs belong to this volume. Removing the volume loses mappings and changes ownership namespaces; upstream files/jobs are not automatically deleted.

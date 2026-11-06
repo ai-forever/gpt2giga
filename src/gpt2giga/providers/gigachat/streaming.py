@@ -203,7 +203,7 @@ class GigaChatNormalizedStreamMapper:
         *,
         message: str,
         error_type: str,
-        code: str,
+        code: str | int,
         raw_message: str | None = None,
         request_id: str | None = None,
     ) -> NormalizedStreamEvent:

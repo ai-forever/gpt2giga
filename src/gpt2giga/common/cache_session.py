@@ -56,7 +56,8 @@ def apply_cache_session_id(
     prepared upstream payload and resolved model or assistant/thread identity.
     """
     settings = _proxy_settings(request)
-    if settings is None or not settings.cache_session_enabled:
+    explicit_key = getattr(request.state, "prompt_cache_key", None)
+    if settings is None or (not settings.cache_session_enabled and not explicit_key):
         return options
     if not _is_chat_like_path(request.url.path):
         return options
@@ -64,6 +65,22 @@ def apply_cache_session_id(
         return options
     if _configured_default_session(request) is not None:
         return options
+
+    if explicit_key:
+        from gpt2giga.app_state import get_resource_owner
+        from gpt2giga.core.context import get_request_context
+
+        context = get_request_context()
+        owner = get_resource_owner(
+            request, profile=context.profile_id if context else None
+        )
+        material = f"{owner}\x00{model or ''}\x00{explicit_key}"
+        session_id = (
+            _SESSION_ID_PREFIX + hashlib.sha256(material.encode()).hexdigest()[:32]
+        )
+        return replace(
+            options, headers={**options.headers, _SESSION_HEADER: session_id}
+        )
 
     if not isinstance(payload, Mapping):
         model_dump = getattr(payload, "model_dump", None)

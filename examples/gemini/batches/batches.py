@@ -2,15 +2,18 @@
 
 from pathlib import Path
 
+import httpx
 from google import genai
 from google.genai import types
 
-api_version = "v1"
+api_version = "v1beta"
 client = genai.Client(
     api_key="0",
     http_options=types.HttpOptions(
         base_url="http://localhost:8090",
         api_version=api_version,
+        # Resumable raw-byte uploads also need the gateway key on the transport.
+        httpx_client=httpx.Client(headers={"x-api-key": "0"}),
     ),
 )
 
@@ -19,7 +22,7 @@ uploaded = client.files.upload(
     file=batch_source_path,
     config=types.UploadFileConfig(
         display_name="Gemini Batch Input",
-        mime_type="application/json",
+        mime_type="application/jsonl",
     ),
 )
 print("Uploaded batch source:", uploaded.name)
@@ -30,6 +33,7 @@ batch = client.batches.create(
     config=types.CreateBatchJobConfig(display_name="Gemini Batch Example"),
 )
 print("Created batch:", batch.name, batch.state)
+# Poll again later if pending. There is no native cancel or processing-time SLA.
 
 retrieved = client.batches.get(name=batch.name)
 print("Retrieved batch:", retrieved.name, retrieved.state)

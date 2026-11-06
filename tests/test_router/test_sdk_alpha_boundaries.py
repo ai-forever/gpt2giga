@@ -1,6 +1,7 @@
 """Real alpha SDK boundaries through the mounted application, without sockets."""
 
 import json
+import tempfile
 from contextlib import asynccontextmanager
 
 import httpx
@@ -12,21 +13,26 @@ from loguru import logger
 from gpt2giga.app.factory import create_app
 from gpt2giga.models.config import ProxyConfig, ProxySettings
 from gpt2giga.protocol import RequestTransformer, ResponseProcessor
+from gpt2giga.storage.resources import ResourceStore
 
 
 @asynccontextmanager
-async def sdk_app(handler, *, normalization="on", fallback=True):
+async def sdk_app(handler, *, normalization="on", fallback=True, auth=False):
     config = ProxyConfig(
         proxy=ProxySettings(
             mode="DEV",
             pass_model=True,
             normalization_mode=normalization,
             legacy_chat_fallback=fallback,
+            enable_api_key_auth=auth,
+            api_key="synthetic-gateway-key",
         ),
         gigachat={"model": "test-model", "max_retries": 0},
     )
     app = create_app(config)
     app.state.logger = logger
+    temporary_store = tempfile.TemporaryDirectory()
+    app.state.resource_store = await ResourceStore.open(temporary_store.name)
     async with httpx2.AsyncClient(
         transport=httpx2.MockTransport(handler), trust_env=False
     ) as wire:
@@ -50,6 +56,8 @@ async def sdk_app(handler, *, normalization="on", fallback=True):
             yield client, app
         await sdk.aclose()
         assert not wire.is_closed  # The fixture owns the injected HTTP client.
+    await app.state.resource_store.aclose()
+    temporary_store.cleanup()
 
 
 @pytest.mark.parametrize("prefix", ["", "/v1", "/v2"])
@@ -213,7 +221,7 @@ async def test_sdk_interruption_is_safe_sse_error_with_request_id(
     if protocol == "responses":
         errors = [frame for frame in frames if frame.get("type") == "error"]
     assert len(errors) == 1, response.text
-    assert errors[0]["code"] == "stream_interrupted"
+    assert errors[0]["code"] == (502 if protocol == "gemini" else "stream_interrupted")
     assert errors[0]["metadata"] == {"gigachat_x_request_id": "upstream-stream-id"}
     assert all(
         not choice.get("finish_reason")
@@ -316,9 +324,165 @@ async def test_tool_finish_without_sdk_terminal_does_not_report_success(protocol
         path, data = chat_request(protocol, "v2", stream=True)
         response = await client.post(path, json=data)
     assert response.status_code == 200
-    assert "stream_interrupted" in response.text
+    assert (
+        '"code": 502' if protocol == "gemini" else "stream_interrupted"
+    ) in response.text
     assert '"finish_reason": "tool_calls"' not in response.text
     assert '"finish_reason": "function_call"' not in response.text
     assert "finishReason" not in response.text
     assert "message_stop" not in response.text
     assert stream.closed
+
+
+@pytest.mark.parametrize("fallback", [False, True])
+@pytest.mark.parametrize("failure", ["timeout", "connection", "invalid_json"])
+async def test_gemini_count_tokens_never_replays_after_dispatch(fallback, failure):
+    seen = []
+
+    def handle(request):
+        seen.append(request)
+        if failure == "timeout":
+            raise httpx2.ReadTimeout("synthetic-secret", request=request)
+        if failure == "connection":
+            raise httpx2.ConnectError("synthetic-secret", request=request)
+        return httpx2.Response(200, content=b"synthetic-secret")
+
+    async with sdk_app(handle, fallback=fallback) as (client, _):
+        response = await client.post(
+            "/v1/models/test-model:countTokens",
+            json={"contents": [{"parts": [{"text": "hello"}]}]},
+        )
+    assert len(seen) == 1
+    assert seen[0].url.path == "/v1/tokens/count"
+    assert response.status_code == (504 if failure == "timeout" else 502)
+    assert response.json()["error"]["code"] == response.status_code
+    assert "synthetic-secret" not in response.text
+
+
+@pytest.mark.parametrize(
+    "prefix", ["", "/v1", "/v2", "/v1beta", "/v1/v1beta", "/v2/v1beta"]
+)
+@pytest.mark.parametrize("failure", ["timeout", "status", "invalid_request"])
+async def test_gemini_aliases_share_google_errors(prefix, failure):
+    seen = []
+
+    def handle(request):
+        seen.append(request)
+        if failure == "timeout":
+            raise httpx2.ReadTimeout("synthetic-secret", request=request)
+        return httpx2.Response(
+            429,
+            json={"message": "synthetic-secret"},
+            headers={"x-request-id": "upstream-rate-limit"},
+        )
+
+    async with sdk_app(handle) as (client, _):
+        operation = (
+            "batchEmbedContents" if failure == "invalid_request" else "generateContent"
+        )
+        response = await client.post(
+            f"{prefix}/models/test-model:{operation}",
+            json={"requests": []}
+            if failure == "invalid_request"
+            else {"contents": [{"parts": [{"text": "hello"}]}]},
+        )
+    status, canonical = {
+        "timeout": (504, "DEADLINE_EXCEEDED"),
+        "status": (429, "RESOURCE_EXHAUSTED"),
+        "invalid_request": (400, "INVALID_ARGUMENT"),
+    }[failure]
+    assert response.status_code == status
+    assert response.json()["error"]["code"] == status
+    assert response.json()["error"]["status"] == canonical
+    assert "detail" not in response.json()
+    assert "synthetic-secret" not in response.text
+    assert len(seen) == (0 if failure == "invalid_request" else 1)
+    if failure == "status":
+        assert response.headers["x-gigachat-request-id"] == "upstream-rate-limit"
+        assert response.headers["x-request-id"] != "upstream-rate-limit"
+
+
+@pytest.mark.parametrize(
+    "rows",
+    [
+        [{"embedding": [1.0], "index": 0}],
+        [{"embedding": [1.0], "index": n} for n in range(3)],
+        [{"embedding": [1.0], "index": 0}, {"embedding": [2.0], "index": 0}],
+        [{"embedding": [1.0], "index": 0}, {"embedding": [2.0], "index": 2}],
+        [{"embedding": [1.0], "index": 0}, {"embedding": [], "index": 1}],
+        [{"embedding": [1.0], "index": 0}, {"index": 1}],
+    ],
+)
+async def test_malformed_embedding_response_is_upstream_error(rows):
+    rows = [
+        {"usage": {"prompt_tokens": 1}, "object": "embedding", **row} for row in rows
+    ]
+    async with sdk_app(
+        lambda _: httpx2.Response(
+            200, json={"data": rows, "model": "test-model", "object": "list"}
+        )
+    ) as (client, _):
+        response = await client.post(
+            "/models/test-model:batchEmbedContents",
+            json={
+                "requests": [
+                    {"content": {"parts": [{"text": text}]}}
+                    for text in ("first", "second")
+                ]
+            },
+        )
+    assert response.status_code == 502, response.text
+    assert response.json()["error"]["code"] == 502
+
+
+async def test_reordered_embeddings_restore_input_order():
+    rows = [{"embedding": [2.0], "index": 1}, {"embedding": [1.0], "index": 0}]
+    rows = [
+        {"usage": {"prompt_tokens": 1}, "object": "embedding", **row} for row in rows
+    ]
+    async with sdk_app(
+        lambda _: httpx2.Response(
+            200, json={"data": rows, "model": "test-model", "object": "list"}
+        )
+    ) as (client, _):
+        response = await client.post(
+            "/models/test-model:batchEmbedContents",
+            json={
+                "requests": [
+                    {"content": {"parts": [{"text": text}]}}
+                    for text in ("first", "second")
+                ]
+            },
+        )
+    assert response.status_code == 200, response.text
+    assert response.json()["embeddings"] == [{"values": [1.0]}, {"values": [2.0]}]
+
+
+def test_gemini_sse_timeout_uses_google_status_and_safe_metadata():
+    from gpt2giga.protocols.gemini.streaming import (
+        normalized_stream_event_to_gemini_chunk,
+    )
+    from gpt2giga.protocols.normalized import NormalizedError, NormalizedStreamEvent
+
+    event = NormalizedStreamEvent(
+        type="error",
+        error=NormalizedError(
+            type="api_error",
+            code="upstream_timeout",
+            message="Request timed out.",
+            provider_metadata={
+                "gigachat": {"request_id": "upstream-timeout", "secret": "hidden"}
+            },
+        ),
+    )
+    result = normalized_stream_event_to_gemini_chunk(
+        event, requested_model="test", response_id="gateway-id"
+    )
+    assert result == {
+        "error": {
+            "code": 504,
+            "status": "DEADLINE_EXCEEDED",
+            "message": "Request timed out.",
+            "metadata": {"gigachat_x_request_id": "upstream-timeout"},
+        }
+    }

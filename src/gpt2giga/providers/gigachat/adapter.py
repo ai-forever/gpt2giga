@@ -432,9 +432,14 @@ class GigaChatProviderAdapter:
             else:
                 _log_stream_error(logger, context, exc)
                 yield mapper.error_event(
-                    message=str(exc),
+                    message="The upstream request failed."
+                    if self.provider_label == "gemini"
+                    else str(exc),
                     error_type=type(exc).__name__,
-                    code="stream_error",
+                    code=getattr(exc, "status_code", 502)
+                    if self.provider_label == "gemini"
+                    else "stream_error",
+                    request_id=sdk_request_id(exc),
                 )
         except asyncio.CancelledError:
             raise
@@ -541,9 +546,14 @@ class GigaChatProviderAdapter:
             else:
                 _log_stream_error(logger, context, exc)
                 yield mapper.error_event(
-                    message=str(exc),
+                    message="The upstream request failed."
+                    if self.provider_label == "gemini"
+                    else str(exc),
                     error_type=type(exc).__name__,
-                    code="stream_error",
+                    code=getattr(exc, "status_code", 502)
+                    if self.provider_label == "gemini"
+                    else "stream_error",
+                    request_id=sdk_request_id(exc),
                 )
         except asyncio.CancelledError:
             raise
@@ -771,6 +781,8 @@ def _normalized_token_count_texts(
     texts: list[str] = []
     chat = request.input
     for message in chat.messages:
+        if message.reasoning_content:
+            texts.append(message.reasoning_content)
         if isinstance(message.content, str):
             if message.content:
                 texts.append(message.content)

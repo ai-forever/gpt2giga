@@ -1,173 +1,212 @@
-"""Batch endpoints."""
+"""OpenAI batch submission, polling and durable result files."""
 
-from typing import Optional
+import json
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Query, Request
 
-from gpt2giga.app_state import get_batch_store, get_file_store, get_gigachat_client
-from gpt2giga.common.exceptions import exceptions_handler
-from gpt2giga.common.gigachat_options import (
-    extract_gigachat_request_options,
-    gigachat_request_options,
+from gpt2giga.app_state import (
+    get_resource_store,
 )
+from gpt2giga.common.exceptions import exceptions_handler
+from gpt2giga.common.files import file_content
 from gpt2giga.common.request_json import read_request_json
 from gpt2giga.openapi_specs.openai import batches_openapi_extra
 from gpt2giga.openapi_tags import OPENAPI_TAG_OPENAI_BATCHES
 from gpt2giga.protocol.batches import (
-    build_openai_batch_object,
+    _transform_chat_batch_result,
+    _transform_responses_batch_result,
     get_batch_target,
-    transform_batch_input_file,
+    parse_jsonl,
 )
-from gpt2giga.routers.openai.helpers import _paginate_items
+from gpt2giga.protocol.embeddings import (
+    apply_embedding_encoding_format,
+    normalize_embedding_response,
+)
+from gpt2giga.providers.gigachat.batches import (
+    TERMINAL,
+    batch_error,
+    batch_owner,
+    create_batch as submit_batch,
+    get_batch,
+    list_batches as registered_batches,
+    poll_batch,
+    prepare_rows,
+    result_file,
+)
 
 router = APIRouter(tags=[OPENAPI_TAG_OPENAI_BATCHES])
+
+
+def _jsonl(rows):
+    return (
+        "\n".join(json.dumps(row, ensure_ascii=False) for row in rows) + "\n"
+    ).encode()
+
+
+async def _materialize(request: Request, resource):
+    metadata = resource.metadata
+    if metadata["status"] not in TERMINAL or metadata.get("files_materialized"):
+        return resource
+    originals = {row["id"]: row for row in metadata["rows"]}
+    target = get_batch_target(metadata["endpoint"])
+    successes, errors = [], []
+    for row in metadata["results"]:
+        key = row["id"]
+        if row.get("expired") or "error" in row:
+            error = row.get("error") or {
+                "code": "batch_expired",
+                "message": "Gateway result acceptance deadline elapsed.",
+            }
+            errors.append(
+                {"id": key, "custom_id": key, "response": None, "error": error}
+            )
+            continue
+        original = originals[key]["original"]
+        raw = row["result"]
+        if target.kind == "chat":
+            body = _transform_chat_batch_result(
+                raw, request.app.state.response_processor, key, original
+            )
+        elif target.kind == "responses":
+            body = _transform_responses_batch_result(
+                raw, request.app.state.response_processor, key, original
+            )
+        else:
+            body = normalize_embedding_response(
+                raw,
+                model=metadata["model"],
+                expected_count=len(originals[key]["request"]["input"]),
+            )
+            body = apply_embedding_encoding_format(
+                body, original.get("encoding_format")
+            )
+        successes.append(
+            {
+                "id": key,
+                "custom_id": key,
+                "response": {
+                    "status_code": 200,
+                    "request_id": row.get("request_id", key),
+                    "body": body,
+                },
+                "error": None,
+            }
+        )
+    output_id = (
+        await result_file(request, resource, "output", _jsonl(successes))
+        if successes
+        else None
+    )
+    error_id = (
+        await result_file(request, resource, "errors", _jsonl(errors))
+        if errors
+        else None
+    )
+    return await get_resource_store(request).update(
+        batch_owner(request, resource),
+        "batch",
+        resource.public_id,
+        {
+            "output_file_id": output_id,
+            "error_file_id": error_id,
+            "files_materialized": True,
+        },
+    )
+
+
+async def batch_object(request: Request, resource):
+    resource = await _materialize(request, resource)
+    m = resource.metadata
+    completed = sum("result" in row for row in m["results"])
+    failed = sum("error" in row or row.get("expired", False) for row in m["results"])
+    return {
+        "id": resource.public_id,
+        "object": "batch",
+        "endpoint": m["endpoint"],
+        "input_file_id": m["input_file_id"],
+        "completion_window": "24h",
+        "status": m["status"],
+        "created_at": int(m["created_at"]),
+        "expires_at": int(m["deadline"]),
+        "completed_at": int(m["ended_at"]) if m["status"] == "completed" else None,
+        "failed_at": int(m["ended_at"]) if m["status"] == "failed" else None,
+        "expired_at": int(m["ended_at"]) if m["status"] == "expired" else None,
+        "in_progress_at": None,
+        "finalizing_at": None,
+        "cancelling_at": None,
+        "cancelled_at": None,
+        "request_counts": {
+            "total": len(m["rows"]),
+            "completed": completed,
+            "failed": failed,
+        },
+        "errors": None,
+        "metadata": m.get("metadata"),
+        "output_file_id": m.get("output_file_id"),
+        "error_file_id": m.get("error_file_id"),
+    }
 
 
 @router.post("/batches", openapi_extra=batches_openapi_extra())
 @exceptions_handler
 async def create_batch(request: Request):
-    """Create a batch job."""
     data = await read_request_json(request)
-    request_options = extract_gigachat_request_options(
-        request, data, include_extra_body=True
-    )
-    completion_window = data.get("completion_window", "24h")
-    if completion_window is None:
-        completion_window = "24h"
-    input_file_id = data.get("input_file_id")
-    if completion_window != "24h":
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "error": {
-                    "message": 'Only `completion_window="24h"` is supported.',
-                    "type": "invalid_request_error",
-                    "param": "completion_window",
-                    "code": None,
-                }
-            },
-        )
-    if not input_file_id:
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "error": {
-                    "message": "`input_file_id` is required.",
-                    "type": "invalid_request_error",
-                    "param": "input_file_id",
-                    "code": None,
-                }
-            },
-        )
-
+    if data.get("completion_window") not in {None, "24h"}:
+        raise batch_error('Only completion_window="24h" is supported.')
+    file_id = data.get("input_file_id")
+    if not isinstance(file_id, str) or not file_id:
+        raise batch_error("input_file_id is required.")
     target = get_batch_target(data.get("endpoint", ""))
-    giga_client = get_gigachat_client(request)
-    async with gigachat_request_options(
-        giga_client, request_options, include_body=False
-    ) as request_client:
-        file_content = await request_client.aget_file_content(file_id=input_file_id)
-
-    proxy_settings = request.app.state.config.proxy_settings
-    async with gigachat_request_options(
-        giga_client, request_options, include_body=False
-    ) as request_client:
-        transformed_content = await transform_batch_input_file(
-            file_content,
-            target=target,
-            request_transformer=request.app.state.request_transformer,
-            giga_client=request_client,
-            embeddings_model=proxy_settings.embeddings,
-            pass_model=proxy_settings.pass_model,
-        )
-    async with gigachat_request_options(
-        giga_client, request_options, include_body=False
-    ) as request_client:
-        batch = await request_client.acreate_batch(
-            transformed_content,
-            method=target.method,
-        )
-
-    metadata = {
-        "endpoint": target.endpoint,
-        "input_file_id": input_file_id,
-        "completion_window": completion_window,
-        "metadata": data.get("metadata"),
-        "output_file_id": batch.output_file_id,
-        "embeddings_model": proxy_settings.embeddings,
-        "pass_model": proxy_settings.pass_model,
-    }
-    get_batch_store(request)[batch.id_] = metadata
-    if batch.output_file_id:
-        get_file_store(request)[batch.output_file_id] = {"purpose": "batch_output"}
-    return build_openai_batch_object(batch, metadata)
+    rows, model = await prepare_rows(
+        request, parse_jsonl(await file_content(request, file_id)), target.endpoint
+    )
+    resource = await submit_batch(
+        request,
+        protocol="openai",
+        method=target.method,
+        model=model,
+        rows=rows,
+        metadata={
+            "endpoint": target.endpoint,
+            "input_file_id": file_id,
+            "metadata": data.get("metadata"),
+        },
+    )
+    return await batch_object(request, resource)
 
 
 @router.get("/batches")
 @exceptions_handler
 async def list_batches(
-    request: Request,
-    after: Optional[str] = Query(default=None),
-    limit: Optional[int] = Query(default=None),
+    request: Request, after: str | None = None, limit: int = Query(20, ge=1, le=100)
 ):
-    """List batch jobs."""
-    giga_client = get_gigachat_client(request)
-    request_options = extract_gigachat_request_options(
-        request, exclude_query_params=("after", "limit")
-    )
-    batch_store = get_batch_store(request)
-    file_store = get_file_store(request)
-    async with gigachat_request_options(
-        giga_client, request_options, include_body=False
-    ) as request_client:
-        batches = await request_client.aget_batches()
-    data = []
-    for batch in batches.batches:
-        metadata = batch_store.get(batch.id_) or {
-            "endpoint": "/v1/chat/completions",
-            "input_file_id": "",
-            "completion_window": "24h",
-        }
-        metadata["output_file_id"] = batch.output_file_id
-        batch_store[batch.id_] = metadata
-        if batch.output_file_id:
-            file_store[batch.output_file_id] = {"purpose": "batch_output"}
-        data.append(build_openai_batch_object(batch, metadata))
-    paged, has_more = _paginate_items(data, after, limit)
-    return {"data": paged, "has_more": has_more, "object": "list"}
+    resources = await registered_batches(request, "openai")
+    if after:
+        matches = [i for i, r in enumerate(resources) if r.public_id == after]
+        if not matches:
+            raise batch_error("Invalid batch cursor.")
+        resources = resources[matches[0] + 1 :]
+    data = [await batch_object(request, r) for r in resources[:limit]]
+    return {
+        "object": "list",
+        "data": data,
+        "has_more": len(resources) > limit,
+        "first_id": data[0]["id"] if data else None,
+        "last_id": data[-1]["id"] if data else None,
+    }
 
 
 @router.get("/batches/{batch_id}")
 @exceptions_handler
 async def retrieve_batch(batch_id: str, request: Request):
-    """Return batch metadata."""
-    giga_client = get_gigachat_client(request)
-    request_options = extract_gigachat_request_options(request)
-    batch_store = get_batch_store(request)
-    file_store = get_file_store(request)
-    async with gigachat_request_options(
-        giga_client, request_options, include_body=False
-    ) as request_client:
-        batches = await request_client.aget_batches(batch_id=batch_id)
-    if not batches.batches:
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "error": {
-                    "message": f"Batch `{batch_id}` not found.",
-                    "type": "not_found_error",
-                    "param": "batch_id",
-                    "code": None,
-                }
-            },
-        )
-    batch = batches.batches[0]
-    metadata = batch_store.get(batch_id) or {
-        "endpoint": "/v1/chat/completions",
-        "input_file_id": "",
-        "completion_window": "24h",
-    }
-    metadata["output_file_id"] = batch.output_file_id
-    batch_store[batch_id] = metadata
-    if batch.output_file_id:
-        file_store[batch.output_file_id] = {"purpose": "batch_output"}
-    return build_openai_batch_object(batch, metadata)
+    return await batch_object(request, await poll_batch(request, batch_id, "openai"))
+
+
+@router.post("/batches/{batch_id}/cancel")
+@router.delete("/batches/{batch_id}")
+@exceptions_handler
+async def unsupported_batch_operation(batch_id: str, request: Request):
+    await get_batch(request, batch_id, "openai")
+    raise batch_error(
+        "The GigaChat backend does not support batch cancellation or deletion.", 501
+    )

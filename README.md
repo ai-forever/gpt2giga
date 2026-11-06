@@ -30,7 +30,7 @@ GigaChat не является drop-in заменой OpenAI или Anthropic AP
 - фильтрует транспортные SDK headers, клиентские API keys, cookies и другие небезопасные метаданные перед upstream;
 - отделяет клиентскую API-key авторизацию прокси от GigaChat credentials;
 - отдаёт список моделей в OpenAI-, Anthropic-, Gemini- и LiteLLM-совместимом виде;
-- поддерживает OpenAI Files; batch routes и Gemini Files остаются отключёнными.
+- поддерживает Files/Batches OpenAI, Anthropic и Gemini в документированном подмножестве.
 
 Подробная матрица поддержки и список реальных ограничений вынесены в [API Compatibility](https://ai-forever.github.io/gpt2giga/api-compatibility).
 
@@ -189,11 +189,14 @@ v1 contract, `/v2` принудительно выбирает GigaChat v2 contr
 - LiteLLM-compatible `GET /model/info`;
 - системные endpoints `GET /health` и `GET|POST /ping`.
 
-Отключено до появления нужных batch methods в GigaChat SDK/backend:
-
-- OpenAI-compatible Files API и Batches API;
-- Anthropic Message Batches API.
-- Gemini-compatible Files API и Batch GenerateContent API.
+Дополнительно подключены Files/Batches трёх протоколов, Responses input_tokens,
+узкий Images generations и native utilities. Cancel/delete batch не поддерживаются.
+Для batch срок 24h означает срок принятия результатов шлюзом: без poll до срока
+даже завершённая native job может быть признана expired; upstream job может
+продолжиться и тарифицироваться. Полной vendor batch parity нет.
+Responses snapshots и Conversations доступны opt-in через
+`GPT2GIGA_RESPONSES_STORAGE_MODE=gateway`; default `native` сохраняет thread continuation.
+См. [API compatibility](https://ai-forever.github.io/gpt2giga/api-compatibility).
 
 Сейчас не является целью проекта:
 
@@ -239,7 +242,7 @@ Compose profiles, reverse proxies, TLS и hardening описаны в [Deploymen
 |---|---|
 | `src/gpt2giga/` | FastAPI app, routers, protocol transforms, config, middleware |
 | `tests/` | Unit, router, protocol, sink и integration tests |
-| `examples/` | Runnable OpenAI, Anthropic, Gemini, embeddings and agents examples; files/batches examples are prepared but not mounted |
+| `examples/` | Runnable OpenAI, Anthropic, Gemini, embeddings and agents examples; documented Files/Batches subsets use real backend execution |
 | `docs/` | Markdown-контент пользовательской документации и architecture notes |
 | `docs-site/` | Docusaurus wrapper, sidebar/theme config и npm tooling для GitHub Pages |
 | `integrations/` | Editor/agent/reverse-proxy integration guides |

@@ -171,6 +171,7 @@ def _is_gemini_route(path: str) -> bool:
         ":embedContent",
         ":batchEmbedContents",
         ":batchGenerateContent",
+        ":asyncBatchEmbedContent",
     )
     return path.startswith("/models/") and path.endswith(gemini_operations)
 

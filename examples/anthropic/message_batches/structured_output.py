@@ -1,4 +1,9 @@
-"""Anthropic Message Batches API structured output example."""
+"""Anthropic Message Batches API structured output example.
+
+Requires GigaChat batch access. Poll before the 24h gateway acceptance deadline:
+first polling later can expire a job that finished upstream in time. Native jobs
+may continue and be billed after expiry; cancellation/deletion are unsupported.
+"""
 
 from anthropic import Anthropic
 

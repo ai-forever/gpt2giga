@@ -83,3 +83,9 @@ uv run python examples/anthropic/message_batches/structured_output.py
   upstream как бюджет рассуждений; всегда задавайте также `max_tokens`.
 - `usage.input_tokens` не включает кэш: он доступен отдельно в
   `usage.cache_read_input_tokens`. Это отличается от полного входа OpenAI.
+
+Message Batches требуют GigaChat pay-as-you-go. Poll до 24h сохраняет результаты;
+первый poll позже может вернуть expired даже для вовремя завершённого native job.
+Upstream job может продолжаться и тарифицироваться после expiry; отмены нет.
+
+`files/document.py`: загрузка текстового документа через Files beta и использование owner-scoped source.type=file в Messages; пользовательские uploads не являются downloadable.

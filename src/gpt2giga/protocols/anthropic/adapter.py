@@ -203,6 +203,7 @@ def _normalize_user_messages(
 
     tool_results: list[NormalizedMessage] = []
     parts: list[NormalizedContentPart] = []
+    attachments: list[str] = []
     for block in value:
         if not isinstance(block, Mapping):
             continue
@@ -210,6 +211,20 @@ def _normalize_user_messages(
         if block_type == "text":
             parts.append(
                 NormalizedContentPart(type="text", text=str(block.get("text", "")))
+            )
+        elif (
+            block_type in {"document", "image"}
+            and isinstance(block.get("source"), Mapping)
+            and block["source"].get("type") == "file"
+        ):
+            attachments.append(block["source"]["file_id"])
+        elif block_type == "document":
+            from gpt2giga.common.client_params import ClientCompatibilityError
+
+            raise ClientCompatibilityError(
+                "Documents require a Files API source.type=file reference.",
+                provider="anthropic",
+                param="messages",
             )
         elif block_type == "image":
             image = _normalize_image(block.get("source"))
@@ -243,6 +258,10 @@ def _normalize_user_messages(
         messages.append(NormalizedMessage(role="user", content=parts))
     elif not tool_results:
         messages.append(NormalizedMessage(role="user", content=""))
+    if attachments:
+        if not messages or messages[-1].role != "user":
+            messages.append(NormalizedMessage(role="user", content=""))
+        messages[-1].raw_extensions["attachments"] = attachments
     return messages
 
 

@@ -57,6 +57,21 @@ def test_runtime_admits_selected_model_image_predicates() -> None:
     assert adapter.forced_model == "GigaChat-2-Max"
 
 
+def test_runtime_parallel_admission_accepts_explicit_catalog_fact() -> None:
+    app = _app()
+    request = NormalizedChatRequest(model="GigaChat-2-Max", parallel_tool_calls=True)
+    with TestClient(app):
+        runtime = app.state.bridge_provider_runtime
+        with pytest.raises(BridgeMatrixAdmissionError):
+            runtime.adapter_for(request, api_mode="v2")
+        adapter = runtime.adapter_for(
+            request,
+            api_mode="v2",
+            provider_capabilities={"parallel_tool_calls": True},
+        )
+    assert adapter.forced_model == "GigaChat-2-Max"
+
+
 def test_runtime_rejects_unproven_selected_model_semantic_with_exact_reason() -> None:
     app = _app()
     request = NormalizedChatRequest(

@@ -89,8 +89,8 @@ uv run python examples/gemini/embeddings/embeddings.py
 `content/stateful.py` требует, чтобы proxy был запущен с
 `GPT2GIGA_CONVERSATION_STITCHING_ENABLED=True`.
 
-Prepared Files/Batches examples are included for the implemented router modules,
-but those routes are not mounted by the default public app yet:
+Files/Batches examples use the mounted Gemini API with `api_version="v1beta"`.
+They require persistent resource storage; native batches require account access:
 
 ```bash
 uv run python examples/gemini/files/files.py
@@ -103,8 +103,8 @@ uv run python examples/gemini/batches/batches.py
 |---|---|---|
 | content generation | [content/README.md](./content/README.md) | `generate_content`, stream, chat-session, stateful, function calling, GigaChat built-in tools, structured output |
 | `countTokens` | [count_tokens/README.md](./count_tokens/README.md) | Подсчёт токенов для `models.count_tokens(...)` |
-| files | [files/README.md](./files/README.md) | Prepared upload, list, get, download, delete |
-| batches | [batches/README.md](./batches/README.md) | Prepared `batchGenerateContent` и bundled JSONL source |
+| files | [files/README.md](./files/README.md) | Resumable upload, list, get, generate with file, delete |
+| batches | [batches/README.md](./batches/README.md) | Native `batchGenerateContent` и bundled JSONL source |
 | embeddings | [embeddings/README.md](./embeddings/README.md) | `models.embed_content(...)` с несколькими строками |
 
 ## Нюансы
@@ -117,12 +117,12 @@ uv run python examples/gemini/batches/batches.py
   покрывает batch-style embeddings flow поверх Gemini-compatible embeddings
   routes.
 - Совместимость в этой итерации сфокусирована на text, function calling,
-  embeddings и подготовленных files/batchGenerateContent handlers.
+  embeddings, Files и native batch execution.
 - GigaChat v2 built-in tools поддержаны для Gemini-compatible `generateContent`
   там, где SDK или raw Gemini-compatible payload может передать соответствующее
   поле tool. Safety enforcement, `cachedContent`, non-text embeddings content и
   часть мультимодальных/file-backed сценариев всё ещё остаются вне scope.
-- Параллельные function calls поддерживаются для `GigaChat-2-Max` через `/v2`;
+- Параллельные function calls поддерживаются для `GigaChat-3-Ultra` через `/v2`;
   пример проверяет два вызова и возвращает оба результата одним следующим ходом.
 - `countTokens` использует GigaChat token counting по извлеченному тексту и
   является compatibility approximation, а не точным Gemini tokenizer.

@@ -10,6 +10,8 @@ x-gpt2giga-common: &gpt2giga-common
   container_name: gpt2giga
   env_file:
     - ../.env
+  volumes:
+    - gpt2giga-resources:/app/var/resources
 
 services:
   gpt2giga-prod:
@@ -17,6 +19,7 @@ services:
     profiles: ["PROD"]
     environment:
       GPT2GIGA_MODE: "PROD"
+      GPT2GIGA_RESOURCE_STORE_PATH: /app/var/resources
     ports:
       - "127.0.0.1:${GPT2GIGA_PORT:-8090}:${GPT2GIGA_PORT:-8090}"
 
@@ -25,5 +28,9 @@ services:
     profiles: ["", "DEV"]
     environment:
       GPT2GIGA_MODE: "DEV"
+      GPT2GIGA_RESOURCE_STORE_PATH: /app/var/resources
     ports:
       - "${GPT2GIGA_PORT:-8090}:${GPT2GIGA_PORT:-8090}"
+
+volumes:
+  gpt2giga-resources:

@@ -30,6 +30,7 @@ from gpt2giga.common.streaming import (
     stream_responses_generator,
 )
 from gpt2giga.common.streaming_response import ModelLimitedStreamingResponse
+from gpt2giga.capabilities.resolver import provider_capability_states
 from gpt2giga.core.context import get_request_context, update_request_context
 from gpt2giga.logger import rquid_context
 from gpt2giga.models.catalog import ModelNotFoundError
@@ -438,10 +439,14 @@ async def _normalized_provider_adapter(
         return injected
     runtime = getattr(state, "bridge_provider_runtime", None)
     if runtime is not None:
-        await _bind_catalog_model(request, normalized_request=normalized_request)
+        facts = await _bind_catalog_model(
+            request, normalized_request=normalized_request
+        )
+        capability_options = {"provider_capabilities": facts} if facts else {}
         return runtime.adapter_for(
             normalized_request,
             api_mode=resolve_gigachat_api_mode(request),
+            **capability_options,
         )
     registry = getattr(state, "provider_registry", None)
     if registry is not None:
@@ -498,7 +503,7 @@ def _reject_unprofiled_injected_semantics(normalized_request) -> None:
         )
 
 
-async def _bind_catalog_model(request: Request, *, normalized_request) -> None:
+async def _bind_catalog_model(request: Request, *, normalized_request) -> dict | None:
     state = request.app.state
     runtime = state.bridge_provider_runtime
     route = runtime.registry.resolve(normalized_request.model)
@@ -529,6 +534,7 @@ async def _bind_catalog_model(request: Request, *, normalized_request) -> None:
             "inventory_revision": descriptor.inventory_revision,
         },
     )
+    return provider_capability_states(descriptor.provider_metadata.get("capabilities"))
 
 
 def _normalized_response_id(normalized_response, *, context) -> str:

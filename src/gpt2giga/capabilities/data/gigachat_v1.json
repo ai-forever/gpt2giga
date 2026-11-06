@@ -5,7 +5,10 @@
       "overlay_id": "gigachat-2-chat-family-v1",
       "selector_kind": "family",
       "selector": "^GigaChat-2-(?:Lite|Pro|Max)$",
-      "api_modes": ["v1", "v2"],
+      "api_modes": [
+        "v1",
+        "v2"
+      ],
       "capabilities": {
         "text_input": {
           "state": "supported",
@@ -28,32 +31,45 @@
           "evidence_ids": []
         }
       },
-      "evidence_ids": ["GIGA-CHAT-CONFORMANCE-2026-08-03"]
+      "evidence_ids": [
+        "GIGA-CHAT-CONFORMANCE-2026-08-03"
+      ]
     },
     {
       "overlay_id": "gigachat-2-max-attachments-v1",
       "selector_kind": "exact",
       "selector": "GigaChat-2-Max",
-      "api_modes": ["v1", "v2"],
+      "api_modes": [
+        "v1",
+        "v2"
+      ],
       "capabilities": {
         "file_input": {
           "state": "supported",
           "reason_id": "reviewed_max_attachment_flow",
-          "evidence_ids": ["GIGACHAT-SDK-VISION-ATTACHMENT"]
+          "evidence_ids": [
+            "GIGACHAT-SDK-VISION-ATTACHMENT"
+          ]
         },
         "image_input": {
           "state": "supported",
           "reason_id": "reviewed_max_image_attachment",
-          "evidence_ids": ["GIGACHAT-SDK-VISION-ATTACHMENT"]
+          "evidence_ids": [
+            "GIGACHAT-SDK-VISION-ATTACHMENT"
+          ]
         }
       },
-      "evidence_ids": ["GIGA-RESPONSES-ATTACHMENT-2026-08-03"]
+      "evidence_ids": [
+        "GIGA-RESPONSES-ATTACHMENT-2026-08-03"
+      ]
     },
     {
       "overlay_id": "gigachat-2-max-v2-hosted-tools",
       "selector_kind": "exact",
       "selector": "GigaChat-2-Max",
-      "api_modes": ["v2"],
+      "api_modes": [
+        "v2"
+      ],
       "capabilities": {
         "hosted_web_search": {
           "state": "supported",
@@ -91,21 +107,25 @@
           "evidence_ids": []
         },
         "parallel_tool_calls": {
-          "state": "supported",
-          "reason_id": "reviewed_v2_parallel_tool_calls",
-          "evidence_ids": ["GIGACHAT-V2-PARALLEL-TOOL-CALLS-2026-08-17"]
+          "state": "unsupported",
+          "reason_id": "public_parallel_tools_ultra_only",
+          "evidence_ids": [
+            "GIGACHAT-POST-CHAT-2026-11-06"
+          ]
         }
       },
       "evidence_ids": [
-        "GIGA-V2-HOSTED-TOOLS-2026-08-03",
-        "GIGACHAT-SDK-0.2.4A1-PARALLEL-TOOL-CALLS"
+        "GIGA-V2-HOSTED-TOOLS-2026-08-03"
       ]
     },
     {
       "overlay_id": "gigachat-2-reasoning-family-v1",
       "selector_kind": "family",
       "selector": "^GigaChat-2-Reasoning(?:-[A-Za-z0-9._-]+)?$",
-      "api_modes": ["v1", "v2"],
+      "api_modes": [
+        "v1",
+        "v2"
+      ],
       "capabilities": {
         "text_input": {
           "state": "supported",
@@ -120,7 +140,9 @@
         "reasoning_controls": {
           "state": "supported",
           "reason_id": "reviewed_reasoning_effort_control",
-          "evidence_ids": ["GIGACHAT-SDK-REASONING-EXAMPLE"]
+          "evidence_ids": [
+            "GIGACHAT-SDK-REASONING-EXAMPLE"
+          ]
         },
         "usage_tokens": {
           "state": "supported",
@@ -128,7 +150,61 @@
           "evidence_ids": []
         }
       },
-      "evidence_ids": ["GIGACHAT-SDK-REASONING-CONTENT"]
+      "evidence_ids": [
+        "GIGACHAT-SDK-REASONING-CONTENT"
+      ]
+    },
+    {
+      "overlay_id": "gigachat-3-ultra-chat",
+      "selector_kind": "exact",
+      "selector": "GigaChat-3-Ultra",
+      "api_modes": [
+        "v1",
+        "v2"
+      ],
+      "capabilities": {
+        "text_input": {
+          "state": "supported",
+          "reason_id": "documented_ultra_text_input",
+          "evidence_ids": []
+        },
+        "streaming": {
+          "state": "supported",
+          "reason_id": "documented_ultra_streaming",
+          "evidence_ids": []
+        },
+        "function_tools": {
+          "state": "supported",
+          "reason_id": "documented_ultra_function_tools",
+          "evidence_ids": []
+        },
+        "usage_tokens": {
+          "state": "supported",
+          "reason_id": "documented_ultra_usage_tokens",
+          "evidence_ids": []
+        }
+      },
+      "evidence_ids": [
+        "GIGACHAT-POST-CHAT-2026-11-06"
+      ]
+    },
+    {
+      "overlay_id": "gigachat-3-ultra-v2-parallel-tools",
+      "selector_kind": "exact",
+      "selector": "GigaChat-3-Ultra",
+      "api_modes": [
+        "v2"
+      ],
+      "capabilities": {
+        "parallel_tool_calls": {
+          "state": "supported",
+          "reason_id": "documented_ultra_v2_parallel_tools",
+          "evidence_ids": []
+        }
+      },
+      "evidence_ids": [
+        "GIGACHAT-POST-CHAT-2026-11-06"
+      ]
     }
   ]
 }

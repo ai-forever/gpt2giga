@@ -61,6 +61,27 @@ class ProxySettings(BaseSettings):
         default=32,
         description="Maximum number of idle credential-specific GigaChat clients.",
     )
+    resource_store_path: str = Field(
+        default="var/resources",
+        min_length=1,
+        description="Durable SQLite and blob directory shared by gateway workers.",
+    )
+    resource_retention_seconds: PositiveInt = Field(
+        default=30 * 86400,
+        description="Resource metadata/blob retention, independent of batch delivery deadlines.",
+    )
+    resource_max_blob_bytes: PositiveInt = Field(
+        default=100 * 1024 * 1024,
+        description="Maximum bytes in one locally retained resource blob.",
+    )
+    resource_max_total_blob_bytes: PositiveInt = Field(
+        default=1024 * 1024 * 1024,
+        description="Maximum total bytes in retained resource blobs.",
+    )
+    resource_trusted_identity: Optional[str] = Field(
+        default=None,
+        description="Deployment-controlled resource identity; never read from untrusted headers.",
+    )
     embeddings: str = Field(
         default="EmbeddingsGigaR", description="Модель для эмбеддингов"
     )
@@ -120,6 +141,10 @@ class ProxySettings(BaseSettings):
     legacy_chat_fallback: bool = Field(
         default=True,
         description="Allow legacy chat path fallback while modular migration is experimental.",
+    )
+    responses_storage_mode: Literal["native", "gateway"] = Field(
+        default="native",
+        description="Native thread continuation or opt-in durable immutable Responses snapshots.",
     )
     conversation_stitching_enabled: bool = Field(
         default=False,

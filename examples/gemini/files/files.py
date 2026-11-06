@@ -3,15 +3,18 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+import httpx
 from google import genai
 from google.genai import types
 
-api_version = "v1"
+api_version = "v1beta"
 client = genai.Client(
     api_key="0",
     http_options=types.HttpOptions(
         base_url="http://localhost:8090",
         api_version=api_version,
+        # Resumable raw-byte uploads also need the gateway key on the transport.
+        httpx_client=httpx.Client(headers={"x-api-key": "0"}),
     ),
 )
 
@@ -25,7 +28,7 @@ with TemporaryDirectory() as tmp_dir:
     uploaded = client.files.upload(
         file=file_path,
         config=types.UploadFileConfig(
-            display_name="Meeting Notes",
+            display_name="meeting_notes.txt",
             mime_type="text/plain",
         ),
     )
@@ -37,9 +40,11 @@ with TemporaryDirectory() as tmp_dir:
     listed_names = [item.name for item in client.files.list(config={"page_size": 10})]
     print("Known file names:", listed_names)
 
-    downloaded = client.files.download(file=uploaded.name)
-    print("Downloaded content:")
-    print(downloaded.decode("utf-8"))
+    response = client.models.generate_content(
+        model="GigaChat-2-Max", contents=["Summarize this file:", uploaded]
+    )
+    print(response.text)
+    # User-uploaded Gemini files are not downloadable; generated batch output is.
 
     client.files.delete(name=uploaded.name)
     print("Deleted file:", uploaded.name)

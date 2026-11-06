@@ -1,118 +1,49 @@
-"""Anthropic message batch endpoints and helpers."""
+"""Anthropic Message Batches backed by durable native GigaChat jobs."""
 
-import base64
 import json
-from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+import re
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Query, Request, Response
 
-from gpt2giga.app_state import get_batch_store, get_file_store, get_gigachat_client
+from gpt2giga.app_state import get_resource_store
 from gpt2giga.common.exceptions import exceptions_handler
-from gpt2giga.common.gigachat_options import (
-    extract_gigachat_request_options,
-    gigachat_request_options,
-)
+from gpt2giga.common.files import file_content
 from gpt2giga.common.request_json import read_request_json
 from gpt2giga.openapi_specs.anthropic import anthropic_message_batches_openapi_extra
 from gpt2giga.openapi_tags import OPENAPI_TAG_ANTHROPIC_MESSAGE_BATCHES
-from gpt2giga.protocol.batches import (
-    extract_batch_result_body,
-    get_batch_target,
-    parse_jsonl,
-    transform_batch_input_file,
-)
+from gpt2giga.protocol.anthropic.params import validate_anthropic_version
 from gpt2giga.protocol.anthropic.request import (
     _build_openai_data_from_anthropic_request,
 )
-from gpt2giga.protocol.anthropic.response import (
-    _anthropic_http_exception,
-    _build_anthropic_response,
+from gpt2giga.protocol.anthropic.response import _build_anthropic_response
+from gpt2giga.providers.gigachat.batches import (
+    TERMINAL,
+    batch_error,
+    batch_owner,
+    create_batch as submit_batch,
+    get_batch,
+    list_batches as registered_batches,
+    poll_batch,
+    prepare_rows,
+    result_file,
+    validate_batch_body,
 )
 
 router = APIRouter(tags=[OPENAPI_TAG_ANTHROPIC_MESSAGE_BATCHES])
 
 
-def _rfc3339_from_timestamp(timestamp: Optional[int]) -> Optional[str]:
-    """Convert a Unix timestamp into Anthropic's RFC 3339 datetime format."""
-    if timestamp is None:
-        return None
+def _rfc3339_from_timestamp(timestamp):
     return (
-        datetime.fromtimestamp(timestamp, tz=timezone.utc)
+        datetime.fromtimestamp(timestamp, timezone.utc)
         .isoformat(timespec="seconds")
         .replace("+00:00", "Z")
+        if timestamp is not None
+        else None
     )
 
 
-def _build_anthropic_batch_request_counts(batch: Any, metadata: Dict[str, Any]) -> Dict:
-    """Map GigaChat request counters onto Anthropic message batch counters."""
-    request_counts = getattr(batch, "request_counts", None)
-    total = getattr(request_counts, "total", None)
-    if total is None:
-        total = len(metadata.get("requests", []))
-
-    status = getattr(batch, "status", None)
-    failed = getattr(request_counts, "failed", None) or 0
-    completed = getattr(request_counts, "completed", None)
-
-    if status == "completed":
-        succeeded = completed if completed is not None else max(total - failed, 0)
-        errored = failed
-        processing = max(total - succeeded - errored, 0)
-    else:
-        succeeded = 0
-        errored = 0
-        processing = total
-
-    return {
-        "canceled": 0,
-        "errored": errored,
-        "expired": 0,
-        "processing": processing,
-        "succeeded": succeeded,
-    }
-
-
-def _build_anthropic_batch_object(batch: Any, metadata: Dict[str, Any]) -> Dict:
-    """Build an Anthropic-compatible message batch object."""
-    batch_id = getattr(batch, "id_", "")
-    created_at = getattr(batch, "created_at", None)
-    processing_status = (
-        "ended" if getattr(batch, "status", None) == "completed" else "in_progress"
-    )
-    output_file_id = getattr(batch, "output_file_id", None)
-
-    expires_at = None
-    if created_at is not None:
-        expires_at = (
-            (datetime.fromtimestamp(created_at, tz=timezone.utc) + timedelta(hours=24))
-            .isoformat(timespec="seconds")
-            .replace("+00:00", "Z")
-        )
-
-    results_url = None
-    if processing_status == "ended" and output_file_id:
-        results_url = f"/v1/messages/batches/{batch_id}/results"
-
-    return {
-        "id": batch_id,
-        "type": "message_batch",
-        "archived_at": metadata.get("archived_at"),
-        "cancel_initiated_at": metadata.get("cancel_initiated_at"),
-        "created_at": _rfc3339_from_timestamp(created_at),
-        "ended_at": (
-            _rfc3339_from_timestamp(getattr(batch, "updated_at", None))
-            if processing_status == "ended"
-            else None
-        ),
-        "expires_at": expires_at,
-        "processing_status": processing_status,
-        "request_counts": _build_anthropic_batch_request_counts(batch, metadata),
-        "results_url": results_url,
-    }
-
-
-def _build_anthropic_batch_error(error: Any, request_id: str) -> Dict:
+def _build_anthropic_batch_error(error, request_id: str) -> dict:
     """Normalize a batch error payload to Anthropic's error response schema."""
     if (
         isinstance(error, dict)
@@ -152,104 +83,34 @@ def _build_anthropic_batch_error(error: Any, request_id: str) -> Dict:
     }
 
 
-def _paginate_anthropic_batches(
-    items: List[Dict[str, Any]],
-    *,
-    after_id: Optional[str],
-    before_id: Optional[str],
-    limit: int,
-) -> tuple[List[Dict[str, Any]], bool]:
-    """Apply Anthropic-style cursor pagination to batch listings."""
-    if after_id:
-        for index, item in enumerate(items):
-            if item.get("id") == after_id:
-                items = items[index + 1 :]
-                break
-
-    if before_id:
-        for index, item in enumerate(items):
-            if item.get("id") == before_id:
-                items = items[:index]
-                break
-
-    return items[:limit], len(items) > limit
-
-
-def _build_anthropic_batch_results(
-    output_content_b64: str,
-    batch_metadata: Dict[str, Any],
-) -> bytes:
-    """Transform a GigaChat batch output file into Anthropic batch results JSONL."""
-    output_rows = parse_jsonl(base64.b64decode(output_content_b64))
-    requests_by_id = {
-        row.get("custom_id"): row.get("params", {})
-        for row in batch_metadata.get("requests", [])
-        if isinstance(row, dict) and row.get("custom_id")
+def batch_object(request: Request, resource):
+    m = resource.metadata
+    ended = m["status"] in TERMINAL
+    succeeded = sum("result" in row for row in m["results"])
+    errored = sum("error" in row for row in m["results"])
+    expired = sum(row.get("expired", False) for row in m["results"])
+    prefix = request.url.path.split("/messages/batches", 1)[0]
+    return {
+        "id": resource.public_id,
+        "type": "message_batch",
+        "archived_at": None,
+        "cancel_initiated_at": None,
+        "created_at": _rfc3339_from_timestamp(m["created_at"]),
+        "ended_at": _rfc3339_from_timestamp(m.get("ended_at")),
+        "expires_at": _rfc3339_from_timestamp(m["deadline"]),
+        "processing_status": "ended" if ended else "in_progress",
+        "request_counts": {
+            "canceled": 0,
+            "errored": errored,
+            "expired": expired,
+            "processing": len(m["rows"]) - succeeded - errored - expired,
+            "succeeded": succeeded,
+        },
+        "results_url": str(request.base_url).rstrip("/")
+        + f"{prefix}/messages/batches/{resource.public_id}/results"
+        if ended
+        else None,
     }
-
-    result_lines = []
-    for index, row in enumerate(output_rows):
-        custom_id = row.get("custom_id") or row.get("id") or f"batch-request-{index}"
-        request_id = str(row.get("request_id") or row.get("id") or custom_id)
-        response = row.get("response")
-        status_code = 200
-        if isinstance(response, dict):
-            status_code = int(response.get("status_code", 200))
-
-        raw_body = extract_batch_result_body(row)
-        error = row.get("error")
-        if status_code >= 400 or (
-            error
-            and "result" not in row
-            and "response" not in row
-            and "body" not in row
-        ):
-            anthropic_result = {
-                "type": "errored",
-                "error": _build_anthropic_batch_error(error or raw_body, request_id),
-            }
-        else:
-            params = requests_by_id.get(custom_id, {})
-            message_payload = raw_body
-            if not isinstance(message_payload, dict):
-                message_payload = {
-                    "choices": [
-                        {
-                            "message": {"content": str(raw_body)},
-                            "finish_reason": "stop",
-                        }
-                    ],
-                    "usage": {},
-                }
-
-            if (
-                isinstance(message_payload, dict)
-                and message_payload.get("type") == "message"
-            ):
-                anthropic_message = message_payload
-            else:
-                anthropic_message = _build_anthropic_response(
-                    message_payload,
-                    params.get("model", "unknown"),
-                    request_id,
-                )
-
-            anthropic_result = {
-                "type": "succeeded",
-                "message": anthropic_message,
-            }
-
-        result_lines.append(
-            json.dumps(
-                {
-                    "custom_id": custom_id,
-                    "result": anthropic_result,
-                },
-                ensure_ascii=False,
-            )
-        )
-
-    return ("\n".join(result_lines) + ("\n" if result_lines else "")).encode("utf-8")
 
 
 @router.post(
@@ -257,282 +118,132 @@ def _build_anthropic_batch_results(
 )
 @exceptions_handler
 async def create_message_batch(request: Request):
-    """Anthropic Message Batches API compatible create endpoint."""
     data = await read_request_json(request)
-    request_options = extract_gigachat_request_options(
-        request, data, include_extra_body=True
-    )
-    completion_window = data.get("completion_window", "24h")
-    if completion_window is None:
-        completion_window = "24h"
-    if completion_window != "24h":
-        return _anthropic_http_exception(
-            400,
-            "invalid_request_error",
-            'Only `completion_window="24h"` is supported.',
-        )
-    requests_data = data.get("requests")
-    if not isinstance(requests_data, list) or not requests_data:
-        return _anthropic_http_exception(
-            400,
-            "invalid_request_error",
-            "`requests` must be a non-empty array.",
-        )
-
-    seen_custom_ids = set()
-    openai_rows = []
-    stored_requests = []
-    for index, batch_request in enumerate(requests_data, start=1):
-        if not isinstance(batch_request, dict):
-            return _anthropic_http_exception(
-                400,
-                "invalid_request_error",
-                f"`requests[{index - 1}]` must be an object.",
+    if data.get("completion_window") not in {None, "24h"}:
+        raise batch_error("Only completion_window=24h is supported.")
+    inputs = data.get("requests")
+    if not isinstance(inputs, list) or not inputs:
+        raise batch_error("requests must be a non-empty array.")
+    rows = []
+    for row in inputs:
+        if not isinstance(row, dict) or not isinstance(row.get("params"), dict):
+            raise batch_error("Each request must contain params.")
+        custom_id = row.get("custom_id")
+        if not isinstance(custom_id, str) or not re.fullmatch(
+            r"[a-zA-Z0-9_-]{1,64}", custom_id
+        ):
+            raise batch_error(
+                "custom_id must contain 1–64 letters, digits, hyphens or underscores."
             )
-
-        custom_id = batch_request.get("custom_id")
-        params = batch_request.get("params")
-        if not isinstance(custom_id, str) or not custom_id:
-            return _anthropic_http_exception(
-                400,
-                "invalid_request_error",
-                f"`requests[{index - 1}].custom_id` must be a non-empty string.",
-            )
-        if custom_id in seen_custom_ids:
-            return _anthropic_http_exception(
-                400,
-                "invalid_request_error",
-                f"Duplicate `custom_id` detected: `{custom_id}`.",
-            )
-        if not isinstance(params, dict):
-            return _anthropic_http_exception(
-                400,
-                "invalid_request_error",
-                f"`requests[{index - 1}].params` must be an object.",
-            )
-        if params.get("stream"):
-            return _anthropic_http_exception(
-                400,
-                "invalid_request_error",
-                "Streaming requests are not supported inside message batches.",
-            )
-
-        seen_custom_ids.add(custom_id)
-        openai_rows.append(
+        params = row["params"]
+        validate_anthropic_version(params, request.headers.get("anthropic-version"))
+        validate_batch_body(params)
+        rows.append(
             {
                 "custom_id": custom_id,
                 "method": "POST",
                 "url": "/v1/chat/completions",
                 "body": _build_openai_data_from_anthropic_request(
-                    params,
-                    request.app.state.logger,
+                    params, request.app.state.logger
                 ),
             }
         )
-        stored_requests.append({"custom_id": custom_id, "params": params})
-
-    target = get_batch_target("/v1/chat/completions")
-    raw_input = (
-        "\n".join(json.dumps(row, ensure_ascii=False) for row in openai_rows) + "\n"
-    ).encode("utf-8")
-    giga_client = get_gigachat_client(request)
-    proxy_settings = request.app.state.config.proxy_settings
-    async with gigachat_request_options(
-        giga_client, request_options, include_body=False
-    ) as request_client:
-        transformed_content = await transform_batch_input_file(
-            raw_input,
-            target=target,
-            request_transformer=request.app.state.request_transformer,
-            giga_client=request_client,
-            embeddings_model=proxy_settings.embeddings,
-            pass_model=proxy_settings.pass_model,
-        )
-    async with gigachat_request_options(
-        giga_client, request_options, include_body=False
-    ) as request_client:
-        batch = await request_client.acreate_batch(
-            transformed_content,
-            method=target.method,
-        )
-
-    metadata = {
-        "api_format": "anthropic_messages",
-        "completion_window": completion_window,
-        "requests": stored_requests,
-        "output_file_id": batch.output_file_id,
-    }
-    get_batch_store(request)[batch.id_] = metadata
-    if batch.output_file_id:
-        get_file_store(request)[batch.output_file_id] = {"purpose": "batch_output"}
-    return _build_anthropic_batch_object(batch, metadata)
+    native_rows, model = await prepare_rows(request, rows, "/v1/chat/completions")
+    for native, original in zip(native_rows, inputs):
+        native["original"] = original["params"]
+    resource = await submit_batch(
+        request,
+        protocol="anthropic",
+        method="chat_completions",
+        model=model,
+        rows=native_rows,
+    )
+    return batch_object(request, resource)
 
 
 @router.get("/messages/batches")
 @exceptions_handler
 async def list_message_batches(
     request: Request,
-    after_id: Optional[str] = Query(default=None),
-    before_id: Optional[str] = Query(default=None),
-    limit: int = Query(default=20, ge=1, le=1000),
+    after_id: str | None = None,
+    before_id: str | None = None,
+    limit: int = Query(20, ge=1, le=1000),
 ):
-    """Anthropic Message Batches API compatible list endpoint."""
-    giga_client = get_gigachat_client(request)
-    request_options = extract_gigachat_request_options(
-        request, exclude_query_params=("after_id", "before_id", "limit")
-    )
-    batch_store = get_batch_store(request)
-    file_store = get_file_store(request)
-    async with gigachat_request_options(
-        giga_client, request_options, include_body=False
-    ) as request_client:
-        batches = await request_client.aget_batches()
-
-    data = []
-    sorted_batches = sorted(
-        batches.batches,
-        key=lambda batch: getattr(batch, "created_at", 0),
-        reverse=True,
-    )
-    for batch in sorted_batches:
-        metadata = batch_store.get(batch.id_)
-        if not metadata or metadata.get("api_format") != "anthropic_messages":
-            continue
-        metadata["output_file_id"] = batch.output_file_id
-        batch_store[batch.id_] = metadata
-        if batch.output_file_id:
-            file_store[batch.output_file_id] = {"purpose": "batch_output"}
-        data.append(_build_anthropic_batch_object(batch, metadata))
-
-    paged, has_more = _paginate_anthropic_batches(
-        data,
-        after_id=after_id,
-        before_id=before_id,
-        limit=limit,
-    )
+    resources = await registered_batches(request, "anthropic")
+    for cursor, before in ((after_id, False), (before_id, True)):
+        if cursor:
+            matches = [i for i, r in enumerate(resources) if r.public_id == cursor]
+            if not matches:
+                raise batch_error("Invalid batch cursor.")
+            resources = (
+                resources[: matches[0]] if before else resources[matches[0] + 1 :]
+            )
+    data = [batch_object(request, r) for r in resources[:limit]]
     return {
-        "data": paged,
-        "has_more": has_more,
-        "first_id": paged[0]["id"] if paged else None,
-        "last_id": paged[-1]["id"] if paged else None,
+        "data": data,
+        "has_more": len(resources) > limit,
+        "first_id": data[0]["id"] if data else None,
+        "last_id": data[-1]["id"] if data else None,
     }
 
 
 @router.get("/messages/batches/{message_batch_id}")
 @exceptions_handler
 async def retrieve_message_batch(message_batch_id: str, request: Request):
-    """Anthropic Message Batches API compatible retrieve endpoint."""
-    batch_store = get_batch_store(request)
-    metadata = batch_store.get(message_batch_id)
-    if not metadata or metadata.get("api_format") != "anthropic_messages":
-        return _anthropic_http_exception(
-            404,
-            "not_found_error",
-            f"Message batch `{message_batch_id}` not found.",
-        )
-
-    giga_client = get_gigachat_client(request)
-    request_options = extract_gigachat_request_options(request)
-    async with gigachat_request_options(
-        giga_client, request_options, include_body=False
-    ) as request_client:
-        batches = await request_client.aget_batches(batch_id=message_batch_id)
-    if not batches.batches:
-        return _anthropic_http_exception(
-            404,
-            "not_found_error",
-            f"Message batch `{message_batch_id}` not found.",
-        )
-
-    batch = batches.batches[0]
-    metadata["output_file_id"] = batch.output_file_id
-    batch_store[message_batch_id] = metadata
-    if batch.output_file_id:
-        get_file_store(request)[batch.output_file_id] = {"purpose": "batch_output"}
-    return _build_anthropic_batch_object(batch, metadata)
-
-
-@router.post("/messages/batches/{message_batch_id}/cancel")
-@exceptions_handler
-async def cancel_message_batch(message_batch_id: str, request: Request):
-    """Surface the unsupported cancel capability with an Anthropic-style error."""
-    batch_store = get_batch_store(request)
-    metadata = batch_store.get(message_batch_id)
-    if not metadata or metadata.get("api_format") != "anthropic_messages":
-        return _anthropic_http_exception(
-            404,
-            "not_found_error",
-            f"Message batch `{message_batch_id}` not found.",
-        )
-    return _anthropic_http_exception(
-        501,
-        "api_error",
-        "Message batch cancellation is not supported by the configured GigaChat backend.",
+    return batch_object(
+        request, await poll_batch(request, message_batch_id, "anthropic")
     )
 
 
+@router.post("/messages/batches/{message_batch_id}/cancel")
 @router.delete("/messages/batches/{message_batch_id}")
 @exceptions_handler
-async def delete_message_batch(message_batch_id: str, request: Request):
-    """Surface the unsupported delete capability with an Anthropic-style error."""
-    batch_store = get_batch_store(request)
-    metadata = batch_store.get(message_batch_id)
-    if not metadata or metadata.get("api_format") != "anthropic_messages":
-        return _anthropic_http_exception(
-            404,
-            "not_found_error",
-            f"Message batch `{message_batch_id}` not found.",
-        )
-    return _anthropic_http_exception(
-        501,
-        "api_error",
-        "Message batch deletion is not supported by the configured GigaChat backend.",
+async def unsupported_message_batch_operation(message_batch_id: str, request: Request):
+    await get_batch(request, message_batch_id, "anthropic")
+    raise batch_error(
+        "The GigaChat backend does not support batch cancellation or deletion.", 501
     )
 
 
 @router.get("/messages/batches/{message_batch_id}/results")
 @exceptions_handler
 async def get_message_batch_results(message_batch_id: str, request: Request):
-    """Anthropic Message Batches API compatible results endpoint."""
-    batch_store = get_batch_store(request)
-    metadata = batch_store.get(message_batch_id)
-    if not metadata or metadata.get("api_format") != "anthropic_messages":
-        return _anthropic_http_exception(
-            404,
-            "not_found_error",
-            f"Message batch `{message_batch_id}` not found.",
+    resource = await poll_batch(request, message_batch_id, "anthropic")
+    if resource.metadata["status"] not in TERMINAL:
+        raise batch_error("Results are not available while processing.", 409)
+    file_id = resource.metadata.get("results_file_id")
+    if file_id is None:
+        originals = {row["id"]: row["original"] for row in resource.metadata["rows"]}
+        rows = []
+        for item in resource.metadata["results"]:
+            key = item["id"]
+            if item.get("expired"):
+                result = {"type": "expired"}
+            elif "error" in item:
+                result = {
+                    "type": "errored",
+                    "error": _build_anthropic_batch_error(item["error"], key),
+                }
+            else:
+                result = {
+                    "type": "succeeded",
+                    "message": _build_anthropic_response(
+                        item["result"],
+                        originals[key].get("model", resource.metadata["model"]),
+                        item.get("request_id", key),
+                    ),
+                }
+            rows.append({"custom_id": key, "result": result})
+        content = (
+            "\n".join(json.dumps(row, ensure_ascii=False) for row in rows) + "\n"
+        ).encode()
+        file_id = await result_file(request, resource, "results", content)
+        await get_resource_store(request).update(
+            batch_owner(request, resource),
+            "batch",
+            message_batch_id,
+            {"results_file_id": file_id},
         )
-
-    giga_client = get_gigachat_client(request)
-    request_options = extract_gigachat_request_options(request)
-    async with gigachat_request_options(
-        giga_client, request_options, include_body=False
-    ) as request_client:
-        batches = await request_client.aget_batches(batch_id=message_batch_id)
-    if not batches.batches:
-        return _anthropic_http_exception(
-            404,
-            "not_found_error",
-            f"Message batch `{message_batch_id}` not found.",
-        )
-
-    batch = batches.batches[0]
-    metadata["output_file_id"] = batch.output_file_id
-    batch_store[message_batch_id] = metadata
-    if getattr(batch, "status", None) != "completed" or not batch.output_file_id:
-        return _anthropic_http_exception(
-            409,
-            "invalid_request_error",
-            "Results are not available until message batch processing has ended.",
-        )
-
-    async with gigachat_request_options(
-        giga_client, request_options, include_body=False
-    ) as request_client:
-        file_response = await request_client.aget_file_content(
-            file_id=batch.output_file_id
-        )
-    content = _build_anthropic_batch_results(
-        base64.b64encode(file_response).decode("ascii"), metadata
+    return Response(
+        await file_content(request, file_id), media_type="application/x-jsonlines"
     )
-    return Response(content=content, media_type="application/binary")

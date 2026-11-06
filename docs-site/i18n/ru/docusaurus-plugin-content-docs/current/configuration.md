@@ -675,3 +675,15 @@ contexts сохраняют семантику. Bundled trust объединяе
 API mTLS certificate, загруженный factory, не отправляется в OAuth.
 `auth_ssl_context` задаёт отдельную OAuth trust policy. Request credentials
 не наследуют server auth fields.
+
+## Хранилище ресурсов
+
+Files, сессии загрузки и batch mappings используют общий SQLite и ограниченный каталог blobs. `GPT2GIGA_RESOURCE_STORE_PATH` по умолчанию равен `var/resources` относительно рабочего каталога. Workers должны использовать один persistent-каталог, включая секрет namespace в `resources.sqlite3`. Недоступный путь останавливает startup; перехода на словарь в памяти нет. SQLite рассчитан на workers с общим локальным диском, а не независимые узлы на произвольной сетевой файловой системе.
+
+`GPT2GIGA_RESOURCE_RETENTION_SECONDS` по умолчанию равен 2592000 (30 дней). Просроченные metadata/blobs очищаются при startup и создании ресурсов, а чтение запрещается сразу после срока. Retention не равен batch delivery deadline и не удаляет upstream documents. Лимиты локальных blobs: `GPT2GIGA_RESOURCE_MAX_BLOB_BYTES=104857600` на файл и `GPT2GIGA_RESOURCE_MAX_TOTAL_BLOB_BYTES=1073741824` суммарно. Каталог содержит контент файлов/результатов и должен быть приватным.
+
+Namespace определяется стабильным HMAC от настроенной аутентифицированной identity, provider profile и credential context. Сырые credentials в ключах не сохраняются. Anonymous local mode имеет один общий namespace; общий gateway API key также идентифицирует один namespace. Opaque pass-through token задаёт credential-scoped namespace: ротация token меняет его. `GPT2GIGA_RESOURCE_TRUSTED_IDENTITY` — доверенная настройка deployment, не HTTP header; она не отменяет разделение по upstream credentials/profile. Резервная копия должна включать БД, её секрет и blobs вместе.
+
+`GPT2GIGA_RESPONSES_STORAGE_MODE=native|gateway` по умолчанию равен `native`. Режим `gateway` включает owner-scoped immutable снимки Responses и Conversations в общем resource store с его retention policy. См. [Хранение ответов](response-storage.md).
+
+После удаления/истечения срока остаётся только небольшой маркер kind/ID без владельца и контента. Он не позволяет ранее зарегистрированным upstream IDs обходить ownership через fallback для старых файлов.

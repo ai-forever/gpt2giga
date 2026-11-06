@@ -97,7 +97,9 @@ async def _embed_texts(
                 texts=transformed["input"],
                 model=effective_model,
             )
-    result = normalize_embedding_response(response, model=effective_model)
+    result = normalize_embedding_response(
+        response, model=effective_model, expected_count=len(texts)
+    )
     await emit_openai_embeddings_observability(
         request.app.state,
         _normalized_embedding_request(
@@ -132,13 +134,10 @@ def _openai_embedding_to_gemini(
     *,
     index: int,
 ) -> dict[str, Any]:
-    data = response.get("data")
-    item = data[index] if isinstance(data, list) and index < len(data) else {}
+    item = response["data"][index]
     usage = response.get("usage") if isinstance(response.get("usage"), dict) else {}
     return {
-        "embedding": {
-            "values": item.get("embedding", []) if isinstance(item, dict) else []
-        },
+        "embedding": {"values": item["embedding"]},
         "usageMetadata": {
             "promptTokenCount": usage.get("prompt_tokens"),
             "totalTokenCount": usage.get("total_tokens"),

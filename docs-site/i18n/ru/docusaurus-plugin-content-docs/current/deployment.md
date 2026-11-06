@@ -280,3 +280,7 @@ curl --fail -H "Authorization: Bearer <proxy-api-key>" http://127.0.0.1:8090/v1/
 - Держите захват содержимого выключенным, пока не утверждены политики маскирования, срока хранения и доступа.
 - Используйте сетевую изоляцию вокруг прокси и бэкендов хранилища.
 - Мониторьте `/health`, `/ping` и (опционально) `/metrics`.
+
+## Persistent volume ресурсов
+
+`deploy/base.yaml` подключает named volume `gpt2giga-resources` к `/app/var/resources` и задаёт этот путь в `GPT2GIGA_RESOURCE_STORE_PATH`. Сохраняйте volume при замене контейнеров. В собственном deployment подключите доступный для записи persistent-каталог к настроенному пути и используйте его для всех workers шлюза. Volume содержит metadata, секрет namespace, сессии загрузки и локальные результаты. Удаление volume теряет mappings и меняет namespaces; upstream files/jobs автоматически не удаляются.

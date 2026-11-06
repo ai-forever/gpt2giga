@@ -74,7 +74,7 @@ def test_openapi_anthropic_documents_client_parameter_policy():
     assert "are accepted but ignored" in _request_body_description(messages_extra)
 
 
-def test_openapi_anthropic_documents_count_tokens_and_disabled_batches_policy():
+def test_openapi_anthropic_documents_count_tokens_and_batch_deadline_policy():
     count_extra = anthropic_count_tokens_openapi_extra()
     count_properties = _full_schema(count_extra)["properties"]
     batches_extra = anthropic_message_batches_openapi_extra()
@@ -83,6 +83,4 @@ def test_openapi_anthropic_documents_count_tokens_and_disabled_batches_policy():
     assert "Generation-only options and `extra_body` are accepted but ignored" in (
         _request_body_description(count_extra)
     )
-    assert "default public Anthropic router omits batch routes" in (
-        _request_body_description(batches_extra)
-    )
+    assert "gateway result-acceptance" in (_request_body_description(batches_extra))

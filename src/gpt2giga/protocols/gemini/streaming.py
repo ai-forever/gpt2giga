@@ -5,6 +5,10 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from gpt2giga.common.gemini_errors import (
+    gemini_error_payload,
+    gemini_stream_error_status,
+)
 from gpt2giga.protocols.gemini.response_adapter import _usage_to_gemini
 from gpt2giga.protocols.normalized import NormalizedStreamEvent, NormalizedToolCall
 
@@ -132,14 +136,12 @@ def normalized_stream_event_to_gemini_chunk(
             if isinstance(request_id, str) and request_id
             else {}
         )
-        return {
-            "error": {
-                "code": error.code if error else "stream_error",
-                "message": error.message if error else "Stream interrupted",
-                "status": error.type if error else "stream_error",
-                **diagnostics,
-            }
-        }
+        payload = gemini_error_payload(
+            error.message if error else "Stream interrupted",
+            gemini_stream_error_status(error),
+        )
+        payload["error"].update(diagnostics)
+        return payload
     if event.type == "usage":
         return _base_chunk(
             event,

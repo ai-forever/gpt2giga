@@ -49,7 +49,12 @@ class FakeGigachat:
         return gen()
 
     async def aembeddings(self, texts, model):
-        return {"data": [{"embedding": [0.1, 0.2], "index": 0}], "model": model}
+        return {
+            "data": [
+                {"embedding": [0.1, 0.2], "index": index} for index in range(len(texts))
+            ],
+            "model": model,
+        }
 
 
 class FakeGigachatReasoning:
@@ -210,7 +215,7 @@ def test_embeddings_emits_embeddings_observability_span():
     assert attributes["gpt2giga.api_format"] == "embeddings"
     assert attributes["embedding.model_name"] == "Embeddings-2"
     assert attributes["embedding.input.count"] == 2
-    assert attributes["embedding.output.count"] == 1
+    assert attributes["embedding.output.count"] == 2
     assert attributes["embedding.dimensions"] == 1024
     assert attributes["embedding.encoding_format"] == "base64"
     assert attributes["llm.operation"] == "embeddings"

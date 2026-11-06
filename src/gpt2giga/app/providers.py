@@ -239,6 +239,7 @@ class BridgeProviderRuntime:
         *,
         api_mode: Literal["v1", "v2"],
         public_protocol: PublicProtocol = PublicProtocol.OPENAI_RESPONSES,
+        provider_capabilities: Mapping[str, Any] | None = None,
     ) -> Any:
         """Admit and return the exact startup-owned adapter for one request."""
         route = self.registry.resolve(request.model)
@@ -247,12 +248,20 @@ class BridgeProviderRuntime:
         capability_predicate_reasons: Mapping[str, str] = {}
         capability_metadata: dict[str, str] = {}
         if route.provider_kind is ProviderKind.GIGACHAT:
+            declared = self.registry.model_alias_for(route).capabilities
+            provider_capabilities = dict(provider_capabilities or {})
+            if (
+                declared is not None
+                and BridgeFeature.PARALLEL_TOOL_CALLS in declared.features
+            ):
+                provider_capabilities[CapabilityKey.PARALLEL_TOOL_CALLS] = True
             effective = resolve_gigachat_route_capabilities(
                 model_id=route.upstream_model,
                 public_protocol=public_protocol.value,
                 api_mode=api_mode,
                 route_id=route.profile_id,
                 builtin_tools_enabled=True,
+                provider_capabilities=provider_capabilities,
             )
             predicate_admission = capability_predicates_for_semantics(
                 effective,

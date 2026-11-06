@@ -763,6 +763,7 @@ async def stream_responses_generator(
     fc_id = f"fc_{response_id}"  # ID for function call item
     response_metadata: dict[str, str] = {}
     incomplete_reason: str | None = None
+    upstream_terminal = False
 
     def build_reasoning_config() -> dict:
         reasoning_data = request_data.get("reasoning") if request_data else None
@@ -1226,7 +1227,7 @@ async def stream_responses_generator(
 
         async def emit_upstream_events() -> AsyncGenerator[str, None]:
             nonlocal final_usage, full_text, functions_state_id
-            nonlocal incomplete_reason
+            nonlocal incomplete_reason, upstream_terminal
             nonlocal output_item_added, raw_full_text, reasoning_text
             nonlocal sequence_number, source_rendering_enabled, text_output_index
             async with gigachat_request_options(
@@ -1273,6 +1274,8 @@ async def stream_responses_generator(
                             )
                         choice = giga_dict["choices"][0]
                         finish_reason = choice.get("finish_reason")
+                        if finish_reason is not None:
+                            upstream_terminal = True
                         if finish_reason in {"length", "max_tokens"}:
                             incomplete_reason = "max_output_tokens"
                         elif finish_reason == "content_filter":
@@ -1468,6 +1471,21 @@ async def stream_responses_generator(
                 async with closing_stream(emit_upstream_events()) as _delegated_stream:
                     async for event in _delegated_stream:
                         yield event
+
+        if (
+            getattr(getattr(request, "state", None), "gateway_snapshot", False)
+            and not upstream_terminal
+        ):
+            yield sse_event(
+                "error",
+                {
+                    "type": "error",
+                    "code": "invalid_upstream_response",
+                    "message": "Upstream stream ended without a terminal result.",
+                    "sequence_number": sequence_number,
+                },
+            )
+            return
 
         flushed_reasoning = reasoning_parser.flush()
         if flushed_reasoning.content:

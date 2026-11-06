@@ -55,3 +55,7 @@ GigaChat-specific built-in tools в `tools/gigachat_tools/` оставлены �
 прокси. Сохраните `response.id` на клиенте: `GET /responses/{id}` не реализован.
 В v1 `store=true` и `previous_response_id` возвращают 400. Отсутствие `store`
 отображается как `false`; неуказанные `temperature` и `top_p` — как `null`.
+
+## Resource additions
+
+`basic/input_tokens.py` estimates text without generation. `storage/snapshots.py` demonstrates retrieve/input_items/delete and Conversations with `GPT2GIGA_RESPONSES_STORAGE_MODE=gateway`. Native mode retains thread continuation semantics. Gateway snapshots support textual/function items; storage uses the shared persistent resource path.

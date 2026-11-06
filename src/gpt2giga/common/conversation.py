@@ -163,7 +163,7 @@ async def stitch_responses_payload(
     mode: Literal["v1", "v2"],
 ) -> ConversationTurn | None:
     """Apply local conversation history to an OpenAI Responses v1 payload."""
-    if mode != "v1":
+    if mode != "v1" or getattr(request.state, "gateway_snapshot", False):
         return None
 
     settings = _settings(request)

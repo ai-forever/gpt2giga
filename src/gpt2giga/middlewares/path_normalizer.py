@@ -13,6 +13,8 @@ class PathNormalizationMiddleware:
         self.valid_roots = valid_roots or [
             "v1",
             "v2",
+            "v1beta",
+            "upload",
             "chat",
             "models",
             "embeddings",

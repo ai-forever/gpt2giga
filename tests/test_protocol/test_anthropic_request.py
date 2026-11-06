@@ -381,7 +381,6 @@ def test_build_openai_data_from_anthropic_request_keeps_function_tools():
 @pytest.mark.parametrize(
     "block_type",
     [
-        "document",
         "file",
         "thinking",
         "redacted_thinking",
@@ -429,7 +428,7 @@ def test_build_openai_data_from_anthropic_request_ignores_text_citations():
     assert openai_data["messages"] == [{"role": "user", "content": "quoted"}]
 
 
-def test_build_openai_data_from_anthropic_request_ignores_image_file_source():
+def test_build_openai_data_from_anthropic_request_preserves_image_file_source():
     data = {
         "model": "claude-x",
         "messages": [
@@ -447,7 +446,9 @@ def test_build_openai_data_from_anthropic_request_ignores_image_file_source():
 
     openai_data = _build_openai_data_from_anthropic_request(data, logger)
 
-    assert openai_data["messages"] == [{"role": "user", "content": ""}]
+    assert openai_data["messages"] == [
+        {"role": "user", "content": "", "attachments": ["file_123"]}
+    ]
 
 
 def test_build_openai_data_from_anthropic_request_ignores_nested_tool_result_blocks():

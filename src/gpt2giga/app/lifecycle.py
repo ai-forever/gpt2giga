@@ -21,6 +21,7 @@ from gpt2giga.providers.profiles.static_catalog import (
     STATIC_REGISTRY_PROFILE_ID,
     static_registry_catalog_snapshot,
 )
+from gpt2giga.storage.resources import ResourceStore
 from gpt2giga.sinks.logs.factory import create_traffic_log_sink, flush_traffic_log_sink
 from gpt2giga.sinks.logs.query import (
     close_traffic_log_query_store,
@@ -106,6 +107,13 @@ async def lifespan(app: FastAPI):
         log_level=config.proxy_settings.log_level,
     )
     try:
+        app.state.resource_store = await ResourceStore.open(
+            config.proxy_settings.resource_store_path,
+            retention_seconds=config.proxy_settings.resource_retention_seconds,
+            max_blob_bytes=config.proxy_settings.resource_max_blob_bytes,
+            max_total_blob_bytes=config.proxy_settings.resource_max_total_blob_bytes,
+        )
+        await app.state.resource_store.purge_expired()
         app.state.bridge_provider_runtime = BridgeProviderRuntime(app.state)
     except BaseException:
         app.state.bridge_shutting_down = True
@@ -160,3 +168,6 @@ async def _close_runtime_dependencies(
     if gigachat_pool is not None:
         await gigachat_pool.aclose()
     await attachment_processor.close()
+    resource_store = getattr(app.state, "resource_store", None)
+    if resource_store is not None:
+        await resource_store.aclose()

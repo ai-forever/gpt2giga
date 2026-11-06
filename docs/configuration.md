@@ -673,3 +673,15 @@ and SSL contexts keep their semantics. Bundled trust combines certifi and the
 Russian root; factory-loaded API mTLS certificates are not sent to OAuth. Explicit
 `auth_ssl_context` controls OAuth trust separately. Request credentials do not
 inherit server auth fields.
+
+## Resource storage
+
+Files, upload sessions and batch mappings share a SQLite store and bounded blob directory. `GPT2GIGA_RESOURCE_STORE_PATH` defaults to `var/resources`, relative to the working directory. All workers must use the same persistent directory, including its namespace secret in `resources.sqlite3`. An unavailable configured path fails startup; there is no in-memory fallback. SQLite is intended for workers sharing a local filesystem, not independent hosts on an arbitrary network filesystem.
+
+`GPT2GIGA_RESOURCE_RETENTION_SECONDS` defaults to 2592000 (30 days). Expired metadata and local blobs are purged on startup and resource creation; expired records are inaccessible immediately. This retention is independent of batch delivery deadlines and does not delete upstream documents. Local blobs are limited by `GPT2GIGA_RESOURCE_MAX_BLOB_BYTES` (104857600) and `GPT2GIGA_RESOURCE_MAX_TOTAL_BLOB_BYTES` (1073741824). Keep the directory private: it contains uploaded/result content, not traffic logs.
+
+Ownership uses a persistent HMAC over the configured authenticated identity, provider profile and credential context. No raw credentials are written into resource keys. Anonymous local mode has one shared namespace; a shared gateway API key also identifies one namespace. Opaque pass-through tokens are credential-scoped: rotating a token changes the namespace. `GPT2GIGA_RESOURCE_TRUSTED_IDENTITY` is a deployment-controlled identity label, never an unverified HTTP header; it does not remove separation by upstream credential/profile. Back up the database, its secret, and blobs together.
+
+`GPT2GIGA_RESPONSES_STORAGE_MODE=native|gateway` defaults to `native`. Select `gateway` for owner-scoped immutable Responses snapshots and Conversations over the same resource store and retention policy. See [Response storage](response-storage.md).
+
+After deletion or expiry, the store retains only a small kind/ID registration marker. It contains no owner or content and prevents old upstream IDs from bypassing ownership through the legacy-file fallback.

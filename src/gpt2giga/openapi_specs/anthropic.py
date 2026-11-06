@@ -437,9 +437,10 @@ def anthropic_message_batches_openapi_extra() -> Dict[str, Any]:
         "Messages API `params` object.\n"
         "- Batch items are translated to the OpenAI-compatible batch pipeline before "
         "submission to GigaChat.\n"
-        "- This schema is used only when the batches router is mounted; the default "
-        "public Anthropic router omits batch routes until GigaChat SDK batch support "
-        "is available."
+        "- Public create/list/retrieve/results routes use native GigaChat batch jobs. "
+        "Cancel/delete are unsupported. `expires_at` is a gateway result-acceptance "
+        "deadline: first polling after 24h expires unresolved items even if the "
+        "backend finished earlier. Jobs can continue and be billed after expiry."
     )
     return _request_body_oneof(
         minimal_schema=minimal_schema,

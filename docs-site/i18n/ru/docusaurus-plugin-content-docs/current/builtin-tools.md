@@ -155,3 +155,5 @@ GigaChat `ChatToolConfig(mode="tool", tool_name="<canonical tool>")`.
 4. Добавить тесты сборщика запросов и адаптера.
 5. Обновить этот документ, а также `api-compatibility.md` и
    `client-parameter-compatibility.md`, если меняется публичное поведение.
+
+Параллельные вызовы функций поддерживает GigaChat-3-Ultra через API v2 (`model_options.parallel_tool_calls`). GigaChat-2-Max не объявляет эту возможность без явных проверенных provider/profile metadata. Возможности неизвестных моделей остаются unknown. Источник: [GigaChat chat API](https://developers.sber.ru/docs/ru/gigachat/api/reference/rest/post-chat).

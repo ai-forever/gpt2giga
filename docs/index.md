@@ -21,6 +21,7 @@ http://localhost:8090
 | Supported OpenAI, Anthropic, Gemini, and LiteLLM routes | [API compatibility](api-compatibility.md) |
 | Behavior of `extra_headers`, `extra_query`, `extra_body`, and optional fields | [Client parameters](client-parameter-compatibility.md) |
 | GigaChat built-in tools and their mapping to OpenAI/Anthropic/Gemini | [Built-in tools](builtin-tools.md) |
+| Image generation and native token/function/balance/AI-check utilities | [Native utilities](native-utilities.md) |
 | Environment variables, authentication, limits, metrics, observability | [Configuration](configuration.md) |
 | Compose profiles, Traefik, nginx, Postgres, OpenSearch, Phoenix | [Deployment](deployment.md) |
 | Runtime logs, traffic logs, admin API, debug translate | [Operations](operations.md) |
@@ -42,7 +43,6 @@ Gemini-compatible routes: `/v1/...` always sends chat-like requests to the
 GigaChat v1 contract, `/v2/...` sends them to the GigaChat v2 contract, and the
 root path without `/v1` or `/v2` uses `GPT2GIGA_GIGACHAT_API_MODE=v1|v2`.
 
-OpenAI Files/Batches, Anthropic Message Batches, and Gemini Files/Batches are prepared in the code but intentionally not mounted until end-to-end execution is available in the upstream SDK/backend.
 
 ## Fast path
 
@@ -58,3 +58,5 @@ OpenAI Files/Batches, Anthropic Message Batches, and Gemini Files/Batches are pr
   versioned internal bridge and its fail-closed semantic-loss contract.
 - [Logging and observability](architecture/logging-and-observability.md) sets the boundaries between runtime logs, traffic logs, metrics, and traces.
 - [Adding a provider or protocol](architecture/how-to-add-provider.md) gives a checklist for extending the public protocol surface and upstream providers.
+
+[Resource APIs](resource-apis.md) · [Gemini resources](gemini-resources.md) · [Response storage](response-storage.md)

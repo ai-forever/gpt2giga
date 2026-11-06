@@ -1,6 +1,10 @@
 """Tests for Anthropic Messages API router."""
 
 import json
+import asyncio
+import sys
+
+import pytest
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -24,7 +28,7 @@ from gpt2giga.protocol.anthropic.response import (
 )
 from gpt2giga.protocols.openai import OpenAIProtocolAdapter
 from gpt2giga.routers.anthropic import router
-from gpt2giga.routers.anthropic.batches import router as message_batches_router
+from gpt2giga.storage.resources import ResourceStore
 
 
 # ---------------------------------------------------------------------------
@@ -426,6 +430,9 @@ class FakeGigachatBatches(FakeGigachat):
         self.last_batch_content = None
         self.last_batch_method = None
 
+    def with_options(self, **kwargs):
+        return self
+
     async def acreate_batch(self, file, method):
         self.last_batch_content = file
         self.last_batch_method = method
@@ -477,7 +484,7 @@ class FakeGigachatBatches(FakeGigachat):
 
 
 class FakeRequestTransformer:
-    async def prepare_chat(self, data, giga_client=None):
+    async def prepare_chat(self, data, giga_client=None, *, forced_model=None):
         return {
             "model": data.get("model", "giga"),
             "messages": data.get("messages", []),
@@ -512,7 +519,6 @@ def make_app(gigachat=None):
 
 def make_app_with_message_batches(gigachat=None):
     app = make_app(gigachat)
-    app.include_router(message_batches_router)
     return app
 
 
@@ -751,23 +757,24 @@ class TestConvertAnthropicMessagesToOpenai:
         assert isinstance(content, list)
         assert content[0]["image_url"]["url"] == "https://example.com/img.png"
 
-    def test_ignores_unsupported_document_block(self):
-        result = _convert_anthropic_messages_to_openai(
-            None,
-            [
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "document",
-                            "source": {"type": "text", "data": "doc"},
-                        }
-                    ],
-                }
-            ],
-        )
+    def test_rejects_unsupported_document_block(self):
+        from gpt2giga.common.client_params import ClientCompatibilityError
 
-        assert result == [{"role": "user", "content": ""}]
+        with pytest.raises(ClientCompatibilityError, match="Documents require"):
+            _convert_anthropic_messages_to_openai(
+                None,
+                [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "document",
+                                "source": {"type": "text", "data": "doc"},
+                            }
+                        ],
+                    }
+                ],
+            )
 
     def test_assistant_tool_use(self):
         result = _convert_anthropic_messages_to_openai(
@@ -1161,7 +1168,7 @@ class TestMessagesEndpoint:
         assert resp.status_code == 200
         assert resp.json()["content"][0]["text"] == "Hello!"
 
-    def test_ignores_unsupported_document_content_block(self):
+    def test_rejects_unsupported_document_content_block(self):
         app = make_app()
         client = TestClient(app)
         payload = {
@@ -1182,8 +1189,8 @@ class TestMessagesEndpoint:
 
         resp = client.post("/messages", json=payload)
 
-        assert resp.status_code == 200
-        assert resp.json()["content"][0]["text"] == "Hello!"
+        assert resp.status_code == 400
+        assert resp.json()["error"]["type"] == "invalid_request_error"
 
     def test_non_stream_basic(self):
         app = make_app()
@@ -2106,7 +2113,7 @@ class TestCountTokensEndpoint:
         assert resp.json()["input_tokens"] == 2
         assert giga.token_inputs == ["Hello world"]
 
-    def test_count_ignores_unsupported_document_block(self):
+    def test_count_rejects_unsupported_document_block(self):
         app = make_app()
         client = TestClient(app)
         payload = {
@@ -2126,8 +2133,8 @@ class TestCountTokensEndpoint:
 
         resp = client.post("/messages/count_tokens", json=payload)
 
-        assert resp.status_code == 200
-        assert resp.json()["input_tokens"] == 0
+        assert resp.status_code == 400
+        assert resp.json()["error"]["type"] == "invalid_request_error"
 
     def test_count_accepts_custom_extra_body_key(self):
         app = make_app()
@@ -2200,24 +2207,41 @@ class TestCountTokensEndpoint:
 
 
 class TestMessageBatchesEndpoint:
-    def test_message_batch_routes_are_disabled(self):
+    @pytest.fixture(autouse=True)
+    def resources(self, monkeypatch, tmp_path):
+        original = make_app
+        stores = []
+
+        def factory(gigachat=None):
+            app = original(gigachat)
+            store = asyncio.run(ResourceStore.open(tmp_path / str(len(stores))))
+            app.state.resource_store = store
+            stores.append(store)
+            return app
+
+        monkeypatch.setattr(sys.modules[__name__], "make_app", factory)
+        yield
+        for store in stores:
+            asyncio.run(store.aclose())
+
+    def test_message_batch_routes_are_enabled(self):
         client = TestClient(make_app(FakeGigachatBatches()))
 
         assert hasattr(client.app.state.gigachat_client, "acreate_batch")
-        assert client.post("/messages/batches").status_code == 404
-        assert client.get("/messages/batches").status_code == 404
-        assert client.get("/messages/batches/batch-1").status_code == 404
+        assert client.post("/messages/batches").status_code == 400
+        assert client.get("/messages/batches").status_code == 200
+        assert client.get("/messages/batches/unknown").status_code == 404
         assert client.post("/messages/batches/batch-1/cancel").status_code == 404
         assert client.delete("/messages/batches/batch-1").status_code == 404
-        assert client.get("/messages/batches/batch-1/results").status_code == 404
+        assert client.get("/messages/batches/unknown/results").status_code == 404
 
-    def test_openapi_omits_message_batch_routes(self):
+    def test_openapi_includes_message_batch_routes(self):
         paths = make_app(FakeGigachatBatches()).openapi()["paths"]
 
-        assert "/messages/batches" not in paths
-        assert "/messages/batches/{message_batch_id}" not in paths
-        assert "/messages/batches/{message_batch_id}/cancel" not in paths
-        assert "/messages/batches/{message_batch_id}/results" not in paths
+        assert "/messages/batches" in paths
+        assert "/messages/batches/{message_batch_id}" in paths
+        assert "/messages/batches/{message_batch_id}/cancel" in paths
+        assert "/messages/batches/{message_batch_id}/results" in paths
 
     def test_batch_lifecycle_and_results_when_router_is_mounted_directly(self):
         app = make_app_with_message_batches(FakeGigachatBatches())
@@ -2249,8 +2273,9 @@ class TestMessageBatchesEndpoint:
         assert created.status_code == 200
         body = created.json()
         assert body["type"] == "message_batch"
-        assert body["processing_status"] == "ended"
-        assert body["results_url"] == "/v1/messages/batches/batch-1/results"
+        assert body["processing_status"] == "in_progress"
+        assert body["results_url"] is None
+        batch_id = body["id"]
         assert giga_client.last_batch_method == "chat_completions"
 
         translated_lines = [
@@ -2265,11 +2290,11 @@ class TestMessageBatchesEndpoint:
         listed = client.get("/messages/batches")
         assert listed.status_code == 200
         listed_body = listed.json()
-        assert listed_body["data"][0]["id"] == "batch-1"
-        assert listed_body["first_id"] == "batch-1"
-        assert listed_body["last_id"] == "batch-1"
+        assert listed_body["data"][0]["id"] == batch_id
+        assert listed_body["first_id"] == batch_id
+        assert listed_body["last_id"] == batch_id
 
-        retrieved = client.get("/messages/batches/batch-1")
+        retrieved = client.get(f"/messages/batches/{batch_id}")
         assert retrieved.status_code == 200
         assert retrieved.json()["request_counts"] == {
             "canceled": 0,
@@ -2279,7 +2304,7 @@ class TestMessageBatchesEndpoint:
             "succeeded": 1,
         }
 
-        results = client.get("/messages/batches/batch-1/results")
+        results = client.get(f"/messages/batches/{batch_id}/results")
         assert results.status_code == 200
         lines = [json.loads(line) for line in results.text.strip().splitlines()]
         assert lines[0]["custom_id"] == "req-1"
@@ -2364,7 +2389,7 @@ class TestMessageBatchesEndpoint:
         app = make_app_with_message_batches(FakeGigachatBatches())
         client = TestClient(app)
 
-        client.post(
+        created = client.post(
             "/messages/batches",
             json={
                 "requests": [
@@ -2380,11 +2405,12 @@ class TestMessageBatchesEndpoint:
             },
         )
 
-        cancel = client.post("/messages/batches/batch-1/cancel")
+        batch_id = created.json()["id"]
+        cancel = client.post(f"/messages/batches/{batch_id}/cancel")
         assert cancel.status_code == 501
         assert cancel.json()["error"]["type"] == "api_error"
 
-        delete = client.delete("/messages/batches/batch-1")
+        delete = client.delete(f"/messages/batches/{batch_id}")
         assert delete.status_code == 501
         assert delete.json()["error"]["type"] == "api_error"
 

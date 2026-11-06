@@ -16,7 +16,12 @@ class FakeClient:
 
     async def aembeddings(self, texts, model):
         self.embedding_calls.append({"texts": texts, "model": model})
-        return {"data": [{"embedding": [0.1], "index": 0}], "model": model}
+        return {
+            "data": [
+                {"embedding": [0.1], "index": index} for index in range(len(texts))
+            ],
+            "model": model,
+        }
 
 
 def make_app(monkeypatch=None, pass_model=False):
@@ -211,3 +216,24 @@ def test_embeddings_rejects_token_ids_without_decodable_model():
     assert resp.status_code == 400
     assert resp.json()["detail"]["error"]["type"] == "invalid_request_error"
     assert resp.json()["detail"]["error"]["param"] == "model"
+
+
+@pytest.mark.parametrize(
+    "item",
+    [
+        {"embedding": [0.1]},
+        {"embedding": [0.1], "index": -1},
+        {"embedding": [0.1], "index": "0"},
+        {"embedding": [0.1], "index": True},
+        {"embedding": [float("nan")], "index": 0},
+        {"embedding": ["invalid"], "index": 0},
+        {"index": 0},
+        {"embedding": [], "index": 0},
+    ],
+)
+def test_embedding_normalizer_rejects_malformed_upstream_items(item):
+    from gigachat.exceptions import APIResponseValidationError
+    from gpt2giga.protocol.embeddings import normalize_embedding_response
+
+    with pytest.raises(APIResponseValidationError):
+        normalize_embedding_response({"data": [item]}, expected_count=1)

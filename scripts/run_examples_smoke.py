@@ -55,24 +55,32 @@ class ExampleResult:
 
 DEFAULT_SKIP_RULES = (
     SkipRule(
+        "examples/openai/responses/storage/*",
+        "Snapshots require GPT2GIGA_RESPONSES_STORAGE_MODE=gateway and explicit live-smoke opt-in.",
+    ),
+    SkipRule(
+        "examples/anthropic/files/*",
+        "Anthropic Files resource workflow requires explicit live-smoke opt-in.",
+    ),
+    SkipRule(
         "examples/openai/files/*",
-        "OpenAI Files API router is prepared but not mounted.",
+        "OpenAI Files resource workflow requires explicit live-smoke opt-in.",
     ),
     SkipRule(
         "examples/openai/batches/*",
-        "OpenAI Batches API router is prepared but not mounted.",
+        "OpenAI Batches requires a batch-enabled account and explicit live-smoke opt-in.",
     ),
     SkipRule(
         "examples/anthropic/message_batches/*",
-        "Anthropic Message Batches API router is prepared but not mounted.",
+        "Anthropic Message Batches requires a batch-enabled account and explicit live-smoke opt-in.",
     ),
     SkipRule(
         "examples/gemini/files/*",
-        "Gemini Files API router is prepared but not mounted.",
+        "Gemini Files resource workflow requires explicit live-smoke opt-in.",
     ),
     SkipRule(
         "examples/gemini/batches/*",
-        "Gemini Batch API router is prepared but not mounted.",
+        "Gemini Batch requires a batch-enabled account and explicit live-smoke opt-in.",
     ),
     SkipRule(
         "examples/openai/agents/*",

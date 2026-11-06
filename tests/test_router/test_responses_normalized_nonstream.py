@@ -74,7 +74,7 @@ class _Transformer:
         self.native_responses_calls = []
         self.allow_native = allow_native
 
-    async def prepare_chat(self, data, giga_client=None):
+    async def prepare_chat(self, data, giga_client=None, **kwargs):
         self.chat_calls.append(data)
         return data
 

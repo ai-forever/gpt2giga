@@ -149,22 +149,93 @@ def gemini_models_openapi_extra(*, list_models: bool) -> dict[str, Any]:
 
 
 def gemini_files_openapi_extra() -> dict[str, Any]:
-    """OpenAPI extras for prepared Gemini Files routes."""
+    """Describe the resumable upload handshake and raw-byte continuation."""
     return {
         "description": (
-            "Prepared Gemini Files API route. The default public Gemini router omits "
-            "file routes until batch/file execution is validated end to end."
-        )
+            "Start a resumable upload with JSON metadata and X-Goog-Upload-Command: start. "
+            "Post raw bytes to the returned X-Goog-Upload-URL with an exact offset and "
+            "upload/finalize command. Metadata-only files are not published. "
+            "Authentication is required on every stage; sessions expire after 24 hours."
+        ),
+        "parameters": [
+            {"in": "header", "name": name, "schema": {"type": "string"}}
+            for name in (
+                "X-Goog-Upload-Protocol",
+                "X-Goog-Upload-Command",
+                "X-Goog-Upload-Header-Content-Length",
+                "X-Goog-Upload-Header-Content-Type",
+                "X-Goog-Upload-Offset",
+            )
+        ],
+        "requestBody": {
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "file": {
+                                "type": "object",
+                                "properties": {
+                                    "displayName": {"type": "string"},
+                                    "mimeType": {"type": "string"},
+                                },
+                            }
+                        },
+                    }
+                },
+                "application/octet-stream": {
+                    "schema": {"type": "string", "format": "binary"}
+                },
+            }
+        },
     }
 
 
 def gemini_batches_openapi_extra(*, create: bool) -> dict[str, Any]:
-    """OpenAPI extras for prepared Gemini Batch routes."""
-    return {
+    """Describe native batch execution and the SDK Operation projection."""
+    result = {
         "description": (
-            "Prepared Gemini Batch API create route. The default public Gemini router "
-            "omits batch routes until execution semantics are validated."
+            "Submit one model's inline requests or owned JSONL file to native GigaChat batch execution. "
+            "No streaming, stateful continuation, hosted tools, cancellation or processing-time SLA. "
+            "The response is an Operation named batches/{id}; output is in metadata.output."
             if create
-            else "Prepared Gemini Batch API metadata route."
+            else "Read registered owner-scoped native jobs; poll on demand with retained results."
         )
     }
+    if create:
+        result["requestBody"] = {
+            "required": True,
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "required": ["batch"],
+                        "properties": {
+                            "batch": {
+                                "type": "object",
+                                "required": ["inputConfig"],
+                                "properties": {
+                                    "displayName": {"type": "string"},
+                                    "inputConfig": {
+                                        "type": "object",
+                                        "properties": {
+                                            "fileName": {"type": "string"},
+                                            "requests": {
+                                                "type": "object",
+                                                "properties": {
+                                                    "requests": {
+                                                        "type": "array",
+                                                        "items": {"type": "object"},
+                                                    }
+                                                },
+                                            },
+                                        },
+                                    },
+                                },
+                            }
+                        },
+                    }
+                }
+            },
+        }
+    return result

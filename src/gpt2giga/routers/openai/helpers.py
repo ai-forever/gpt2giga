@@ -1,17 +1,11 @@
 """Shared helpers for OpenAI-compatible API routes."""
 
-import base64
 import re
 from typing import Optional
 
 from fastapi import HTTPException, Request
 
-from gpt2giga.app_state import get_batch_store, get_gigachat_client
-from gpt2giga.common.gigachat_options import (
-    extract_gigachat_request_options,
-    gigachat_request_options,
-)
-from gpt2giga.protocol.batches import infer_openai_file_purpose
+from gpt2giga.protocol.files import _serialize_file_object as _serialize_file_object
 
 GPT2GIGA_ATTACHMENT_IDS_HEADER = "x-gpt2giga-attachment-ids"
 _FILE_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,200}$")
@@ -59,58 +53,3 @@ def _paginate_items(
     if limit is None:
         return items, False
     return items[:limit], len(items) > limit
-
-
-def _serialize_file_object(file_obj, stored_metadata: Optional[dict] = None) -> dict:
-    """Normalize a GigaChat file object into the OpenAI-compatible response shape."""
-    stored_metadata = stored_metadata or {}
-    purpose = infer_openai_file_purpose(
-        getattr(file_obj, "purpose", None), stored_metadata.get("purpose")
-    )
-    return {
-        "id": getattr(file_obj, "id_", ""),
-        "object": "file",
-        "bytes": getattr(file_obj, "bytes_", 0),
-        "created_at": getattr(file_obj, "created_at", None),
-        "filename": getattr(file_obj, "filename", ""),
-        "purpose": purpose,
-        "status": stored_metadata.get("status", "processed"),
-        "expires_at": stored_metadata.get("expires_at"),
-        "status_details": stored_metadata.get("status_details"),
-    }
-
-
-async def _load_batch_output_content(request: Request, file_id: str) -> bytes:
-    """Load file content and post-process batch output files when needed."""
-    giga_client = get_gigachat_client(request)
-    request_options = extract_gigachat_request_options(request)
-    async with gigachat_request_options(
-        giga_client, request_options, include_body=False
-    ) as request_client:
-        file_response = await request_client.aget_file_content(file_id=file_id)
-    batch_store = get_batch_store(request)
-    matching_batch = next(
-        (
-            meta
-            for meta in batch_store.values()
-            if meta.get("output_file_id") == file_id
-        ),
-        None,
-    )
-    if matching_batch:
-        async with gigachat_request_options(
-            giga_client, request_options, include_body=False
-        ) as request_client:
-            input_file = await request_client.aget_file_content(
-                file_id=matching_batch["input_file_id"]
-            )
-        from gpt2giga.protocol.batches import transform_batch_output_file
-
-        return await transform_batch_output_file(
-            base64.b64encode(file_response).decode("ascii"),
-            batch_metadata=matching_batch,
-            input_content_b64=base64.b64encode(input_file).decode("ascii"),
-            response_processor=request.app.state.response_processor,
-        )
-
-    return file_response

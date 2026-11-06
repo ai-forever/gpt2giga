@@ -107,15 +107,30 @@ def _add_model_type_metadata(model: dict[str, Any]) -> None:
     model["metadata"] = metadata
 
 
-def _anthropic_created_at() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+def _anthropic_created_at(model: dict[str, Any]) -> str:
+    """Use a provider release timestamp, or a stable unknown-date sentinel."""
+    for key in ("release_date", "created_at", "created"):
+        value = model.get(key)
+        try:
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                released = datetime.fromtimestamp(value, timezone.utc)
+            elif isinstance(value, str):
+                released = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            else:
+                continue
+            if released.tzinfo is None:
+                released = released.replace(tzinfo=timezone.utc)
+            return released.astimezone(timezone.utc).isoformat(timespec="seconds")
+        except (ValueError, OverflowError, OSError):
+            continue
+    return "1970-01-01T00:00:00+00:00"
 
 
 def _build_anthropic_model(model: dict[str, Any]) -> dict[str, Any]:
     model_id = _model_id(model)
     return {
         "id": model_id,
-        "created_at": _anthropic_created_at(),
+        "created_at": _anthropic_created_at(model),
         "display_name": str(model.get("display_name") or model_id),
         "type": "model",
     }
@@ -212,7 +227,7 @@ async def show_available_models(request: Request):
     if _is_anthropic_models_request(request):
         return _build_anthropic_model_list(models, request)
     if _is_gemini_models_request(request):
-        return build_gemini_model_list(models)
+        return build_gemini_model_list(models, request=request)
     current_timestamp = int(time.time())
     for model in models:
         _add_model_type_metadata(model)

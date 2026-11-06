@@ -1,6 +1,10 @@
 """Helpers for request-scoped and application-scoped state."""
 
+import json
+
 from fastapi import Request
+
+from gpt2giga.storage.resources import ResourceStore, ResourceStoreError
 
 from gpt2giga.common.model_concurrency import ModelConcurrencyLimiter
 from gpt2giga.models.catalog import ModelCatalogSnapshot
@@ -63,17 +67,46 @@ def get_model_concurrency_limiter(request: Request) -> ModelConcurrencyLimiter:
     return app_state.model_concurrency_limiter
 
 
-def get_batch_store(request: Request) -> dict:
-    """Return the in-memory batch metadata store."""
-    app_state = request.app.state
-    if not hasattr(app_state, "batch_metadata_store"):
-        app_state.batch_metadata_store = {}
-    return app_state.batch_metadata_store
+def get_resource_store(request: Request) -> ResourceStore:
+    """Return the lifespan-owned store; never create a volatile fallback."""
+    store = getattr(request.app.state, "resource_store", None)
+    if not isinstance(store, ResourceStore):
+        raise ResourceStoreError("Resource storage is unavailable")
+    return store
 
 
-def get_file_store(request: Request) -> dict:
-    """Return the in-memory file metadata store."""
-    app_state = request.app.state
-    if not hasattr(app_state, "file_metadata_store"):
-        app_state.file_metadata_store = {}
-    return app_state.file_metadata_store
+def get_resource_owner(
+    request: Request, *, provider: str = "gigachat", profile: str | None = None
+) -> str:
+    """Derive a persistent owner from trusted configuration and request auth."""
+    config = request.app.state.config
+    settings = config.proxy_settings
+    identity = settings.resource_trusted_identity
+    if not identity:
+        identity = (
+            settings.api_key
+            if settings.enable_api_key_auth or settings.mode == "PROD"
+            else "anonymous"
+        ) or "anonymous"
+    upstream = config.gigachat_settings
+    credential_context = {}
+    for key in ("base_url", "scope", "credentials", "access_token", "user", "password"):
+        value = getattr(upstream, key, None)
+        if hasattr(value, "get_secret_value"):
+            value = value.get_secret_value()
+        if value is not None:
+            credential_context[key] = str(value)
+    if settings.pass_token:
+        authorization = request.headers.get("authorization", "")
+        if authorization.startswith("Bearer "):
+            # Middleware validates the pass-through format; never decode JWT claims.
+            credential_context = {
+                "base_url": credential_context.get("base_url", ""),
+                "pass_token": authorization.removeprefix("Bearer "),
+            }
+    return get_resource_store(request).owner_namespace(
+        str(identity),
+        provider=provider,
+        profile=profile or get_gigachat_model_catalog_profile_id(request),
+        credential_context=json.dumps(credential_context, sort_keys=True),
+    )

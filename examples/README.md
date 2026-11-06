@@ -29,6 +29,8 @@ client = OpenAI(base_url=f"http://localhost:8090/{api_version}/", api_key="0")
 - OpenAI Python SDK:
   - Chat Completions API: [`examples/openai/chat_completions/README.md`](openai/chat_completions/README.md)
   - Responses API: [`examples/openai/responses/README.md`](openai/responses/README.md)
+  - Images API (GigaChat v2): [`generate.py`](openai/images/generate.py)
+- Native GigaChat utilities: [`utilities.py`](native/utilities.py)
 - Anthropic Python SDK (Messages API): [`examples/anthropic/README.md`](./anthropic/README.md)
 - Gemini-like REST API: [`examples/gemini/README.md`](./gemini/README.md)
 
@@ -99,11 +101,9 @@ uv run python scripts/run_examples_smoke.py \
   --report-json .local/examples-smoke-report.json
 ```
 
-По умолчанию пропускаются подготовленные, но пока не смонтированные Files/Batches
-examples и OpenAI Agents example с внешними HTTP API. Для принудительного запуска
-всего набора добавьте `--include-known-unsupported`.
+Smoke runner по умолчанию пропускает ресурсные Files/Batches workflows и OpenAI Agents example с внешними HTTP API. Для их явного live запуска используется `--include-known-unsupported`; для batch нужен pay-as-you-go account.
 
-Files API, OpenAI Batches API, Anthropic Message Batches API и Gemini Files/Batches API примеры уже подготовлены, но соответствующие router-модули временно не смонтированы в этом релизе.
+Files/Batches доступны в документированном подмножестве. У batch нет native cancellation; 24h — срок принятия результатов шлюзом, upstream job может продолжиться и тарифицироваться.
 
 Stateful Anthropic/Gemini examples require the proxy process to be started with
 `GPT2GIGA_CONVERSATION_STITCHING_ENABLED=True`.
@@ -112,15 +112,15 @@ Stateful Anthropic/Gemini examples require the proxy process to be started with
 
 - `examples/openai/embeddings/basic.py`: эмбеддинги (`/embeddings` или `/v1/embeddings`)
 - `examples/openai/models/basic.py`: список моделей
-- `examples/openai/files/basic.py`: OpenAI Files API (router подготовлен, но временно не смонтирован)
-- `examples/openai/batches/basic.py`: OpenAI Batches API (router подготовлен, но временно не смонтирован)
+- `examples/openai/files/basic.py`: OpenAI Files API (поддержанное подмножество, см. API compatibility)
+- `examples/openai/batches/basic.py`: OpenAI Batches API (native jobs, gateway deadline 24h, без отмены)
 - `examples/anthropic/messages/structured_outputs/structured_output.py`: Anthropic Messages structured output
 - `examples/anthropic/messages/structured_outputs/structured_output_stream.py`: Anthropic streaming structured output
 - `examples/anthropic/messages/tools/gigachat_tools/code_interpreter.py`: Anthropic Messages GigaChat built-in code interpreter через v2 chat completions
 - `examples/anthropic/messages/tools/gigachat_tools/image_generate.py`: Anthropic Messages GigaChat built-in image generation через v2 chat completions
 - `examples/anthropic/messages/basic/stateful.py`: Anthropic stateful Messages через conversation stitching
 - `examples/anthropic/message_batches/structured_output.py`: Anthropic Message Batches structured output
-- `examples/anthropic/message_batches/basic.py`: Anthropic Message Batches API (router подготовлен, но временно не смонтирован)
+- `examples/anthropic/message_batches/basic.py`: Anthropic Message Batches API (native jobs, gateway deadline 24h, без отмены)
 - `examples/openai/responses/tools/function_calling.py`: function calling через Responses API
 - `examples/openai/agents/weather_handoff.py`: интеграция с OpenAI Agents SDK (потребуются доп. зависимости, см. `examples/AGENTS.md`)
 - `examples/gemini/content/generate_content.py`: Gemini-like `generateContent`
@@ -133,8 +133,8 @@ Stateful Anthropic/Gemini examples require the proxy process to be started with
 - `examples/gemini/content/structured_output.py`: Gemini-like structured output
 - `examples/gemini/count_tokens/count_tokens.py`: Gemini-like `countTokens`
 - `examples/gemini/embeddings/embeddings.py`: Gemini-like `embedContent` и batch-style embeddings
-- `examples/gemini/files/files.py`: Gemini Files API (router подготовлен, но временно не смонтирован)
-- `examples/gemini/batches/batches.py`: Gemini Batch API (router подготовлен, но временно не смонтирован)
+- `examples/gemini/files/files.py`: Gemini Files API (поддержанное подмножество, см. API compatibility)
+- `examples/gemini/batches/batches.py`: Gemini Batch API (поддержанное подмножество, см. API compatibility)
 
 ## Изменения контрактов в 0.3.1a1
 
@@ -153,3 +153,7 @@ Stateful Anthropic/Gemini examples require the proxy process to be started with
 исполняют только фиксированные функции-заглушки, без внешних сервисов.
 Примеры, требующие v2, пропускают запуск при переключении smoke runner на v1;
 обычный клиент получает 400 при `required`/`any` или хранении Responses в v1.
+
+- `examples/openai/responses/basic/input_tokens.py`: текстовая оценка через tokens/count без chat/upload.
+- `examples/openai/responses/storage/snapshots.py`: durable snapshots и Conversations (gateway storage opt-in).
+- `examples/anthropic/files/document.py`: Files upload и document reference в Messages.

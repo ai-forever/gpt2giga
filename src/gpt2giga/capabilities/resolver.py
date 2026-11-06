@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from typing import Any
 
 from gpt2giga.capabilities.models import (
     CAPABILITY_KEYS_V1,
@@ -199,6 +200,20 @@ def apply_provider_capability_metadata(
         revision=metadata_revision,
         evidence=(*model_layer.evidence, metadata_evidence),
     )
+
+
+def provider_capability_states(metadata: Any) -> dict[CapabilityKey, CapabilityState]:
+    """Read only recognized explicit capability facts from provider metadata."""
+    if not isinstance(metadata, Mapping):
+        return {}
+    states = {}
+    for key in CapabilityKey:
+        value = metadata.get(key.value)
+        if isinstance(value, Mapping):
+            value = value.get("state")
+        if isinstance(value, bool) or value in ("supported", "unsupported", "unknown"):
+            states[key] = _provider_state(value)
+    return states
 
 
 def _intersect_decisions(

@@ -1,4 +1,8 @@
+import asyncio
 import json
+import sys
+
+import pytest
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -8,7 +12,7 @@ from pydantic import BaseModel, Field
 from gpt2giga.models.config import ProxyConfig
 from gpt2giga.protocol import ResponseProcessor
 from gpt2giga.routers.openai import router as openai_router
-from gpt2giga.routers.openai.batches import router as batches_router
+from gpt2giga.storage.resources import ResourceStore
 
 
 class FakeUploadedFile(BaseModel):
@@ -57,7 +61,7 @@ class FakeGigaChat:
         self._created_at = 100
 
     async def aupload_file(self, file, purpose):
-        filename, content = file
+        filename, content, _mime = file
         file_id = f"file-{len(self.files) + 1}"
         self.last_uploaded_file = file
         self.last_uploaded_purpose = purpose
@@ -93,6 +97,9 @@ class FakeGigaChat:
 
     async def aget_file_content(self, file_id):
         return self.files[file_id]["content"]
+
+    def with_options(self, **kwargs):
+        return self
 
     async def acreate_batch(self, file, method):
         self.last_batch_content = file
@@ -151,7 +158,7 @@ class FakeGigaChat:
 
 
 class FakeRequestTransformer:
-    async def prepare_chat(self, data, giga_client=None):
+    async def prepare_chat(self, data, giga_client=None, *, forced_model=None):
         return {
             "model": "GigaChat",
             "messages": data["messages"],
@@ -178,30 +185,47 @@ def make_app():
 
 def make_app_with_files_and_batches():
     app = make_app()
-    app.include_router(batches_router)
     return app
 
 
-def test_files_routes_are_enabled_but_batches_remain_disabled():
+@pytest.fixture(autouse=True)
+def temporary_resource_store(monkeypatch, tmp_path):
+    original = make_app
+    stores = []
+
+    def factory():
+        app = original()
+        store = asyncio.run(ResourceStore.open(tmp_path / str(len(stores))))
+        app.state.resource_store = store
+        stores.append(store)
+        return app
+
+    monkeypatch.setattr(sys.modules[__name__], "make_app", factory)
+    yield
+    for store in stores:
+        asyncio.run(store.aclose())
+
+
+def test_files_and_batches_routes_are_enabled():
     client = TestClient(make_app())
 
     assert client.post("/files").status_code == 400
     assert client.get("/files").status_code == 200
-    assert client.post("/batches").status_code == 404
-    assert client.get("/batches").status_code == 404
+    assert client.post("/batches").status_code == 400
+    assert client.get("/batches").status_code == 200
     assert client.get("/batches/batch-1").status_code == 404
     assert client.post("/batches/batch-1/cancel").status_code == 404
 
 
-def test_openapi_includes_files_and_omits_batches_routes():
+def test_openapi_includes_files_and_batches_routes():
     paths = make_app().openapi()["paths"]
 
     assert "/files" in paths
     assert "/files/{file_id}" in paths
     assert "/files/{file_id}/content" in paths
-    assert "/batches" not in paths
-    assert "/batches/{batch_id}" not in paths
-    assert "/batches/{batch_id}/cancel" not in paths
+    assert "/batches" in paths
+    assert "/batches/{batch_id}" in paths
+    assert "/batches/{batch_id}/cancel" in paths
 
 
 def test_files_endpoints_roundtrip_when_router_is_mounted_directly():
@@ -234,7 +258,7 @@ def test_files_endpoints_roundtrip_when_router_is_mounted_directly():
     assert deleted.json() == {"id": file_id, "deleted": True, "object": "file"}
 
 
-def test_files_endpoint_lets_sdk_infer_content_type_from_filename():
+def test_batch_jsonl_stays_local_without_document_upload():
     app = make_app_with_files_and_batches()
     giga_client = app.state.gigachat_client
     client = TestClient(app)
@@ -252,9 +276,10 @@ def test_files_endpoint_lets_sdk_infer_content_type_from_filename():
     )
 
     assert response.status_code == 200
-    assert giga_client.last_uploaded_file == (
-        "input.jsonl",
-        b'{"hello":"world"}\n',
+    assert giga_client.last_uploaded_file is None
+    assert (
+        client.get(f"/files/{response.json()['id']}/content").content
+        == b'{"hello":"world"}\n'
     )
 
 
@@ -323,19 +348,21 @@ def test_batches_endpoints_translate_openai_flow_when_router_is_mounted_directly
     assert "custom_id" not in translated_line
     assert "body" not in translated_line
 
-    retrieved = client.get("/batches/batch-1")
+    batch_id = body["id"]
+    retrieved = client.get(f"/batches/{batch_id}")
     assert retrieved.status_code == 200
-    assert retrieved.json()["output_file_id"] == "file-output-1"
+    assert retrieved.json()["output_file_id"].startswith("file_g2g_")
+    output_id = retrieved.json()["output_file_id"]
 
     listed = client.get("/batches")
     assert listed.status_code == 200
-    assert listed.json()["data"][0]["id"] == "batch-1"
+    assert listed.json()["data"][0]["id"] == batch_id
 
-    output_file = client.get("/files/file-output-1")
+    output_file = client.get(f"/files/{output_id}")
     assert output_file.status_code == 200
     assert output_file.json()["purpose"] == "batch_output"
 
-    output_content = client.get("/files/file-output-1/content")
+    output_content = client.get(f"/files/{output_id}/content")
     assert output_content.status_code == 200
     transformed_line = json.loads(output_content.content.decode("utf-8").strip())
     assert transformed_line["custom_id"] == "req-1"

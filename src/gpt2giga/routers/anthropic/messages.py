@@ -36,7 +36,11 @@ from gpt2giga.openapi_specs.anthropic import (
     anthropic_messages_openapi_extra,
 )
 from gpt2giga.openapi_tags import OPENAPI_TAG_ANTHROPIC_MESSAGES
-from gpt2giga.protocol.anthropic.params import sanitize_anthropic_messages_parameters
+from gpt2giga.protocol.anthropic.params import (
+    sanitize_anthropic_messages_parameters,
+    validate_anthropic_version,
+)
+from gpt2giga.protocol.anthropic.files import resolve_anthropic_file_references
 from gpt2giga.protocol.anthropic.request import (
     _build_openai_data_from_anthropic_request,
     _convert_anthropic_messages_to_openai,
@@ -88,7 +92,10 @@ def _claude_cli_model_override(request: Request) -> str | None:
 @exceptions_handler
 async def count_tokens(request: Request):
     """Anthropic Messages count_tokens API compatible endpoint."""
-    data = sanitize_anthropic_messages_parameters(await read_request_json(request))
+    data = sanitize_anthropic_messages_parameters(
+        await read_request_json(request),
+        version=request.headers.get("anthropic-version"),
+    )
     request_options = extract_gigachat_request_options(request, dict(data))
     normalized = await _try_normalized_count_tokens(
         request,
@@ -141,6 +148,8 @@ async def count_tokens(request: Request):
 async def messages(request: Request):
     """Anthropic Messages API compatible endpoint."""
     data = await read_request_json(request)
+    validate_anthropic_version(data, request.headers.get("anthropic-version"))
+    await resolve_anthropic_file_references(request, data)
     pinned_model = _claude_cli_model_override(request)
     request_options = extract_gigachat_request_options(request, data)
     stream = data.get("stream", False)

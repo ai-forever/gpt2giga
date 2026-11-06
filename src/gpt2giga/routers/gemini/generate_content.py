@@ -54,6 +54,7 @@ from gpt2giga.providers.profiles import (
     ProviderKind,
     ProviderModelInventory,
 )
+from gpt2giga.routers.gemini.files import resolve_file_references
 from gpt2giga.sinks.base import is_sink_active
 from gpt2giga.sinks.observability.factory import emit_observability_event
 from gpt2giga.sinks.observability.llm import (
@@ -94,6 +95,8 @@ async def generate_content(model: str, request: Request):
         context=context,
         stream=False,
     )
+    if external_route is None:
+        await resolve_file_references(request, normalized_request)
     conversation_turn = await _stitch_gemini_request(
         request,
         data,
@@ -156,6 +159,8 @@ async def stream_generate_content(model: str, request: Request):
         context=context,
         stream=True,
     )
+    if external_route is None:
+        await resolve_file_references(request, normalized_request)
     conversation_turn = await _stitch_gemini_request(
         request,
         data,
@@ -424,18 +429,20 @@ async def _try_normalized_count_tokens(
             context=context,
         )
         request_options = extract_gigachat_request_options(request, payload)
-        response = await _provider_adapter(
+        provider = _provider_adapter(
             request,
             normalized_request=normalized_request.input,
             request_options=request_options,
             forced_model=_gemini_cli_model_override(request),
-        ).count_tokens(normalized_request, context=context)
-        return {"totalTokens": response.input_tokens}
+        )
     except Exception as exc:
         if settings is None or not settings.legacy_chat_fallback:
             raise
         _log_normalized_fallback(request, exc, event="gemini_count_tokens_fallback")
         return None
+    # Once dispatched, failure has an unknown outcome and must never replay.
+    response = await provider.count_tokens(normalized_request, context=context)
+    return {"totalTokens": response.input_tokens}
 
 
 def _provider_adapter(

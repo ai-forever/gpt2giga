@@ -58,7 +58,9 @@ async def embeddings(request: Request):
             response = await request_client.aembeddings(
                 texts=transformed["input"], model=effective_model
             )
-    normalized = normalize_embedding_response(response, model=effective_model)
+    normalized = normalize_embedding_response(
+        response, model=effective_model, expected_count=len(transformed["input"])
+    )
     result = apply_embedding_encoding_format(normalized, data.get("encoding_format"))
     await emit_openai_embeddings_observability(
         request.app.state,

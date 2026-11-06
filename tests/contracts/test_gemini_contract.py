@@ -163,7 +163,7 @@ async def test_stream_terminal_and_gemini_error_shape(contract_stack) -> None:
     )
     assert error_frame is not None
     assert json.loads(error_frame.removeprefix("data: "))["error"] == {
-        "code": "stream_error",
-        "message": str(stack.client.stream_error),
-        "status": "BadRequestError",
+        "code": 400,
+        "message": "The upstream request failed.",
+        "status": "INVALID_ARGUMENT",
     }

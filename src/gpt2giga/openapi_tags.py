@@ -2,6 +2,9 @@
 
 OPENAPI_TAG_OPENAI_CHAT_COMPLETIONS = "OpenAI / Chat Completions"
 OPENAPI_TAG_OPENAI_RESPONSES = "OpenAI / Responses"
+OPENAPI_TAG_OPENAI_CONVERSATIONS = "OpenAI / Conversations"
+OPENAPI_TAG_OPENAI_IMAGES = "OpenAI / Images"
+OPENAPI_TAG_GIGACHAT_NATIVE = "GigaChat / Native utilities"
 OPENAPI_TAG_OPENAI_EMBEDDINGS = "OpenAI / Embeddings"
 OPENAPI_TAG_OPENAI_MODELS = "OpenAI / Models"
 OPENAPI_TAG_OPENAI_FILES = "OpenAI / Files"
@@ -20,6 +23,18 @@ OPENAPI_TAG_ADMIN_TRAFFIC_LOGS = "Admin / Traffic Logs"
 OPENAPI_TAG_ADMIN_DEBUG_TRANSLATION = "Admin / Debug Translation"
 
 _OPENAPI_TAGS_METADATA_BY_NAME = {
+    OPENAPI_TAG_OPENAI_CONVERSATIONS: {
+        "name": OPENAPI_TAG_OPENAI_CONVERSATIONS,
+        "description": "Opt-in gateway-backed OpenAI Conversations routes.",
+    },
+    OPENAPI_TAG_OPENAI_IMAGES: {
+        "name": OPENAPI_TAG_OPENAI_IMAGES,
+        "description": "OpenAI-compatible GigaChat v2 image generation subset.",
+    },
+    OPENAPI_TAG_GIGACHAT_NATIVE: {
+        "name": OPENAPI_TAG_GIGACHAT_NATIVE,
+        "description": "Explicit native GigaChat account and text utilities.",
+    },
     OPENAPI_TAG_OPENAI_CHAT_COMPLETIONS: {
         "name": OPENAPI_TAG_OPENAI_CHAT_COMPLETIONS,
         "description": "OpenAI-compatible chat completion routes.",
@@ -58,11 +73,11 @@ _OPENAPI_TAGS_METADATA_BY_NAME = {
     },
     OPENAPI_TAG_GEMINI_FILES: {
         "name": OPENAPI_TAG_GEMINI_FILES,
-        "description": "Prepared Gemini-compatible file routes.",
+        "description": "Gemini-compatible file routes.",
     },
     OPENAPI_TAG_GEMINI_BATCHES: {
         "name": OPENAPI_TAG_GEMINI_BATCHES,
-        "description": "Prepared Gemini-compatible batch routes.",
+        "description": "Gemini-compatible batch routes.",
     },
     OPENAPI_TAG_ANTHROPIC_MESSAGES: {
         "name": OPENAPI_TAG_ANTHROPIC_MESSAGES,
@@ -97,13 +112,20 @@ _OPENAPI_TAGS_METADATA_BY_NAME = {
 _DEFAULT_OPENAPI_TAGS = [
     OPENAPI_TAG_OPENAI_CHAT_COMPLETIONS,
     OPENAPI_TAG_OPENAI_RESPONSES,
+    OPENAPI_TAG_OPENAI_CONVERSATIONS,
+    OPENAPI_TAG_OPENAI_IMAGES,
     OPENAPI_TAG_OPENAI_EMBEDDINGS,
     OPENAPI_TAG_OPENAI_MODELS,
     OPENAPI_TAG_OPENAI_FILES,
+    OPENAPI_TAG_OPENAI_BATCHES,
     OPENAPI_TAG_GEMINI_GENERATE_CONTENT,
     OPENAPI_TAG_GEMINI_EMBEDDINGS,
     OPENAPI_TAG_GEMINI_MODELS,
+    OPENAPI_TAG_GEMINI_FILES,
+    OPENAPI_TAG_GEMINI_BATCHES,
     OPENAPI_TAG_ANTHROPIC_MESSAGES,
+    OPENAPI_TAG_ANTHROPIC_MESSAGE_BATCHES,
+    OPENAPI_TAG_GIGACHAT_NATIVE,
     OPENAPI_TAG_LITELLM_MODEL_INFO,
     OPENAPI_TAG_SYSTEM_HEALTH,
 ]
