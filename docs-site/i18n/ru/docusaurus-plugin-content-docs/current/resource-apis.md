@@ -42,6 +42,8 @@ POST /responses/input_tokens возвращает object=response.input_tokens �
 Cache вложений разделён по provider/profile/credentials и хранит размер и тип.
 Anthropic `expires_in_seconds` отклоняется до upload, пока native expiry не поддержан.
 Гонка resumable-записей на одном offset даёт один success и один HTTP 409.
+Cancel атомарно удаляет только active session. Если finalize уже захватил session,
+cancel возвращает HTTP 409; если cancel победил первым, native upload не начинается.
 Finalize локального JSONL переносит blob без повторного расходования квоты.
 
 ## Резервирование upload и выбор профиля
@@ -62,8 +64,10 @@ SQLite/upstream нет. Начатые storage transactions дренируютс
 timeout не является общим deadline запроса. Очередь SQLite ждёт асинхронно до занятия
 executor thread. Очистка expired rows коммитится независимо от отказа публикации.
 
-Resumable append записывает только новый chunk. Видимые bytes задаёт committed
-offset; неподтверждённый хвост обрезается при восстановлении. Batch list проверяет
+Resumable append проверяет metadata/blob квоты до записи нового chunk. Видимые bytes
+задаёт committed offset. При ошибке записи неподтверждённый хвост обрезается под
+SQLite writer lock; если cleanup не удался, оставшиеся bytes продолжают занимать общую
+blob квоту до успешного retry, expiry cleanup, удаления или восстановления при startup. Batch list проверяет
 cursor и выбирает страницу до polling её active jobs. Неизменившиеся и terminal
 jobs не вызывают лишних metadata UPDATE.
 

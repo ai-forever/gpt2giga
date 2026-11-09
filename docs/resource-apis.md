@@ -87,6 +87,8 @@ failure stops the request; it never silently becomes a text-only success. Attach
 cache reuse is scoped to provider/profile/credentials and retains size/type accounting.
 Anthropic `expires_in_seconds` is rejected before upload until native expiry is supported.
 Concurrent resumable writes at the same offset yield one success and one HTTP 409.
+Cancellation atomically removes only an active session. Once finalization has claimed
+the session, cancel returns HTTP 409; if cancel wins first, no native upload starts.
 Finalizing local JSONL adopts its upload blob without requiring a second blob quota.
 
 ## Upload admission and profile selection
@@ -107,8 +109,10 @@ Storage cleanup drains transactions already started, so this upstream timeout is
 a total request deadline. SQLite admission waits asynchronously before taking an
 executor thread. Expired-row cleanup commits independently of rejected publications.
 
-Resumable appends write only the new chunk. Committed offsets define the visible
-bytes; an uncommitted tail is trimmed on recovery. Batch lists validate the cursor
+Resumable appends admit metadata and blob capacity before writing only the new chunk.
+Committed offsets define the visible bytes. Failed writes trim unpublished bytes under
+the SQLite writer lock; if cleanup fails, the remaining bytes still consume the aggregate
+blob quota until retry, expiry cleanup, deletion or startup recovery removes them. Batch lists validate the cursor
 and select a page before polling its active jobs. Unchanged and terminal jobs do not
 produce redundant metadata updates.
 

@@ -529,3 +529,323 @@ async def test_failed_append_does_not_truncate_another_workers_committed_bytes(
     assert await one.read_blob("owner", "upload", "session") == b"okcommitted"
     await one.aclose()
     await two.aclose()
+
+
+async def test_append_metadata_admission_precedes_physical_write(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    store = await ResourceStore.open(tmp_path)
+    await store.put(
+        "owner", "upload", "session", {"status": "active", "upload_offset": 0}, blob=b""
+    )
+    store.max_metadata_bytes = store._db.execute(
+        "SELECT metadata_bytes FROM resource_usage"
+    ).fetchone()[0]
+    blob = next((tmp_path / "blobs").iterdir())
+    original_open = Path.open
+    opened = []
+
+    def tracked_open(path, *args, **kwargs):
+        if path == blob:
+            opened.append(args)
+        return original_open(path, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "open", tracked_open)
+        with pytest.raises(ResourceLimitError):
+            await store.append_blob("owner", "upload", "session", b"x" * 10, offset=0)
+    assert opened == []
+    assert blob.stat().st_size == 0
+    assert (await store.get("owner", "upload", "session")).blob_size == 0
+    await store.aclose()
+
+
+@pytest.mark.parametrize("cleanup_fails", [False, True])
+async def test_failed_append_removes_or_charges_uncommitted_bytes(
+    tmp_path, monkeypatch, cleanup_fails
+):
+    from pathlib import Path
+    from gpt2giga.storage import resources
+
+    store = await ResourceStore.open(tmp_path, max_total_blob_bytes=5)
+    await store.put(
+        "owner",
+        "upload",
+        "session",
+        {"status": "active", "upload_offset": 2},
+        blob=b"ok",
+    )
+    blob = next((tmp_path / "blobs").iterdir())
+    original_open = Path.open
+    fsync_calls = []
+
+    def fail_fsync(fd):
+        fsync_calls.append(fd)
+        raise OSError("injected fsync failure")
+
+    def fail_cleanup(path, *args, **kwargs):
+        if path == blob and fsync_calls and args and args[0] == "r+b":
+            raise OSError("injected cleanup failure")
+        return original_open(path, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(resources.os, "fsync", fail_fsync)
+        if cleanup_fails:
+            patch.setattr(Path, "open", fail_cleanup)
+        with pytest.raises(OSError, match="fsync"):
+            await store.append_blob("owner", "upload", "session", b"bad", offset=2)
+        assert await store.read_blob("owner", "upload", "session") == b"ok"
+        assert (await store.get("owner", "upload", "session")).blob_size == 2
+        physical = sum(p.stat().st_size for p in (tmp_path / "blobs").iterdir())
+        charged = store._db.execute("SELECT blob_bytes FROM resource_usage").fetchone()[
+            0
+        ]
+        assert charged == physical == (5 if cleanup_fails else 2)
+        if cleanup_fails:
+            with pytest.raises(ResourceLimitError):
+                await store.put("owner", "file", "other", {}, blob=b"x")
+    await store.append_blob("owner", "upload", "session", b"new", offset=2)
+    assert blob.read_bytes() == b"oknew"
+    assert store._db.execute("SELECT blob_bytes FROM resource_usage").fetchone()[0] == 5
+    await store.aclose()
+
+
+async def test_failed_commit_recovers_against_latest_worker_size(tmp_path, monkeypatch):
+    one = await ResourceStore.open(tmp_path)
+    two = await ResourceStore.open(tmp_path)
+    await one.put("owner", "upload", "session", {"status": "active"}, blob=b"ok")
+    loop = asyncio.get_running_loop()
+    connection = one._connection()
+    rolled_back = False
+
+    class FailedCommit:
+        def __getattr__(self, name):
+            return getattr(connection, name)
+
+        def __enter__(self):
+            connection.__enter__()
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            nonlocal rolled_back
+            if not rolled_back and exc_type is None:
+                rolled_back = True
+                connection.rollback()
+                future = asyncio.run_coroutine_threadsafe(
+                    two.append_blob(
+                        "owner", "upload", "session", b"committed", offset=2
+                    ),
+                    loop,
+                )
+                future.result(timeout=5)
+                raise sqlite3.OperationalError("injected commit failure")
+            return connection.__exit__(exc_type, exc, traceback)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(one, "_connection", lambda: FailedCommit())
+        with pytest.raises(sqlite3.OperationalError, match="commit failure"):
+            await one.append_blob("owner", "upload", "session", b"rejected", offset=2)
+    blob = next((tmp_path / "blobs").iterdir())
+    assert blob.read_bytes() == b"okcommitted"
+    assert await one.read_blob("owner", "upload", "session") == b"okcommitted"
+    assert connection.execute("SELECT blob_bytes FROM resource_usage").fetchone()[
+        0
+    ] == len(b"okcommitted")
+    await one.aclose()
+    await two.aclose()
+
+
+async def test_failed_append_cleanup_is_recovered_on_restart(tmp_path, monkeypatch):
+    from pathlib import Path
+    from gpt2giga.storage import resources
+
+    store = await ResourceStore.open(tmp_path, max_total_blob_bytes=5)
+    await store.put(
+        "owner",
+        "upload",
+        "session",
+        {"status": "active", "upload_offset": 2},
+        blob=b"ok",
+    )
+    original_open = Path.open
+    failed = False
+
+    def fail_fsync(fd):
+        nonlocal failed
+        failed = True
+        raise OSError("injected fsync failure")
+
+    def fail_cleanup(path, *args, **kwargs):
+        if failed and args and args[0] == "r+b":
+            raise OSError("injected cleanup failure")
+        return original_open(path, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(resources.os, "fsync", fail_fsync)
+        patch.setattr(Path, "open", fail_cleanup)
+        with pytest.raises(OSError, match="fsync"):
+            await store.append_blob("owner", "upload", "session", b"bad", offset=2)
+    assert store._db.execute("SELECT blob_bytes FROM resource_usage").fetchone()[0] == 5
+    await store.aclose()
+    store = await ResourceStore.open(tmp_path, max_total_blob_bytes=5)
+    assert store._db.execute("SELECT blob_bytes FROM resource_usage").fetchone()[0] == 2
+    assert store._db.execute("SELECT COUNT(*) FROM blob_cleanup").fetchone()[0] == 0
+    assert sum(p.stat().st_size for p in (tmp_path / "blobs").iterdir()) == 2
+    await store.append_blob("owner", "upload", "session", b"new", offset=2)
+    await store.aclose()
+
+
+async def test_partial_append_write_failure_restores_physical_committed_prefix(
+    tmp_path, monkeypatch
+):
+    from pathlib import Path
+
+    store = await ResourceStore.open(tmp_path)
+    await store.put(
+        "owner",
+        "upload",
+        "session",
+        {"status": "active", "upload_offset": 2},
+        blob=b"ok",
+    )
+    original_open = Path.open
+    blob = next((tmp_path / "blobs").iterdir())
+
+    class PartialWrite:
+        def __init__(self, stream):
+            self.stream = stream
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            self.stream.close()
+
+        def __getattr__(self, name):
+            return getattr(self.stream, name)
+
+        def write(self, data):
+            self.stream.write(data[:2])
+            self.stream.flush()
+            raise OSError("injected partial write")
+
+    def partial_open(path, *args, **kwargs):
+        stream = original_open(path, *args, **kwargs)
+        return PartialWrite(stream) if path == blob else stream
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "open", partial_open)
+        with pytest.raises(OSError, match="partial write"):
+            await store.append_blob("owner", "upload", "session", b"bad", offset=2)
+    assert blob.read_bytes() == b"ok"
+    assert store._db.execute("SELECT blob_bytes FROM resource_usage").fetchone()[0] == 2
+    assert (await store.get("owner", "upload", "session")).metadata[
+        "upload_offset"
+    ] == 2
+    await store.aclose()
+
+
+async def test_append_failure_with_inaccessible_blob_preserves_admitted_charge(
+    tmp_path, monkeypatch
+):
+    from pathlib import Path
+    from gpt2giga.storage import resources
+
+    store = await ResourceStore.open(tmp_path, max_total_blob_bytes=5)
+    await store.put(
+        "owner",
+        "upload",
+        "session",
+        {"status": "active", "upload_offset": 2},
+        blob=b"ok",
+    )
+    blob = next((tmp_path / "blobs").iterdir())
+    original_open, original_stat = Path.open, Path.stat
+    failed = False
+
+    def fail_fsync(fd):
+        nonlocal failed
+        failed = True
+        raise OSError("injected fsync failure")
+
+    def inaccessible_open(path, *args, **kwargs):
+        if failed and path == blob and args and args[0] == "r+b":
+            raise PermissionError("injected inaccessible blob")
+        return original_open(path, *args, **kwargs)
+
+    def inaccessible_stat(path, *args, **kwargs):
+        if failed and path == blob:
+            raise PermissionError("injected inaccessible stat")
+        return original_stat(path, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(resources.os, "fsync", fail_fsync)
+        patch.setattr(Path, "open", inaccessible_open)
+        patch.setattr(Path, "stat", inaccessible_stat)
+        with pytest.raises(OSError, match="fsync failure"):
+            await store.append_blob("owner", "upload", "session", b"bad", offset=2)
+        assert (
+            store._db.execute("SELECT blob_bytes FROM resource_usage").fetchone()[0]
+            == 5
+        )
+        assert (await store.get("owner", "upload", "session")).blob_size == 2
+        with pytest.raises(ResourceLimitError):
+            await store.put("owner", "file", "other", {}, blob=b"x")
+    await store.purge_expired()
+    assert blob.read_bytes() == b"ok"
+    assert store._db.execute("SELECT blob_bytes FROM resource_usage").fetchone()[0] == 2
+    await store.aclose()
+
+
+async def test_delete_transfers_blob_charge_before_unlocking_metadata(
+    tmp_path, monkeypatch
+):
+    store = await ResourceStore.open(tmp_path, max_total_blob_bytes=5)
+    await store.put("owner", "upload", "session", {"status": "active"}, blob=b"ok")
+    blob = next((tmp_path / "blobs").iterdir())
+    with blob.open("ab") as stream:
+        stream.write(b"bad")
+    with store._db:
+        store._db.execute("INSERT INTO blob_cleanup VALUES (?, ?)", (blob.name, 3))
+    connection = store._connection()
+    removal_committed = []
+
+    class CrashBeforeCleanup:
+        def __getattr__(self, name):
+            return getattr(connection, name)
+
+        def __enter__(self):
+            connection.__enter__()
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            result = connection.__exit__(exc_type, exc, traceback)
+            if not removal_committed and exc_type is None:
+                with sqlite3.connect(tmp_path / "resources.sqlite3") as observer:
+                    removal_committed.append(
+                        observer.execute(
+                            "SELECT blob_bytes FROM resource_usage"
+                        ).fetchone()[0]
+                    )
+                    assert (
+                        observer.execute("SELECT COUNT(*) FROM resources").fetchone()[0]
+                        == 0
+                    )
+                raise OSError("injected crash after metadata commit")
+            return result
+
+    with monkeypatch.context() as patch:
+        patch.setattr(store, "_connection", lambda: CrashBeforeCleanup())
+        with pytest.raises(OSError, match="crash"):
+            await store.delete("owner", "upload", "session", expected_status="active")
+    assert removal_committed == [5]
+    assert blob.stat().st_size == 5
+    assert (
+        connection.execute("SELECT blob_bytes FROM resource_usage").fetchone()[0] == 5
+    )
+    await store.purge_expired()
+    assert not blob.exists()
+    assert (
+        connection.execute("SELECT blob_bytes FROM resource_usage").fetchone()[0] == 0
+    )
+    await store.aclose()

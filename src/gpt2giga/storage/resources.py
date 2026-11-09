@@ -127,13 +127,16 @@ class ResourceStore:
                     metadata TEXT NOT NULL, created_at REAL NOT NULL,
                     expires_at REAL NOT NULL, blob_name TEXT, blob_size INTEGER NOT NULL,
                     PRIMARY KEY(owner, kind, public_id))""")
+                db.execute("""CREATE TABLE IF NOT EXISTS blob_cleanup (
+                    blob_name TEXT PRIMARY KEY, blob_bytes INTEGER NOT NULL)""")
                 db.execute("""CREATE TABLE IF NOT EXISTS resource_usage (
                     singleton INTEGER PRIMARY KEY CHECK(singleton=1),
                     resource_count INTEGER NOT NULL, metadata_bytes INTEGER NOT NULL,
                     blob_bytes INTEGER NOT NULL)""")
                 db.execute("""INSERT OR REPLACE INTO resource_usage
                     SELECT 1, COUNT(*), COALESCE(SUM(length(CAST(metadata AS BLOB))),0),
-                    COALESCE(SUM(blob_size),0) FROM resources""")
+                    COALESCE(SUM(blob_size),0) +
+                    (SELECT COALESCE(SUM(blob_bytes),0) FROM blob_cleanup) FROM resources""")
                 db.execute("""CREATE TRIGGER IF NOT EXISTS resource_usage_insert
                     AFTER INSERT ON resources BEGIN UPDATE resource_usage SET
                     resource_count=resource_count+1,
@@ -150,6 +153,16 @@ class ResourceStore:
                     metadata_bytes=metadata_bytes+length(CAST(NEW.metadata AS BLOB))
                         -length(CAST(OLD.metadata AS BLOB)),
                     blob_bytes=blob_bytes+NEW.blob_size-OLD.blob_size
+                    WHERE singleton=1; END""")
+                db.execute("""CREATE TRIGGER IF NOT EXISTS blob_cleanup_insert
+                    AFTER INSERT ON blob_cleanup BEGIN UPDATE resource_usage SET
+                    blob_bytes=blob_bytes+NEW.blob_bytes WHERE singleton=1; END""")
+                db.execute("""CREATE TRIGGER IF NOT EXISTS blob_cleanup_delete
+                    AFTER DELETE ON blob_cleanup BEGIN UPDATE resource_usage SET
+                    blob_bytes=blob_bytes-OLD.blob_bytes WHERE singleton=1; END""")
+                db.execute("""CREATE TRIGGER IF NOT EXISTS blob_cleanup_update
+                    AFTER UPDATE ON blob_cleanup BEGIN UPDATE resource_usage SET
+                    blob_bytes=blob_bytes+NEW.blob_bytes-OLD.blob_bytes
                     WHERE singleton=1; END""")
                 db.execute(
                     "CREATE TABLE IF NOT EXISTS registered_resources (kind TEXT NOT NULL, public_id TEXT NOT NULL, PRIMARY KEY(kind, public_id))"
@@ -204,6 +217,7 @@ class ResourceStore:
                             and blob.name not in referenced
                         ):
                             blob.unlink(missing_ok=True)
+                    db.execute("DELETE FROM blob_cleanup")
                 self._db = db
             except BaseException:
                 db.close()
@@ -238,6 +252,10 @@ class ResourceStore:
 
     def _purge(self, db: sqlite3.Connection) -> int:
         # Bound foreground cleanup. Registered IDs are intentional ACL tombstones.
+        for (name,) in db.execute(
+            "SELECT blob_name FROM blob_cleanup LIMIT 256"
+        ).fetchall():
+            self._recover_blob(db, name)
         rows = db.execute(
             "SELECT rowid, blob_name FROM resources WHERE expires_at <= ? ORDER BY expires_at LIMIT 256",
             (self._clock(),),
@@ -248,7 +266,49 @@ class ResourceStore:
         for _, name in rows:
             if name:
                 (self.path / "blobs" / name).unlink(missing_ok=True)
+                db.execute("DELETE FROM blob_cleanup WHERE blob_name=?", (name,))
         return len(rows)
+
+    def _recover_blob(
+        self, db: sqlite3.Connection, name: str, *, attempted_size: int = 0
+    ) -> None:
+        """Trim unpublished bytes under the writer lock, charging failed cleanup."""
+        row = db.execute(
+            "SELECT blob_size FROM resources WHERE blob_name=?", (name,)
+        ).fetchone()
+        size = row[0] if row else 0
+        target = self.path / "blobs" / name
+        charged = db.execute(
+            "SELECT blob_bytes FROM blob_cleanup WHERE blob_name=?", (name,)
+        ).fetchone()
+        fallback_size = max(attempted_size, size + (charged[0] if charged else 0))
+        try:
+            if row:
+                with target.open("r+b") as stream:
+                    stream.truncate(size)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+            else:
+                target.unlink(missing_ok=True)
+        except OSError:
+            # A failed cleanup must not make physically occupied capacity free.
+            pass
+        try:
+            remaining = max(0, target.stat().st_size - size)
+        except FileNotFoundError:
+            remaining = 0
+        except OSError:
+            # Inaccessible files still occupy capacity. Keep the conservative
+            # admitted size until a later cleanup can establish their size.
+            remaining = max(0, fallback_size - size)
+        if remaining:
+            db.execute(
+                "INSERT INTO blob_cleanup VALUES (?, ?) ON CONFLICT(blob_name) "
+                "DO UPDATE SET blob_bytes=excluded.blob_bytes",
+                (name, remaining),
+            )
+        else:
+            db.execute("DELETE FROM blob_cleanup WHERE blob_name=?", (name,))
 
     def _check_metadata_budget(self, db: sqlite3.Connection) -> None:
         count, size = db.execute(
@@ -555,9 +615,8 @@ class ResourceStore:
             with self._lock:
                 db = self._connection()
                 name = None
-                previous_size = 0
-                created = False
-                committed = False
+                touched = False
+                failure = None
                 try:
                     with db:
                         db.execute("BEGIN IMMEDIATE")
@@ -568,7 +627,11 @@ class ResourceStore:
                         if row is None:
                             return None
                         metadata = json.loads(row[2])
-                        if metadata.get("status") in {"finalizing", "finalized"}:
+                        if metadata.get("status") in {
+                            "finalizing",
+                            "finalized",
+                            "cancelled",
+                        }:
                             raise ResourceConflictError(
                                 "Upload session no longer accepts data"
                             )
@@ -576,6 +639,14 @@ class ResourceStore:
                             raise ResourceConflictError(
                                 "Upload offset does not match received bytes"
                             )
+                        if (
+                            row[6]
+                            and db.execute(
+                                "SELECT 1 FROM blob_cleanup WHERE blob_name=?",
+                                (row[6],),
+                            ).fetchone()
+                        ):
+                            self._recover_blob(db, row[6])
                         size = offset + len(data)
                         total = db.execute(
                             "SELECT blob_bytes FROM resource_usage WHERE singleton=1"
@@ -588,38 +659,43 @@ class ResourceStore:
                                 "Resource store blob quota exceeded"
                             )
                         name = row[6] or uuid.uuid4().hex
-                        created = row[6] is None
-                        previous_size = row[5]
-                        target = self.path / "blobs" / name
-                        with target.open("x+b" if created else "r+b") as stream:
-                            os.chmod(target, 0o600)
-                            # Remove the tail of any uncommitted crashed append.
-                            stream.truncate(previous_size)
-                            stream.seek(previous_size)
-                            stream.write(data)
-                            stream.flush()
-                            os.fsync(stream.fileno())
                         metadata["upload_offset"] = size
                         encoded = json.dumps(
                             metadata, ensure_ascii=False, separators=(",", ":")
                         )
+                        db.execute("SAVEPOINT append_chunk")
                         db.execute(
                             "UPDATE resources SET blob_name=?, blob_size=?, metadata=? WHERE owner=? AND kind=? AND public_id=?",
                             (name, size, encoded, owner, kind, public_id),
                         )
+                        # The future count/metadata/blob usage is admitted before I/O.
                         self._check_metadata_budget(db)
-                    committed = True
-                    return self._resource(
-                        (row[0], row[1], encoded, row[3], row[4], size)
-                    )
+                        target = self.path / "blobs" / name
+                        try:
+                            touched = True
+                            with target.open("r+b" if row[6] else "x+b") as stream:
+                                os.chmod(target, 0o600)
+                                stream.truncate(row[5])
+                                stream.seek(row[5])
+                                stream.write(data)
+                                stream.flush()
+                                os.fsync(stream.fileno())
+                        except BaseException as exc:
+                            db.execute("ROLLBACK TO append_chunk")
+                            self._recover_blob(db, name, attempted_size=size)
+                            failure = exc
+                        db.execute("RELEASE append_chunk")
                 except BaseException:
-                    if name and created and not committed:
-                        (self.path / "blobs" / name).unlink(missing_ok=True)
-                    # Existing blobs may already have another worker's committed
-                    # append after rollback releases SQLite's writer lock. Leave
-                    # their tail alone; reads honor the committed size and the
-                    # next append/startup truncates under the database lock.
+                    if touched and name:
+                        # Commit/rollback can release the lock. Never use the old
+                        # offset here: another worker may already have appended.
+                        with db:
+                            db.execute("BEGIN IMMEDIATE")
+                            self._recover_blob(db, name, attempted_size=size)
                     raise
+                if failure is not None:
+                    raise failure
+                return self._resource((row[0], row[1], encoded, row[3], row[4], size))
 
         return await self._run(operation)
 
@@ -666,7 +742,14 @@ class ResourceStore:
 
         return await self._run(operation)
 
-    async def delete(self, owner: str, kind: str, public_id: str) -> bool:
+    async def delete(
+        self,
+        owner: str,
+        kind: str,
+        public_id: str,
+        *,
+        expected_status: str | None = None,
+    ) -> bool:
         """Remove only the specified owner's metadata and local blob."""
 
         def operation() -> bool:
@@ -674,11 +757,28 @@ class ResourceStore:
                 with self._connection() as db:
                     db.execute("BEGIN IMMEDIATE")
                     row = db.execute(
-                        "SELECT blob_name FROM resources WHERE owner=? AND kind=? AND public_id=?",
+                        "SELECT blob_name, metadata, blob_size FROM resources WHERE owner=? AND kind=? AND public_id=?",
                         (owner, kind, public_id),
                     ).fetchone()
                     if row is None:
                         return False
+                    if (
+                        expected_status is not None
+                        and json.loads(row[1]).get("status") != expected_status
+                    ):
+                        raise ResourceConflictError(
+                            "Resource status changed concurrently"
+                        )
+                    if row[0]:
+                        # Transfer the committed prefix to cleanup ownership in
+                        # the same transaction; a crash before unlink cannot
+                        # make its physical capacity available to another writer.
+                        db.execute(
+                            "INSERT INTO blob_cleanup VALUES (?, ?) "
+                            "ON CONFLICT(blob_name) DO UPDATE SET "
+                            "blob_bytes=blob_cleanup.blob_bytes+excluded.blob_bytes",
+                            (row[0], row[2]),
+                        )
                     db.execute(
                         "DELETE FROM resources WHERE owner=? AND kind=? AND public_id=?",
                         (owner, kind, public_id),
@@ -686,7 +786,9 @@ class ResourceStore:
                 # Commit the removal first: a crash may leave an orphan blob,
                 # but can never resurrect a live resource pointing at deleted bytes.
                 if row[0]:
-                    (self.path / "blobs" / row[0]).unlink(missing_ok=True)
+                    with db:
+                        db.execute("BEGIN IMMEDIATE")
+                        self._recover_blob(db, row[0])
                 return True
 
         return await self._run(operation)

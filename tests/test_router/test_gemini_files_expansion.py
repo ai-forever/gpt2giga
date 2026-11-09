@@ -391,3 +391,109 @@ async def test_atomic_offset_conflict_maps_to_409(monkeypatch):
         assert sorted(response.status_code for response in responses) == [200, 409]
         queried = await client.post(url, headers={"X-Goog-Upload-Command": "query"})
         assert queried.headers["X-Goog-Upload-Size-Received"] == "2"
+
+
+@pytest.mark.parametrize("command", ["upload", "upload, finalize"])
+async def test_rejected_resumable_appends_leave_no_unaccounted_disk(command):
+    seen = []
+    async with sdk_app(file_backend(seen)) as (client, app):
+        store = app.state.resource_store
+        size = 1024 * 1024
+        store.max_total_blob_bytes = size
+        urls = [await start(client, size) for _ in range(8)]
+        store.max_metadata_bytes = store._db.execute(
+            "SELECT metadata_bytes FROM resource_usage"
+        ).fetchone()[0]
+        for url in urls:
+            response = await client.post(
+                url,
+                headers={"X-Goog-Upload-Command": command, "X-Goog-Upload-Offset": "0"},
+                content=b"x" * size,
+            )
+            assert response.status_code == 413, response.text
+            query = await client.post(url, headers={"X-Goog-Upload-Command": "query"})
+            assert query.headers["x-goog-upload-size-received"] == "0"
+            assert query.headers["x-goog-upload-status"] == "active"
+        assert (
+            store._db.execute("SELECT blob_bytes FROM resource_usage").fetchone()[0]
+            == 0
+        )
+        assert sum(p.stat().st_size for p in (store.path / "blobs").iterdir()) == 0
+        assert seen == []
+
+
+async def test_cancel_cannot_win_after_finalization_claim():
+    seen = []
+    entered, release = asyncio.Event(), asyncio.Event()
+    backend = file_backend(seen)
+
+    async def handle(request):
+        entered.set()
+        await release.wait()
+        return backend(request)
+
+    async with sdk_app(handle) as (client, _):
+        url = await start(client)
+        finalizing = asyncio.create_task(
+            client.post(
+                url,
+                headers={
+                    "X-Goog-Upload-Command": "upload, finalize",
+                    "X-Goog-Upload-Offset": "0",
+                },
+                content=b"native-file-bytes",
+            )
+        )
+        try:
+            await asyncio.wait_for(entered.wait(), 5)
+            cancelled = await client.post(
+                url, headers={"X-Goog-Upload-Command": "cancel"}
+            )
+            assert cancelled.status_code == 409, cancelled.text
+            assert "x-goog-upload-status" not in cancelled.headers
+        finally:
+            release.set()
+            finalized = await finalizing
+        assert finalized.status_code == 200, finalized.text
+        assert finalized.headers["x-goog-upload-status"] == "final"
+        assert (await client.get("/v1beta/files/upstream-file")).status_code == 200
+        assert len(seen) == 1
+
+
+async def test_cancel_wins_before_finalization_claim(monkeypatch):
+    seen = []
+    async with sdk_app(file_backend(seen)) as (client, app):
+        url = await start(client)
+        entered, release = asyncio.Event(), asyncio.Event()
+        store = app.state.resource_store
+        original_update = store.update
+
+        async def delayed_claim(owner, kind, public_id, updates):
+            if kind == "upload":
+                entered.set()
+                await release.wait()
+            return await original_update(owner, kind, public_id, updates)
+
+        monkeypatch.setattr(store, "update", delayed_claim)
+        finalizing = asyncio.create_task(
+            client.post(
+                url,
+                headers={
+                    "X-Goog-Upload-Command": "upload, finalize",
+                    "X-Goog-Upload-Offset": "0",
+                },
+                content=b"native-file-bytes",
+            )
+        )
+        try:
+            await asyncio.wait_for(entered.wait(), 5)
+            cancelled = await client.post(
+                url, headers={"X-Goog-Upload-Command": "cancel"}
+            )
+            assert cancelled.status_code == 200
+            assert cancelled.headers["x-goog-upload-status"] == "cancelled"
+        finally:
+            release.set()
+            finalized = await finalizing
+        assert finalized.status_code == 404
+        assert seen == []

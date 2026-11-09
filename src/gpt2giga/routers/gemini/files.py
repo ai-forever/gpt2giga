@@ -120,7 +120,14 @@ async def resumable_upload(request: Request):
             }
         )
     if command == {"cancel"}:
-        await store.delete(owner, "upload", session_id)
+        try:
+            deleted = await store.delete(
+                owner, "upload", session_id, expected_status="active"
+            )
+        except ResourceConflictError as exc:
+            raise _invalid("Upload finalization has already started.", 409) from exc
+        if not deleted:
+            raise file_not_found()
         return Response(headers={"X-Goog-Upload-Status": "cancelled"})
     if (
         not command
