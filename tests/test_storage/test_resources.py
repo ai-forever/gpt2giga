@@ -89,6 +89,172 @@ async def test_quotas_rollback_and_owned_delete(tmp_path):
         await store.list("owner", "file")
 
 
+@pytest.mark.parametrize("budget", ["max_resources", "max_metadata_bytes"])
+async def test_put_metadata_admission_precedes_blob_io(tmp_path, monkeypatch, budget):
+    from pathlib import Path
+
+    store = await ResourceStore.open(tmp_path, **{budget: 0})
+    original_open, original_unlink = Path.open, Path.unlink
+    touched = []
+
+    def tracked_open(path, *args, **kwargs):
+        if path.parent == tmp_path / "blobs":
+            touched.append("open")
+        return original_open(path, *args, **kwargs)
+
+    def fail_unlink(path, *args, **kwargs):
+        if path.parent == tmp_path / "blobs":
+            touched.append("unlink")
+            raise PermissionError("injected cleanup failure")
+        return original_unlink(path, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "open", tracked_open)
+        patch.setattr(Path, "unlink", fail_unlink)
+        with pytest.raises(ResourceLimitError, match="metadata quota"):
+            await store.put("owner", "file", "rejected", {}, blob=b"payload")
+    assert touched == []
+    assert list((tmp_path / "blobs").iterdir()) == []
+    assert not await store.is_registered("file", "rejected")
+    await store.aclose()
+
+
+@pytest.mark.parametrize("failure", ["write", "fsync", "commit"])
+@pytest.mark.parametrize("cleanup_fails", [False, True])
+async def test_failed_put_removes_or_charges_unpublished_blob(
+    tmp_path, monkeypatch, failure, cleanup_fails
+):
+    from pathlib import Path
+    from gpt2giga.storage import resources
+
+    store = await ResourceStore.open(tmp_path, max_total_blob_bytes=5)
+    connection = store._connection()
+    original_open, original_unlink = Path.open, Path.unlink
+    failed = False
+
+    class PartialWrite:
+        def __init__(self, stream):
+            self.stream = stream
+
+        def __getattr__(self, name):
+            return getattr(self.stream, name)
+
+        def __enter__(self):
+            self.stream.__enter__()
+            return self
+
+        def __exit__(self, *args):
+            return self.stream.__exit__(*args)
+
+        def write(self, data):
+            self.stream.write(data[:3])
+            raise OSError("injected write failure")
+
+    def partial_open(path, *args, **kwargs):
+        stream = original_open(path, *args, **kwargs)
+        if path.parent == tmp_path / "blobs" and args == ("xb",):
+            return PartialWrite(stream)
+        return stream
+
+    def fail_fsync(fd):
+        raise OSError("injected fsync failure")
+
+    def fail_unlink(path, *args, **kwargs):
+        if path.parent == tmp_path / "blobs":
+            raise PermissionError("injected cleanup failure")
+        return original_unlink(path, *args, **kwargs)
+
+    class FailedCommit:
+        def __getattr__(self, name):
+            return getattr(connection, name)
+
+        def __enter__(self):
+            connection.__enter__()
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            nonlocal failed
+            # The first transaction is the independent foreground purge.
+            if (
+                not failed
+                and exc_type is None
+                and connection.execute("SELECT COUNT(*) FROM resources").fetchone()[0]
+            ):
+                failed = True
+                connection.rollback()
+                raise sqlite3.OperationalError("injected commit failure")
+            return connection.__exit__(exc_type, exc, traceback)
+
+    with monkeypatch.context() as patch:
+        if failure == "write":
+            patch.setattr(Path, "open", partial_open)
+        elif failure == "fsync":
+            patch.setattr(resources.os, "fsync", fail_fsync)
+        else:
+            patch.setattr(store, "_connection", lambda: FailedCommit())
+        if cleanup_fails:
+            patch.setattr(Path, "unlink", fail_unlink)
+        error = sqlite3.OperationalError if failure == "commit" else OSError
+        with pytest.raises(error, match=f"injected {failure} failure"):
+            await store.put("owner", "file", "rejected", {}, blob=b"12345")
+        assert await store.get("owner", "file", "rejected") is None
+        assert not await store.is_registered("file", "rejected")
+        expected = (3 if failure == "write" else 5) if cleanup_fails else 0
+        assert sum(p.stat().st_size for p in (tmp_path / "blobs").iterdir()) == expected
+        assert connection.execute(
+            "SELECT resource_count, metadata_bytes, blob_bytes FROM resource_usage"
+        ).fetchone() == (0, 0, expected)
+        if cleanup_fails:
+            with pytest.raises(ResourceLimitError, match="blob quota"):
+                await store.put("owner", "file", "another", {}, blob=b"123")
+    await store.purge_expired()
+    assert list((tmp_path / "blobs").iterdir()) == []
+    assert connection.execute("SELECT COUNT(*) FROM blob_cleanup").fetchone()[0] == 0
+    assert (
+        connection.execute("SELECT blob_bytes FROM resource_usage").fetchone()[0] == 0
+    )
+    await store.put("owner", "file", "recovered", {}, blob=b"12345")
+    await store.aclose()
+
+
+async def test_put_recovery_preserves_blob_when_commit_succeeded(tmp_path, monkeypatch):
+    store = await ResourceStore.open(tmp_path)
+    connection = store._connection()
+    failed = False
+
+    class ErrorAfterCommit:
+        def __getattr__(self, name):
+            return getattr(connection, name)
+
+        def __enter__(self):
+            connection.__enter__()
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            nonlocal failed
+            result = connection.__exit__(exc_type, exc, traceback)
+            if (
+                not failed
+                and exc_type is None
+                and connection.execute("SELECT COUNT(*) FROM resources").fetchone()[0]
+            ):
+                failed = True
+                raise sqlite3.OperationalError("injected error after commit")
+            return result
+
+    with monkeypatch.context() as patch:
+        patch.setattr(store, "_connection", lambda: ErrorAfterCommit())
+        with pytest.raises(sqlite3.OperationalError, match="after commit"):
+            await store.put("owner", "file", "committed", {}, blob=b"retained")
+    assert await store.read_blob("owner", "file", "committed") == b"retained"
+    assert await store.is_registered("file", "committed")
+    assert connection.execute("SELECT COUNT(*) FROM blob_cleanup").fetchone()[0] == 0
+    assert (
+        connection.execute("SELECT blob_bytes FROM resource_usage").fetchone()[0] == 8
+    )
+    await store.aclose()
+
+
 async def test_atomic_updates_across_workers_and_stable_order(tmp_path):
     one = await ResourceStore.open(tmp_path, clock=lambda: 1)
     two = await ResourceStore.open(tmp_path, clock=lambda: 1)

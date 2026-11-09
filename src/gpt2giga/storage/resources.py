@@ -344,6 +344,8 @@ class ResourceStore:
 
         def operation() -> Resource:
             name = None
+            touched = False
+            failure = None
             with self._lock:
                 db = self._connection()
                 try:
@@ -359,18 +361,13 @@ class ResourceStore:
                             )
                         if blob is not None:
                             name = uuid.uuid4().hex
-                            target = self.path / "blobs" / name
-                            with target.open("xb") as stream:
-                                os.chmod(target, 0o600)
-                                stream.write(blob)
-                                stream.flush()
-                                os.fsync(stream.fileno())
                         now = self._clock()
                         expiry = (
                             expires_at
                             if expires_at is not None
                             else now + self.retention_seconds
                         )
+                        db.execute("SAVEPOINT put_resource")
                         if kind == "file" and not public_id.startswith("file_g2g_"):
                             db.execute(
                                 "INSERT OR IGNORE INTO registered_resources VALUES (?, ?)",
@@ -381,13 +378,39 @@ class ResourceStore:
                             (owner, kind, public_id, encoded, now, expiry, name, size),
                         )
                         self._check_metadata_budget(db)
-                    return Resource(
-                        public_id, kind, json.loads(encoded), now, expiry, size
-                    )
+                        if blob is not None:
+                            target = self.path / "blobs" / name
+                            try:
+                                with target.open("xb") as stream:
+                                    touched = True
+                                    os.chmod(target, 0o600)
+                                    stream.write(blob)
+                                    stream.flush()
+                                    os.fsync(stream.fileno())
+                            except BaseException as exc:
+                                failure = exc
+                                db.execute("ROLLBACK TO put_resource")
+                                if touched:
+                                    self._recover_blob(db, name, attempted_size=size)
+                        db.execute("RELEASE put_resource")
                 except BaseException:
-                    if name:
-                        (self.path / "blobs" / name).unlink(missing_ok=True)
+                    if touched:
+                        # Commit failure may release the writer lock. Recover
+                        # against committed state after acquiring it again.
+                        try:
+                            with db:
+                                db.execute("BEGIN IMMEDIATE")
+                                self._recover_blob(db, name, attempted_size=size)
+                        except Exception:
+                            # A broken database must not replace the write error.
+                            # Startup reconciliation still owns any orphan blob.
+                            pass
+                    if failure is not None:
+                        raise failure
                     raise
+                if failure is not None:
+                    raise failure
+                return Resource(public_id, kind, json.loads(encoded), now, expiry, size)
 
         await self.purge_expired()
         return await self._run(operation)

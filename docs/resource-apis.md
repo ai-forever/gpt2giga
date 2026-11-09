@@ -109,10 +109,14 @@ Storage cleanup drains transactions already started, so this upstream timeout is
 a total request deadline. SQLite admission waits asynchronously before taking an
 executor thread. Expired-row cleanup commits independently of rejected publications.
 
-Resumable appends admit metadata and blob capacity before writing only the new chunk.
+Local file creation checks count, metadata and blob quotas before opening a blob;
+admission refusal returns 413 without creating a file. Resumable appends admit
+metadata and blob capacity before writing only the new chunk.
 Committed offsets define the visible bytes. Failed writes trim unpublished bytes under
 the SQLite writer lock; if cleanup fails, the remaining bytes still consume the aggregate
-blob quota until retry, expiry cleanup, deletion or startup recovery removes them. Batch lists validate the cursor
+blob quota until retry, expiry cleanup, deletion or startup recovery removes them.
+The same cleanup accounting covers failed local file creation and preserves the
+original write or publication error when cleanup also fails. Batch lists validate the cursor
 and select a page before polling its active jobs. Unchanged and terminal jobs do not
 produce redundant metadata updates.
 

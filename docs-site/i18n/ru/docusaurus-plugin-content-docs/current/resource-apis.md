@@ -64,10 +64,14 @@ SQLite/upstream нет. Начатые storage transactions дренируютс
 timeout не является общим deadline запроса. Очередь SQLite ждёт асинхронно до занятия
 executor thread. Очистка expired rows коммитится независимо от отказа публикации.
 
+Создание локального файла проверяет count/metadata/blob квоты до открытия blob;
+отказ admission возвращает 413 без создания файла.
 Resumable append проверяет metadata/blob квоты до записи нового chunk. Видимые bytes
 задаёт committed offset. При ошибке записи неподтверждённый хвост обрезается под
 SQLite writer lock; если cleanup не удался, оставшиеся bytes продолжают занимать общую
-blob квоту до успешного retry, expiry cleanup, удаления или восстановления при startup. Batch list проверяет
+blob квоту до успешного retry, expiry cleanup, удаления или восстановления при startup.
+Тот же учёт cleanup действует при неудачном создании локального файла; ошибка
+очистки не подменяет исходную ошибку записи или публикации. Batch list проверяет
 cursor и выбирает страницу до polling её active jobs. Неизменившиеся и terminal
 jobs не вызывают лишних metadata UPDATE.
 

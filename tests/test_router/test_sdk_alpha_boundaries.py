@@ -78,6 +78,45 @@ async def test_mounted_files_preserve_sdk_bytes(prefix, content):
     assert seen[0].url.path.endswith("/files/synthetic-file/content")
 
 
+async def test_local_file_metadata_refusal_needs_no_blob_cleanup(monkeypatch):
+    from pathlib import Path
+
+    seen = []
+
+    def handle(request):
+        seen.append(request)
+        raise AssertionError("Local batch files must not dispatch upstream")
+
+    async with sdk_app(handle) as (client, app):
+        store = app.state.resource_store
+        store.max_metadata_bytes = 0
+        store.max_total_blob_bytes = 1024
+        original_unlink = Path.unlink
+        cleanup = []
+
+        def fail_unlink(path, *args, **kwargs):
+            if path.parent == store.path / "blobs":
+                cleanup.append(path.name)
+                raise PermissionError("injected cleanup failure")
+            return original_unlink(path, *args, **kwargs)
+
+        with monkeypatch.context() as patch:
+            patch.setattr(Path, "unlink", fail_unlink)
+            for _ in range(3):
+                response = await client.post(
+                    "/v1/files",
+                    data={"purpose": "batch"},
+                    files={"file": ("batch.jsonl", b"{}\n" * 100, "application/jsonl")},
+                )
+                assert response.status_code == 413, response.text
+        assert cleanup == []
+        assert seen == []
+        assert list((store.path / "blobs").iterdir()) == []
+        assert store._db.execute(
+            "SELECT resource_count, metadata_bytes, blob_bytes FROM resource_usage"
+        ).fetchone() == (0, 0, 0)
+
+
 def chat_request(protocol, mode, *, stream=False):
     if protocol == "responses":
         return f"/{mode}/responses", {
