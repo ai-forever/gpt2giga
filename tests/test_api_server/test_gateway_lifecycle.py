@@ -205,6 +205,9 @@ async def test_phoenix_lifespans_release_real_providers_and_workers(
 
     from opentelemetry.sdk.trace.export import SpanExportResult
 
+    # Export assertions must not depend on the caller's sampling policy.
+    monkeypatch.setenv("OTEL_TRACES_SAMPLER", "always_on")
+    monkeypatch.delenv("OTEL_TRACES_SAMPLER_ARG", raising=False)
     exporters = []
 
     class Exporter:
