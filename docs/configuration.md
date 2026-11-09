@@ -141,7 +141,7 @@ can be visible to other processes.
 | `GPT2GIGA_PASS_MODEL` | `True` | Pass the `model` from the request to GigaChat. Set `False` to always use the configured GigaChat model. |
 | `GPT2GIGA_PASS_TOKEN` | `False` | Parse the client `Authorization` as GigaChat credentials for per-request upstream authorization. |
 | `GPT2GIGA_SHUTDOWN_TIMEOUT_SECONDS` | `10.0` | Maximum graceful drain time before active requests are cancelled during shutdown. |
-| `GPT2GIGA_PASS_TOKEN_CLIENT_CACHE_SIZE` | `32` | Maximum idle credential-specific clients retained for connection reuse. |
+| `GPT2GIGA_PASS_TOKEN_CLIENT_CACHE_SIZE` | `32` | Idle credential-client cache target N. Total owned clients (active, cached, failed or in-flight closes) are capped at 2 × N. A new credential receives 503 with `Retry-After: 1` when full; existing leases are preserved. |
 | `GPT2GIGA_EMBEDDINGS` | `EmbeddingsGigaR` | Default embeddings model when the model from the request is not used. |
 | `GPT2GIGA_ENABLE_IMAGES` | `True` | Accept and translate supported image inputs. Disable when the deployment must reject image processing. |
 | `GPT2GIGA_DEFAULT_MAX_TOKENS` | empty | Add this positive `max_tokens` value only when the client did not provide `max_tokens`, `max_completion_tokens`, or `max_output_tokens`. Empty means no injected limit. |
@@ -697,8 +697,10 @@ A disconnected model request stops waiting for a concurrency slot before dispatc
 An empty acquire timeout still permits indefinite waiting by a connected client.
 Dynamic model entries are released after their final holder or waiter exits.
 Credential-pool eviction owns client cleanup even if acquisition is cancelled;
-client close has a five-second timeout, and failed closes remain recorded for a
-shutdown retry.
+client close has a five-second timeout. Failed closes remain owned and are retried
+with backoff during operation and again at shutdown. The total ownership budget
+includes active clients and outstanding cleanup, so close failures cannot grow an
+unbounded ledger.
 
 `GPT2GIGA_SHUTDOWN_TIMEOUT_SECONDS` limits request draining. Separately, each
 telemetry sink receives up to five seconds for best-effort flush. A stalled queued

@@ -59,7 +59,10 @@ class ProxySettings(BaseSettings):
     )
     pass_token_client_cache_size: PositiveInt = Field(
         default=32,
-        description="Maximum number of idle credential-specific GigaChat clients.",
+        description=(
+            "Maximum idle credential-specific GigaChat clients; total owned clients "
+            "are capped at twice this value, with HTTP 503 for new credentials at capacity."
+        ),
     )
     resource_store_path: str = Field(
         default="var/resources",

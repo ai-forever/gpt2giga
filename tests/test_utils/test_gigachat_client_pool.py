@@ -213,3 +213,118 @@ async def test_evicted_close_timeout_is_retained_for_shutdown_retry():
     await pool.aclose()
     assert all(client.closed for client in created.values())
     assert not pool._failed_cleanup
+
+
+async def test_failed_cleanup_recovers_on_requests_without_shutdown(monkeypatch):
+    import gc
+    import weakref
+
+    from gpt2giga.providers.gigachat.pool import GigaChatPoolCapacityError
+
+    now = [0.0]
+    recovered = False
+    clients = []
+
+    class RecoveringClient:
+        async def aclose(self):
+            if not recovered:
+                raise RuntimeError("synthetic close failure")
+
+    def factory(settings, token):
+        client = RecoveringClient()
+        clients.append(weakref.ref(client))
+        return client
+
+    pool = GigaChatClientPool({}, max_size=1, client_factory=factory)
+    monkeypatch.setattr(pool, "_clock", lambda: now[0])
+    for index in range(100):
+        try:
+            async with pool.acquire(str(index)):
+                pass
+        except GigaChatPoolCapacityError:
+            pass
+    gc.collect()
+    assert sum(ref() is not None for ref in clients) == 2
+    assert len(pool._failed_cleanup) == 1
+    recovered = True
+    now[0] = 100
+    for index in range(20):
+        async with pool.acquire(f"recovered-{index}"):
+            pass
+    gc.collect()
+    assert sum(ref() is not None for ref in clients) == 1
+    assert not pool._failed_cleanup
+    assert not pool._cleanup_tasks
+    await pool.aclose()
+
+
+async def test_pool_cleanup_backoff_and_no_duplicate_concurrent_close(monkeypatch):
+    import asyncio
+
+    now = [0.0]
+    attempts = 0
+    recovered = False
+    closing = asyncio.Event()
+    release = asyncio.Event()
+
+    class Client:
+        async def aclose(self):
+            nonlocal attempts
+            attempts += 1
+            if not recovered:
+                raise RuntimeError("synthetic")
+            closing.set()
+            await release.wait()
+
+    pool = GigaChatClientPool({}, max_size=1, client_factory=lambda *_: Client())
+    monkeypatch.setattr(pool, "_clock", lambda: now[0])
+    async with pool.acquire("first"):
+        pass
+    async with pool.acquire("second"):
+        pass
+    for _ in range(20):
+        async with pool.acquire("second"):
+            pass
+    assert attempts == 1
+    now[0] = 100
+    recovered = True
+
+    async def reuse():
+        async with pool.acquire("second"):
+            pass
+
+    tasks = [asyncio.create_task(reuse()) for _ in range(10)]
+    await closing.wait()
+    await asyncio.sleep(0)
+    assert attempts == 2
+    release.set()
+    await asyncio.gather(*tasks)
+    assert not pool._failed_cleanup
+    await pool.aclose()
+
+
+async def test_pool_active_client_budget_rejects_new_keys_but_allows_reuse():
+    from gpt2giga.providers.gigachat.pool import GigaChatPoolCapacityError
+
+    created = []
+
+    def factory(settings, token):
+        client = FakeClient(token)
+        created.append(client)
+        return client
+
+    pool = GigaChatClientPool({}, max_size=1, client_factory=factory)
+    async with pool.acquire("first") as first:
+        async with pool.acquire("second") as second:
+            with pytest.raises(GigaChatPoolCapacityError):
+                async with pool.acquire("third"):
+                    pytest.fail("new credentials cannot exceed the ownership budget")
+            assert len(created) == 2
+            async with pool.acquire("first") as reused:
+                assert reused is first
+            assert not first.closed
+            assert not second.closed
+        assert not first.closed
+        assert second.closed
+    await pool.aclose()
+    assert all(client.close_calls == 1 for client in created)

@@ -745,3 +745,56 @@ async def test_traffic_log_body_iterator_emits_stream_aborted():
     assert event.status_code == 499
     assert event.error_type == "stream_cancelled"
     assert event.metadata["lifecycle"] == "streaming_aborted"
+
+
+@pytest.mark.parametrize(
+    "path,protocol",
+    [
+        ("/v1/chat/completions", "openai"),
+        ("/v1/messages", "anthropic"),
+        ("/v1beta/models/test:generateContent", "gemini"),
+    ],
+)
+async def test_pool_capacity_returns_retryable_redacted_error(path, protocol):
+    import httpx
+
+    from gpt2giga.providers.gigachat.pool import GigaChatClientPool
+
+    class Client:
+        async def aclose(self):
+            raise RuntimeError("synthetic-secret-close-error")
+
+    pool = GigaChatClientPool({}, max_size=1, client_factory=lambda *_: Client())
+    async with pool.acquire("first"):
+        pass
+    async with pool.acquire("second"):
+        pass
+    test_app = FastAPI()
+    test_app.add_middleware(PassTokenMiddleware)
+    test_app.state.config = SimpleNamespace(
+        proxy_settings=SimpleNamespace(pass_token=True)
+    )
+    test_app.state.gigachat_client = Client()
+    test_app.state.gigachat_pool = pool
+    test_app.state.logger = MagicMock()
+
+    @test_app.post(path)
+    async def endpoint():
+        pytest.fail("pool backpressure must precede route execution")
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=test_app), base_url="http://test"
+    ) as client:
+        response = await client.post(
+            path, headers={"Authorization": "Bearer giga-auth-new-secret"}
+        )
+    assert response.status_code == 503
+    assert response.headers["Retry-After"] == "1"
+    assert "secret" not in response.text
+    error = response.json()["error"]
+    if protocol == "gemini":
+        assert error["status"] == "UNAVAILABLE"
+    else:
+        assert error["type"] == "api_error"
+        assert error["code"] == "client_pool_capacity"
+    assert len(pool._retired) + len(pool._entries) == 2

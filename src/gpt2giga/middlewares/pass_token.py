@@ -1,6 +1,10 @@
 from contextlib import AsyncExitStack
 from starlette.types import ASGIApp, Receive, Scope, Send
 from starlette.responses import JSONResponse
+from starlette.requests import Request
+
+from gpt2giga.common.exceptions import pool_capacity_response
+from gpt2giga.providers.gigachat.pool import GigaChatPoolCapacityError
 
 from gpt2giga.providers.gigachat.auth import (
     PassTokenError,
@@ -51,6 +55,10 @@ class PassTokenMiddleware:
             lease = pool.acquire(token)
             try:
                 client = await lease.__aenter__()
+            except GigaChatPoolCapacityError:
+                response = pool_capacity_response(Request(scope))
+                await response(scope, receive, send)
+                return
             except (PassTokenError, GigaChatClientConfigurationError) as exc:
                 state.logger.warning("Failed to pass token to GigaChat")
                 await _send_pass_token_error(scope, receive, send, str(exc))

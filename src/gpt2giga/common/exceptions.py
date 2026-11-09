@@ -20,6 +20,7 @@ from gpt2giga.common.gemini_errors import gemini_error_payload, gemini_error_sta
 from gpt2giga.core.context import _infer_protocol, get_request_context
 from gpt2giga.logger import rquid_context
 from gpt2giga.providers.gigachat.model_resolution import UpstreamModelRequiredError
+from gpt2giga.providers.gigachat.pool import GigaChatPoolCapacityError
 from gpt2giga.providers.gigachat.streaming import sdk_request_id, sdk_transport_error
 from gpt2giga.providers.network import ProviderNetworkAuthorizationError
 from gpt2giga.providers.openai_compatible import OpenAICompatibleUpstreamError
@@ -148,6 +149,8 @@ def exceptions_handler(func):
                     code="model_required",
                 ),
             )
+        except GigaChatPoolCapacityError:
+            return pool_capacity_response(_request_argument(args, kwargs))
         except ModelConcurrencyTimeoutError as e:
             from loguru import logger
 
@@ -307,6 +310,18 @@ def exceptions_handler(func):
             )
 
     return wrapper
+
+
+def pool_capacity_response(request: Request | None) -> JSONResponse:
+    """Project credential-pool backpressure without exposing credential keys."""
+    response = _bridge_transport_error_response(
+        str(GigaChatPoolCapacityError()),
+        code="client_pool_capacity",
+        request=request,
+        status_code=503,
+    )
+    response.headers["Retry-After"] = "1"
+    return response
 
 
 def _request_argument(args: tuple, kwargs: dict) -> Request | None:

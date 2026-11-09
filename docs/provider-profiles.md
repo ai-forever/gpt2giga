@@ -201,3 +201,17 @@ and Gemini GenerateContent retain their admitted external bridge paths.
 For Files uploaded for an explicit GigaChat model alias, select its profile with
 `X-GPT2GIGA-Profile`. Gemini resumable uploads retain the start-time profile.
 See [upload admission and profile selection](resource-apis.md#upload-admission-and-profile-selection).
+
+### Credential pool cleanup and capacity
+
+Each pass-token pool retains ownership of clients whose close fails. Subsequent
+requests retry up to four eligible closes, with exponential backoff from 0.1 to
+30 seconds and a five-second timeout per close attempt. A successful retry
+releases the client without restarting the gateway; idle pools retry on the
+next request or shutdown. Retries never expose credential keys or close errors.
+
+`GPT2GIGA_PASS_TOKEN_CLIENT_CACHE_SIZE` sets the idle cache target (default 32).
+The total budget for active, cached, and closing clients is twice that target.
+When full, a new credential receives HTTP 503, `client_pool_capacity`
+(OpenAI/Anthropic) or `UNAVAILABLE` (Gemini), and `Retry-After: 1`. Existing
+credential leases remain usable and are never evicted while active.
