@@ -172,5 +172,5 @@ async def test_cancelled_parse_closes_partial_upload(monkeypatch):
     await receiving.wait()
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
-        await task
+        await asyncio.wait_for(task, timeout=1)
     assert opened and all(file.closed for file in opened)

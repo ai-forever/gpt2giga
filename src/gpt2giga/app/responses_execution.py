@@ -558,7 +558,7 @@ async def _bind_catalog_model(request: Request, *, normalized_request) -> dict |
     runtime = state.bridge_provider_runtime
     route = runtime.registry.resolve(normalized_request.model)
     if route.provider_kind.value != "gigachat":
-        return
+        return None
     catalog = get_gigachat_model_catalog(request)
     try:
         descriptor = await catalog.get_model(

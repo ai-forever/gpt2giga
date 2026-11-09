@@ -1,6 +1,7 @@
 import asyncio
 import sqlite3
 import threading
+from pathlib import Path
 
 import pytest
 from fastapi import FastAPI, Request
@@ -13,6 +14,90 @@ from gpt2giga.storage.resources import (
     ResourceStore,
     ResourceStoreError,
 )
+
+
+@pytest.mark.parametrize("error_type", [KeyboardInterrupt, SystemExit])
+@pytest.mark.parametrize("operation", ["put", "append"])
+@pytest.mark.parametrize("cleanup_fails", [False, True])
+async def test_process_control_error_propagates_after_blob_accounting(
+    tmp_path, monkeypatch, error_type, operation, cleanup_fails
+):
+    store = await ResourceStore.open(tmp_path)
+    if operation == "append":
+        await store.put("owner", "upload", "session", {}, blob=b"ok")
+    error = error_type("injected interruption")
+    interrupted = False
+    original_open, original_unlink = Path.open, Path.unlink
+
+    class InterruptedWrite:
+        def __init__(self, stream):
+            self.stream = stream
+
+        def __getattr__(self, name):
+            return getattr(self.stream, name)
+
+        def __enter__(self):
+            self.stream.__enter__()
+            return self
+
+        def __exit__(self, *args):
+            return self.stream.__exit__(*args)
+
+        def write(self, data):
+            nonlocal interrupted
+            self.stream.write(data[:1])
+            interrupted = True
+            raise error
+
+    def interrupted_open(path, *args, **kwargs):
+        if (
+            cleanup_fails
+            and interrupted
+            and path.parent == tmp_path / "blobs"
+            and args == ("r+b",)
+        ):
+            raise OSError("injected cleanup failure")
+        stream = original_open(path, *args, **kwargs)
+        if path.parent == tmp_path / "blobs" and args in (("xb",), ("r+b",)):
+            return InterruptedWrite(stream)
+        return stream
+
+    def fail_unlink(path, *args, **kwargs):
+        if path.parent == tmp_path / "blobs":
+            raise OSError("injected cleanup failure")
+        return original_unlink(path, *args, **kwargs)
+
+    async def run_inline(worker):
+        # Keep process-control exceptions inside pytest's assertion, off Task internals.
+        return worker()
+
+    with monkeypatch.context() as patch:
+        patch.setattr(store, "_run", run_inline)
+        patch.setattr(Path, "open", interrupted_open)
+        if cleanup_fails:
+            patch.setattr(Path, "unlink", fail_unlink)
+        with pytest.raises(error_type) as raised:
+            if operation == "put":
+                await store.put("owner", "file", "rejected", {}, blob=b"bad")
+            else:
+                await store.append_blob("owner", "upload", "session", b"bad", offset=2)
+        assert raised.value is error
+        if operation == "put":
+            assert await store.get("owner", "file", "rejected") is None
+            expected = 1 if cleanup_fails else 0
+        else:
+            assert (await store.get("owner", "upload", "session")).blob_size == 2
+            assert await store.read_blob("owner", "upload", "session") == b"ok"
+            expected = 3 if cleanup_fails else 2
+        assert (
+            sum(path.stat().st_size for path in (tmp_path / "blobs").iterdir())
+            == expected
+        )
+        assert (
+            store._db.execute("SELECT blob_bytes FROM resource_usage").fetchone()[0]
+            == expected
+        )
+    await store.aclose()
 
 
 async def test_restart_workers_ownership_and_metadata(tmp_path):
