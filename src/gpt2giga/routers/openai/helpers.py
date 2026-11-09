@@ -5,8 +5,6 @@ from typing import Optional
 
 from fastapi import HTTPException, Request
 
-from gpt2giga.protocol.files import _serialize_file_object as _serialize_file_object
-
 GPT2GIGA_ATTACHMENT_IDS_HEADER = "x-gpt2giga-attachment-ids"
 _FILE_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,200}$")
 _MAX_REQUEST_ATTACHMENT_IDS = 10

@@ -240,7 +240,7 @@ async def test_dynamic_entry_keeps_waiters_and_cleans_cancelled_waiter():
         assert limiter._semaphores["dynamic"] is original
         waiter.cancel()
         with pytest.raises(asyncio.CancelledError):
-            await waiter
+            await asyncio.wait_for(waiter, timeout=1)
         assert limiter._users["dynamic"] == 1
         assert limiter._semaphores["dynamic"] is original
     assert limiter._semaphores == {}
@@ -258,7 +258,7 @@ async def test_dynamic_entry_survives_release_to_waiter():
     await entered.wait()
     assert limiter._semaphores["dynamic"] is original
     release.set()
-    await waiter
+    await asyncio.wait_for(waiter, timeout=1)
     assert limiter._semaphores == {}
 
 

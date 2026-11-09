@@ -292,7 +292,7 @@ async def test_cancellation_during_telemetry_drain_still_closes_dependencies(
         await started.wait()
         shutdown.cancel()
         with pytest.raises(asyncio.CancelledError):
-            await shutdown
+            await asyncio.wait_for(shutdown, timeout=1)
         assert sink.closed == 1
         assert client.closed
         with pytest.raises(ResourceStoreError, match="not open"):

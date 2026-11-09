@@ -207,7 +207,7 @@ def provider_capability_states(metadata: Any) -> dict[CapabilityKey, CapabilityS
     if not isinstance(metadata, Mapping):
         return {}
     states = {}
-    for key in CapabilityKey:
+    for key in CAPABILITY_KEYS_V1:
         value = metadata.get(key.value)
         if isinstance(value, Mapping):
             value = value.get("state")

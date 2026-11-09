@@ -105,6 +105,7 @@ class ResourceStore:
                 try:
                     task.result()
                 except Exception:
+                    # The worker was drained; preserve the caller's cancellation.
                     pass
                 raise
 
@@ -388,6 +389,8 @@ class ResourceStore:
                                     stream.flush()
                                     os.fsync(stream.fileno())
                             except BaseException as exc:
+                                # Preserve every error until cleanup accounting commits;
+                                # the original exception is re-raised below.
                                 failure = exc
                                 db.execute("ROLLBACK TO put_resource")
                                 if touched:
@@ -704,6 +707,8 @@ class ResourceStore:
                                 stream.flush()
                                 os.fsync(stream.fileno())
                         except BaseException as exc:
+                            # Commit cleanup accounting before re-raising even
+                            # process-control exceptions outside the transaction.
                             db.execute("ROLLBACK TO append_chunk")
                             self._recover_blob(db, name, attempted_size=size)
                             failure = exc

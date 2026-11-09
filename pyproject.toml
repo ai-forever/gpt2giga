@@ -13,7 +13,6 @@ dependencies = [
     "aiohttp>=3.14.5,<4",
     "httpx>=0.28.1,<1",
     "tiktoken>=0.13.0,<1",
-    "pillow>=12.3.0,<13",
     "uvicorn>=0.51.0,<1",
     "openai>=2.50.0,<4",
     "aioitertools>=0.13.0,<0.14",
@@ -101,10 +100,14 @@ dev = [
     "pytest-xdist (>=3.8.0,<4.0.0)",
     "ruff (>=0.15,<1)",
     "pytest-cov (>=7.1.0,<8.0.0)",
-    "pre-commit (>=4.3.0,<5.0.0)",
+    # Patched filelock requires Python 3.11; gateway/runtime still supports 3.10.
+    "pre-commit>=4.3.0,<5.0.0; python_version >= '3.11'",
 ]
 integrations = [
     "openai-agents (>=0.17,<1)",
     "pyjwt (>=2.13.0)",
 
 ]
+
+[tool.uv]
+constraint-dependencies = ["filelock>=4.2.1"]
