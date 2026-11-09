@@ -20,7 +20,7 @@ Below are the practical incompatibilities that the proxy covers.
 | Tools and structured output | Function/tool schemas and JSON-schema controls differ between providers and backend modes. | Maps local tools/functions and forwards structured-output schemas through native GigaChat `response_format`. |
 | Authorization | OpenAI/Anthropic clients work with API keys, while GigaChat requires a different credentials/scope mechanism. | Separates proxy API-key authentication from upstream GigaChat authorization and, if needed, supports per-request pass-through. |
 | Model discovery | GigaChat model responses do not match the OpenAI/Anthropic/Gemini/LiteLLM shape. | Repackages the model list and description for the target client. |
-| OpenAI/Anthropic/Gemini batch routes | The installed GigaChat SDK/backend has no full create/list/retrieve/cancel flow for batch APIs. | Keeps the Files/Batches routers disabled until they can work end-to-end. |
+| OpenAI/Anthropic/Gemini batch routes | GigaChat has native create/poll but no cancel/delete operation. | Uses native execution, durable row mappings and protocol results; cancel/delete returns an explicit unsupported error. See [resource APIs](resource-apis.md). |
 
 ## Mounted routes
 
@@ -47,11 +47,14 @@ Examples:
 | `POST /responses` | Stable native / normalized preview | Native GigaChat execution preserves the compatibility surface, including hosted tools and attachment handoff. Route-selected normalized execution is technical preview and rejects semantics that its selected route/model/API mode cannot preserve. |
 | `POST /embeddings` | Supported | Uses the model from the request or the proxy default for embeddings, depending on the configuration. |
 | `GET /model/info` | Supported | LiteLLM-compatible model info endpoint. |
-| `POST /files`, `GET /files*` | Disabled | Router code exists but is not mounted: files without batches give an incomplete OpenAI batch flow. |
-| `POST /batches`, `GET /batches*` | Disabled | Disabled until batch create/list/retrieve/cancel appears in the GigaChat SDK/backend. |
+| `POST /files`, `GET /files*`, `DELETE /files/{id}` | Supported | Upload/list/get/delete and binary content; root, `/v1` and `/v2` aliases. |
+| `POST /batches`, `GET /batches*` | Supported subset | Native chat/stateless Responses/embeddings jobs; durable output/error files and gateway delivery deadlines. |
 | Stored chat-completion routes | Not implemented | Stored completions are out of scope for now. |
 | Legacy `POST /completions` | Not implemented | Legacy text completions are out of scope for now. |
-| Images, audio, moderations, uploads | Not implemented | The proxy does not implement these OpenAI route families. |
+| `POST /images/generations` | Supported subset | v2, one image, base64 bytes; see [native utilities](native-utilities.md). |
+| Audio, moderations, multipart Uploads API | Not implemented | No matching backend contract. |
+| `POST /responses/input_tokens` | Text estimate | Calls tokens/count without generation or uploads; instructions, functions and output schemas included. |
+| Responses retrieve/delete/input_items; Conversations CRUD/items | Opt-in | `GPT2GIGA_RESPONSES_STORAGE_MODE=gateway`; see [response storage](response-storage.md). |
 | Fine-tuning, assistants, threads, runs, vector stores | Not implemented | Out of scope for now. |
 | Realtime/WebSocket API | Not implemented | Out of scope for now. |
 
@@ -61,10 +64,10 @@ Examples:
 |---|---|---|
 | `GET /models` | Supported | Returned in the Anthropic shape when the request contains Anthropic SDK headers. |
 | `GET /models/{model_id}` | Supported | Returned in the Anthropic shape when the request contains Anthropic SDK headers. |
-| `POST /messages` | Supported | Messages API, streaming, local tools, GigaChat v2 mapping for compatible Anthropic provider tools, and native structured output. With `GPT2GIGA_NORMALIZATION_MODE=on`, the accepted v1 subset uses the normalized request/response/SSE core. |
+| `POST /messages` | Supported | Messages API, streaming, local tools, GigaChat v2 mapping for compatible Anthropic provider tools, and native structured output. All compatibility modes share the request/response/SSE execution core. |
 | `POST /messages/count_tokens` | Provider-dependent | GigaChat can count message, system, tool, and structured-output text. A Chat Completions-only external alias rejects the operation because it has no exact token-count API. |
-| `POST /messages/batches`, `GET /messages/batches*` | Disabled | Router code exists but is not mounted until batch methods appear in the GigaChat SDK/backend. |
-| Files API beta | Not implemented | Out of scope for now. |
+| `POST /messages/batches`, `GET /messages/batches*` | Supported subset | Native execution and per-item results with enforced gateway delivery deadline; no cancellation. |
+| Files API beta | Supported subset | Explicit Anthropic headers dispatch shared `/files`; file-only upload and native attachment references. |
 | Skills API beta | Not implemented | Out of scope for now. |
 | Agents, Sessions, Environments, Admin beta APIs | Not implemented | Out of scope for now. |
 
@@ -104,7 +107,7 @@ logs.
 `supportedGenerationMethods` is built conservatively: known GigaChat/chat-like
 models advertise `generateContent`, `streamGenerateContent`, and `countTokens`;
 embedding-like models advertise only `embedContent` and `batchEmbedContents`;
-unknown/custom model ids advertise only `countTokens`, unless the backend metadata
+unknown/custom model ids advertise no methods, unless the backend metadata
 provides more precise information. A static Chat Completions alias advertises
 generation and streaming, but not `countTokens`.
 
@@ -117,8 +120,8 @@ generation and streaming, but not `countTokens`.
 | `POST /models/{model}:countTokens`, `/v1/...`, `/v2/...`, `/v1beta/...`, `/v1/v1beta/...`, `/v2/v1beta/...` | Provider-dependent | GigaChat counts `systemInstruction`, `contents`, and function declarations. A Chat Completions-only external alias rejects the operation. |
 | `POST /models/{model}:embedContent`, `/v1/...`, `/v2/...`, `/v1beta/...`, `/v1/v1beta/...`, `/v2/v1beta/...` | Supported | Returns Gemini `embedding.values` using the GigaChat embeddings backend. |
 | `POST /models/{model}:batchEmbedContents`, `/v1/...`, `/v2/...`, `/v1beta/...`, `/v1/v1beta/...`, `/v2/v1beta/...` | Supported | Returns Gemini `embeddings[]` using the GigaChat embeddings backend. |
-| `POST /v1beta/files`, `GET /v1beta/files*` | Disabled | Router code is prepared but not mounted by default. |
-| `POST /v1beta/models/{model}:batchGenerateContent`, `GET /v1beta/batches*` | Disabled | Router code is prepared but not mounted until end-to-end batch execution. |
+| Resumable `/upload/v1beta/files`, `GET /v1beta/files*`, delete | Supported subset | Real SDK upload; metadata alone does not publish a file. See [Gemini resources](gemini-resources.md). |
+| `:batchGenerateContent`, `:asyncBatchEmbedContent`, `GET /v1beta/batches*` | Supported subset | Native jobs projected as SDK Operations with real destinations. |
 
 ### Gemini function calling
 
@@ -158,8 +161,7 @@ release, check exactly the declared scope:
   `embedContent`, `batchEmbedContents`, model discovery;
 - supported prefixes: root, `/v1`, `/v2`, `/v1beta`, `/v1/v1beta`,
   `/v2/v1beta`;
-- disabled routes: the Gemini Files API and `batchGenerateContent` routers exist
-  in the code but are not publicly mounted until end-to-end upstream execution;
+- resource routes: resumable Files, batchGenerateContent and asyncBatchEmbedContent use native execution and the common durable store;
 - partially supported fields: `safetySettings` and `cachedContent` are accepted
   for compatibility/diagnostics but not enforced; `candidateCount`, `topK`, and
   `responseModalities` are accepted/observed but ignored by GigaChat execution;
@@ -169,7 +171,7 @@ release, check exactly the declared scope:
   return `400`;
 - unsupported features: Gemini tools outside the GigaChat SDK built-in mapping
   (`fileSearch`, `googleMaps`, `computerUse`, MCP, RAG/retrieval/Vertex tools),
-  full multimodal/file-backed Gemini flows, non-text embeddings content;
+  arbitrary external file URIs and non-text embeddings content;
 - approximations: `countTokens` counts the extracted text through GigaChat token
   counting, ignores non-text/file/cachedContent parts, and is not an exact
   Gemini tokenizer.
@@ -258,7 +260,7 @@ need them can point to `http://localhost:8090/v2`.
 
 ## SDK contract alignment
 
-The gateway installs `gigachat>=0.2.4,<0.3.0` from PyPI; `uv.lock` pins the
+The gateway installs `gigachat[aiohttp]==0.3.0a1` from PyPI; `uv.lock` pins the
 resolved version and artifact hashes. The gateway and SDK are tested together
 with synthetic HTTP responses; these checks do not establish live model quality,
 feature permissions, cache savings, or deterministic generation.
@@ -355,3 +357,45 @@ Here `client` uses `/v2`. To select a configured assistant instead of a model,
 pass `extra_body={"assistant_id": "<your assistant ID>"}`: the gateway removes
 `model` from the upstream request. This does not create an assistant; it requires
 an existing identifier available to your account.
+
+### Upstream transport errors
+
+Before response start, SDK timeouts return 504 (`upstream_timeout`); connection,
+validation and interrupted streams return 502 (`upstream_connection_error`,
+`invalid_upstream_response`, `stream_interrupted`). Gemini uses DEADLINE_EXCEEDED
+for 504 and UNAVAILABLE for 502. After headers, protocol SSE error events preserve
+the already sent HTTP status; failures never replay dispatched chat calls.
+Gateway `X-Request-ID` is unchanged. An available upstream ID is returned as
+`X-GigaChat-Request-ID` in HTTP errors or `error.metadata.gigachat_x_request_id`
+in SSE (Responses error event uses `metadata` directly). No body or credentials
+are copied into diagnostics. OpenAI Files content returns the original bytes.
+
+## Expanded contract boundaries
+
+All Gemini generation/count/embedding aliases serialize errors consistently. HTTP and SSE use numeric Google error codes and canonical statuses (timeout: 504 / DEADLINE_EXCEEDED). An error does not produce a subsequent successful terminal event; upstream IDs remain separate from the gateway request ID. countTokens never falls back after dispatch. Malformed upstream embedding responses (missing/extra/empty vectors, duplicate or invalid indices) return 502; valid reordered indices are restored to input order. Accepted `outputDimensionality`, `taskType`, `title` and nested model hints retain their existing ignored policy.
+
+Gemini Models applies pageSize/pageToken and advertises methods from model capability evidence, not owner-name substrings. Unknown models do not gain speculative methods. Anthropic Models uses known release dates, otherwise a stable epoch. Public GigaChat facts advertise parallel calls for GigaChat-3-Ultra via v2, not GigaChat-2-Max; explicit reviewed profile/provider metadata takes precedence.
+
+The default Anthropic version and `2023-06-01` keep legacy parameter acceptance. Explicit `anthropic-version: 2026-10-21` rejects temperature/top_p/top_k and direct assistant document blocks, including count and batch input. Files use page/next_page for that version; Models still uses after_id/before_id. Document blocks require supported owner-scoped file references; unsupported document source semantics return a validation error rather than disappearing.
+
+## Batch execution and deadlines
+
+Batch APIs require GigaChat pay-as-you-go batch access. Each job has one GigaChat model and endpoint family, `stream=false`, unique custom IDs and user-defined functions only. OpenAI supports Chat Completions, stateless Responses and embeddings; Anthropic supports Messages. Hosted tools and stateful Responses are rejected before submission. JSONL input/output is retained locally in the shared resource store rather than uploaded as a GigaChat document. Polling only retrieves an existing job. Unknown native jobs are not included in another protocol's list. There is no gateway scheduler or background polling worker.
+
+For OpenAI `completion_window="24h"` and Anthropic `expires_at`, 24 hours is a **gateway result-acceptance deadline**, not a promise about native processing duration. Poll before the deadline to persist confirmed results. At the first poll after the deadline, unresolved rows become permanently expired; confirmed success/error results remain accessible until resource retention expires. A first poll after the deadline can therefore expire a job that the backend actually finished in time: the SDK's `updated_at` is not a verified completion timestamp. Late results never overwrite expiry. GigaChat jobs may continue and be billed after gateway expiry; cancellation and deletion return 501 and do not stop the upstream job. These limitations also apply to the examples.
+
+Create failures after an ambiguous timeout are not automatically retried, because the native job may already exist. Batch output/error files and row mappings survive worker changes and restart when the resource volume is preserved. Check both `output_file_id` and `error_file_id` for OpenAI, or each Anthropic result's `type`; successful HTTP polling does not imply every item succeeded.
+
+
+### Execution and resource boundaries
+
+Known GigaChat aliases bind the selected endpoint, credentials and upstream model before
+preparation, including when request-model forwarding is disabled. Request token overrides
+retain that endpoint. The public Chat Completions facade to an OpenAI-compatible upstream
+remains blocked; it does not fall through to GigaChat. See [provider profiles](provider-profiles.md).
+
+Required attachment failures stop generation. Registered file ownership applies to raw
+native IDs, headers and protocol-specific references, including batch rows. See
+[resource guarantees](resource-apis.md#failure-and-ownership-guarantees).
+Responses streams require semantic completion, and gateway snapshot admission rejects
+unreplayable attachment/native state before I/O; see [response storage](response-storage.md).

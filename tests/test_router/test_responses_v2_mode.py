@@ -1,5 +1,7 @@
 import json
 
+import httpx
+
 import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
@@ -11,6 +13,7 @@ from gpt2giga.common.api_mode import force_gigachat_api_mode
 from gpt2giga.models.config import ProxyConfig, ProxySettings
 from gpt2giga.protocol import RequestTransformer, ResponseProcessor
 from gpt2giga.routers.openai import router
+from gpt2giga.storage.resources import ResourceStore
 
 
 class MockResponse:
@@ -72,12 +75,13 @@ class FakeAChatResource:
 
         async def gen():
             chunk_payload = {
+                "finish_reason": "stop",
                 "messages": [
                     {
                         "role": "assistant",
                         "content": [{"text": "ok-stream"}],
                     }
-                ]
+                ],
             }
             if self.thread_id is not None:
                 chunk_payload["thread_id"] = self.thread_id
@@ -354,11 +358,14 @@ def test_responses_versioned_prefix_overrides_config(route, expected_mode):
         assert response.json()["output"][0]["content"][0]["text"] == "ok-v2"
 
 
-def test_responses_forwards_harness_file_ids_with_tool_payload():
+async def test_responses_forwards_harness_file_ids_with_tool_payload(tmp_path):
     app = make_app("v2")
-    client = TestClient(app)
+    app.state.resource_store = await ResourceStore.open(tmp_path)
+    client = httpx.AsyncClient(
+        transport=httpx.ASGITransport(app), base_url="http://gateway.test"
+    )
 
-    response = client.post(
+    response = await client.post(
         "/responses",
         headers={"x-gpt2giga-attachment-ids": "file-pdf-1"},
         json={
@@ -379,6 +386,9 @@ def test_responses_forwards_harness_file_ids_with_tool_payload():
     assert app.state.request_transformer.response_chat_completion_calls[0][2] == (
         "file-pdf-1",
     )
+
+    await client.aclose()
+    await app.state.resource_store.aclose()
 
 
 def test_responses_rejects_invalid_harness_file_ids():

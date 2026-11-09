@@ -9,15 +9,13 @@ dedicated Gemini-to-normalized adapter in the main execution path.
 
 ## Current status
 
-- `GPT2GIGA_NORMALIZATION_MODE=off`: OpenAI Chat Completions and Anthropic
-  Messages go through legacy transforms.
-- `GPT2GIGA_NORMALIZATION_MODE=shadow`: OpenAI Chat builds a normalized request
-  alongside the legacy path and stores a safe diagnostic shape hash without prompt content.
-- `GPT2GIGA_NORMALIZATION_MODE=on`: OpenAI Chat Completions, the accepted
-  Anthropic Messages v1 subset, and Gemini `countTokens` are executed through
-  their protocol adapters, normalized models, and `GigaChatProviderAdapter`; a
-  legacy fallback is available before the response starts via
-  `GPT2GIGA_LEGACY_CHAT_FALLBACK=True`.
+- `GPT2GIGA_NORMALIZATION_MODE=off` remains the configuration default.
+  `off`, `shadow` and `on` use one chat execution core; `shadow` records a safe
+  diagnostic from the already decoded request. `GPT2GIGA_LEGACY_CHAT_FALLBACK`
+  remains an accepted compatibility setting and does not replay dispatch.
+- Public protocol adapters feed a small message/event IR directly into shared
+  GigaChat v1/v2 builders. One provider adapter owns SDK calls, concurrency
+  limits and iterator cleanup. Reasoning and hosted-tool intent survive decoding.
 - OpenAI Responses keeps the existing GigaChat execution path for built-in
   GigaChat models. An exact alias from an `openai_compatible` provider profile
   is normalized and executed through the bound Chat Completions adapter.
@@ -30,8 +28,8 @@ dedicated Gemini-to-normalized adapter in the main execution path.
   `gigachat` formats for protected admin workflows.
 - Explicitly admitted OpenAI-compatible and vLLM profiles use the normalized
   Chat Completions adapter as the public route switch for their exact aliases.
-  Responses, Chat Completions, Anthropic Messages, and Gemini GenerateContent
-  share that execution owner.
+  Responses, Anthropic Messages, and Gemini GenerateContent share that execution
+  owner. Chat Completions to external providers remains blocked by the loss matrix.
 - Anthropic requests, responses, and SSE project directly through the
   normalized layer. Exact token counting is available only when the selected
   provider exposes that capability; a Chat Completions-only route rejects it.
@@ -205,11 +203,13 @@ OpenAI Chat Completions in normalized mode goes like this:
 6. Observability receives the normalized request/response and builds safe
    OpenInference-style span attributes.
 
-Inside `GigaChatProviderAdapter`, the normalized request is currently
-reconstructed into an OpenAI-like payload, after which the existing
-`RequestTransformer` for the GigaChat v1/v2 SDK is used. This is a transitional
-layer: the normalized contract is already separated from the router, but part of
-the GigaChat-specific preparation still reuses the legacy code.
+`GigaChatProviderAdapter` prepares typed messages through
+`RequestTransformer.prepare_normalized`, then uses shared pure SDK builders.
+The normalized request is not reconstructed into an OpenAI request for execution.
+The old projection helper remains for history and public admin/preview compatibility,
+not as an execution entry point into the legacy request transformer.
+Native Responses retains its stateful executor and opaque thread/tool state IDs;
+its structured terminal result reaches storage and observability before SSE serialization.
 
 ## Differences from OpenAI Chat Completions
 
@@ -285,8 +285,8 @@ The normalized layer differs as follows:
 - With normalization mode `on`, `countTokens` uses the same normalized
   token-count request/response contract as the admitted bridge.
 
-The Gemini Files/Batches router modules are prepared but not mounted in the public
-API surface; they are not part of the current normalized execution path.
+Gemini Files/Batches are mounted with durable resources and native SDK execution.
+Their resource lifecycle is separate from the chat message IR.
 
 ## Differences from the GigaChat format
 
@@ -330,14 +330,12 @@ The normalized layer differs as follows:
 - Anthropic `usage.input_tokens` and `usage.output_tokens` already match the
   normalized naming, and `total_tokens` is computed when both values are present.
 
-With `GPT2GIGA_NORMALIZATION_MODE=on`, `AnthropicProtocolAdapter` builds the
-normalized request directly, `GigaChatProviderAdapter` executes it, and the
-Anthropic response/SSE projector restores the client wire contract. The same
-path represents `count_tokens` with `NormalizedTokenCountRequest` and
-`NormalizedTokenCountResponse`. Legacy execution remains the default and the
-pre-response fallback for semantics outside the accepted v1 subset. Prompt
-caching, computer use, files, and other unmodeled Anthropic features are not
-claimed by the normalized path.
+`AnthropicProtocolAdapter` builds the normalized request directly,
+`GigaChatProviderAdapter` executes it, and the Anthropic response/SSE projector
+restores the client wire contract. Token counting uses `NormalizedTokenCountRequest`
+and `NormalizedTokenCountResponse` regardless of the compatibility mode setting.
+File references are owner-checked before preparation. Unmodeled external-provider
+semantics still fail admission before I/O.
 
 ## Observability
 
@@ -376,3 +374,23 @@ Useful endpoints:
 
 Shadow diagnostics do not write prompt or response content. They store the route,
 status, warnings/errors, and the shape hash of the normalized payload.
+
+
+Token counting retains one narrow input-projection compatibility difference: `on` includes
+normalized tool/schema text, while `off`/`shadow` retain the tolerant legacy text subset.
+All modes share the same token-count dispatch, client binding, limiter and cleanup.
+
+The public Chat projection preserves the supported native `audio`, `annotations`,
+`inline_data`, `tool_executions` and `files` extensions through an explicit allowlist.
+Source markers use the shared renderer. Reference-only Chat replies do not download
+generated image bytes; consumers requiring bytes hydrate them explicitly.
+The stream owner discards reasoning/source state after both normal flush and aborted
+execution. Anthropic conversation stitching retains current typed messages and only
+decodes restored history at the storage boundary; its legacy request builder remains
+for batch/admin consumers.
+
+Streaming also preserves standalone deltas containing these public extensions,
+even without text or usage. Empty keepalives and provider state-only chunks stay
+private. A known client disconnect cancels an idle stream under both ASGI 2.3 and
+2.4; upstream cleanup completes before the model slot and credential lease are
+released.

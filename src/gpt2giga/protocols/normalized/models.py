@@ -142,6 +142,7 @@ class NormalizedReasoningIntent(NormalizedBaseModel):
     """Preserve requested reasoning controls for later capability admission."""
 
     effort: Optional[str] = None
+    max_tokens: Optional[int] = None
     summary: Optional[str] = None
     generate_summary: Optional[str] = None
     context: Optional[str] = None

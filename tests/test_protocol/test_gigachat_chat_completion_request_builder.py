@@ -10,7 +10,6 @@ from gpt2giga.protocol.anthropic.request import (
     _build_openai_data_from_anthropic_request,
 )
 from gpt2giga.protocols.gemini.adapter import GeminiProtocolAdapter
-from gpt2giga.providers.gigachat.adapter import normalized_chat_to_openai_payload
 
 
 async def test_prepare_chat_completion_builds_chat_completion_request():
@@ -1176,9 +1175,7 @@ async def test_prepare_chat_completion_maps_gemini_function_calling_example_hist
         model="GigaChat-2-Max",
     )
 
-    request = await rt.prepare_chat_completion(
-        normalized_chat_to_openai_payload(normalized)
-    )
+    request = await rt.prepare_normalized(normalized, api_mode="v2")
 
     assert [message.role for message in request.messages] == [
         "user",
@@ -1262,9 +1259,7 @@ async def test_prepare_chat_completion_ignores_gemini_orphaned_function_call():
         model="GigaChat-2-Max",
     )
 
-    request = await rt.prepare_chat_completion(
-        normalized_chat_to_openai_payload(normalized)
-    )
+    request = await rt.prepare_normalized(normalized, api_mode="v2")
 
     assert [message.role for message in request.messages] == [
         "assistant",

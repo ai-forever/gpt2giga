@@ -38,6 +38,42 @@ ALLOWED_LABELS = frozenset(
         "sink",
     }
 )
+# Unknown model names and exception classes must not create one series per request.
+MODEL_LABELS = frozenset(
+    {
+        "GigaChat",
+        "GigaChat-Pro",
+        "GigaChat-Max",
+        "GigaChat-2",
+        "GigaChat-2-Pro",
+        "GigaChat-2-Max",
+        "Embeddings",
+        "EmbeddingsGigaR",
+    }
+)
+ERROR_LABELS = frozenset(
+    {
+        "stream_cancelled",
+        "request_cancelled",
+        "HTTPException",
+        "TimeoutError",
+        "ReadTimeout",
+        "ConnectTimeout",
+        "WriteTimeout",
+        "PoolTimeout",
+        "ReadError",
+        "ConnectError",
+        "ResponseError",
+        "AuthenticationError",
+        "RateLimitError",
+        "InternalServerError",
+        "BadRequestError",
+        "APIConnectionError",
+        "APITimeoutError",
+        "RuntimeError",
+        "ValueError",
+    }
+)
 METRIC_DEFINITIONS: dict[str, tuple[str, str]] = {
     "gpt2giga_requests_total": (
         "counter",
@@ -86,8 +122,14 @@ class HistogramState:
 class PrometheusMetricsSink:
     """Collect aggregate service metrics and render Prometheus text format."""
 
-    def __init__(self, buckets: Iterable[float] = DEFAULT_BUCKETS):
+    def __init__(
+        self,
+        buckets: Iterable[float] = DEFAULT_BUCKETS,
+        *,
+        known_models: Iterable[str] = (),
+    ):
         self.buckets = tuple(sorted(float(bucket) for bucket in buckets))
+        self.known_models = MODEL_LABELS | frozenset(known_models)
         self._counters: dict[tuple[str, MetricLabels], float] = {}
         self._histograms: dict[tuple[str, MetricLabels], HistogramState] = {}
         self._lock = RLock()
@@ -101,7 +143,7 @@ class PrometheusMetricsSink:
         """Increment a counter metric."""
         if value <= 0:
             return
-        labels = normalize_labels(attributes)
+        labels = normalize_labels(attributes, known_models=self.known_models)
         with self._lock:
             key = (name, labels)
             self._counters[key] = self._counters.get(key, 0.0) + value
@@ -115,7 +157,7 @@ class PrometheusMetricsSink:
         """Record a histogram observation."""
         if value < 0:
             return
-        labels = normalize_labels(attributes)
+        labels = normalize_labels(attributes, known_models=self.known_models)
         with self._lock:
             state = self._histograms.setdefault(
                 (name, labels),
@@ -134,7 +176,7 @@ class PrometheusMetricsSink:
         attributes: Mapping[str, Any] | None = None,
     ) -> None:
         """Set an absolute counter value for externally maintained totals."""
-        labels = normalize_labels(attributes)
+        labels = normalize_labels(attributes, known_models=self.known_models)
         with self._lock:
             self._counters[(name, labels)] = max(float(value), 0.0)
 
@@ -216,7 +258,11 @@ class PrometheusMetricsSink:
             lines.append(f"{name}_count{_format_labels(labels)} {state.count}")
 
 
-def normalize_labels(attributes: Mapping[str, Any] | None) -> MetricLabels:
+def normalize_labels(
+    attributes: Mapping[str, Any] | None,
+    *,
+    known_models: frozenset[str] = MODEL_LABELS,
+) -> MetricLabels:
     """Return whitelisted Prometheus labels without raw content or secrets."""
     if not attributes:
         return ()
@@ -224,7 +270,24 @@ def normalize_labels(attributes: Mapping[str, Any] | None) -> MetricLabels:
     for key, value in attributes.items():
         if key not in ALLOWED_LABELS or value is None:
             continue
-        labels[key] = str(value)
+        value = str(value)
+        if key == "model" and value not in known_models:
+            value = "other"
+        elif key == "error_type" and value not in ERROR_LABELS:
+            value = "other"
+        elif key == "method" and value not in {
+            "GET",
+            "POST",
+            "PUT",
+            "PATCH",
+            "DELETE",
+            "HEAD",
+            "OPTIONS",
+            "TRACE",
+            "CONNECT",
+        }:
+            value = "other"
+        labels[key] = value
     return tuple(sorted(labels.items()))
 
 

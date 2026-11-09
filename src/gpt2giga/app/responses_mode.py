@@ -56,8 +56,11 @@ def select_responses_execution(
 
     try:
         route = registry.resolve(requested_model)
-    except ProviderAliasError:
-        if not _has_dynamic_gigachat_route(registry):
+    except ProviderAliasError as exc:
+        if exc.reason_id not in {
+            "alias_unknown",
+            "alias_not_string",
+        } or not _has_dynamic_gigachat_route(registry):
             raise
         selection = ResponsesExecutionSelection(
             mode=ResponsesExecutionMode.NATIVE_GIGACHAT,

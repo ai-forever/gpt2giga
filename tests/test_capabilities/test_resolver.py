@@ -133,3 +133,20 @@ def test_explicit_provider_metadata_outranks_overlay_without_name_inference() ->
     assert refined.capabilities[CapabilityKey.REASONING_CONTROLS].state is (
         CapabilityState.UNKNOWN
     )
+
+
+def test_provider_metadata_filters_unrecognized_capability_values():
+    from gpt2giga.capabilities.resolver import provider_capability_states
+
+    assert provider_capability_states(
+        {
+            "parallel_tool_calls": {"state": "supported"},
+            "text_input": False,
+            "streaming": ["invalid"],
+            "future_capability": True,
+        }
+    ) == {
+        CapabilityKey.PARALLEL_TOOL_CALLS: CapabilityState.SUPPORTED,
+        CapabilityKey.TEXT_INPUT: CapabilityState.UNSUPPORTED,
+    }
+    assert provider_capability_states(["chat"]) == {}

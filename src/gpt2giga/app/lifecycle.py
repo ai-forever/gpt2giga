@@ -1,5 +1,6 @@
 """Application lifecycle setup."""
 
+import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -21,6 +22,7 @@ from gpt2giga.providers.profiles.static_catalog import (
     STATIC_REGISTRY_PROFILE_ID,
     static_registry_catalog_snapshot,
 )
+from gpt2giga.storage.resources import ResourceStore
 from gpt2giga.sinks.logs.factory import create_traffic_log_sink, flush_traffic_log_sink
 from gpt2giga.sinks.logs.query import (
     close_traffic_log_query_store,
@@ -35,6 +37,11 @@ from gpt2giga.sinks.observability.factory import (
     create_observability_sink,
     flush_observability_sink,
 )
+
+
+# Telemetry gets a separate best-effort budget; request drain retains its meaning.
+TELEMETRY_FLUSH_TIMEOUT_SECONDS = 5.0
+TELEMETRY_CLOSE_TIMEOUT_SECONDS = 5.0
 
 
 @asynccontextmanager
@@ -106,6 +113,15 @@ async def lifespan(app: FastAPI):
         log_level=config.proxy_settings.log_level,
     )
     try:
+        app.state.resource_store = await ResourceStore.open(
+            config.proxy_settings.resource_store_path,
+            retention_seconds=config.proxy_settings.resource_retention_seconds,
+            max_blob_bytes=config.proxy_settings.resource_max_blob_bytes,
+            max_total_blob_bytes=config.proxy_settings.resource_max_total_blob_bytes,
+            max_metadata_bytes=config.proxy_settings.resource_max_metadata_bytes,
+            max_resources=config.proxy_settings.resource_max_resources,
+        )
+        await app.state.resource_store.purge_expired()
         app.state.bridge_provider_runtime = BridgeProviderRuntime(app.state)
     except BaseException:
         app.state.bridge_shutting_down = True
@@ -139,24 +155,62 @@ async def _close_runtime_dependencies(
 ) -> None:
     """Close every application-owned dependency in deterministic order."""
     logger = app.state.logger
-    await flush_metrics_sink(getattr(app.state, "metrics_sink", None), logger=logger)
-    await flush_observability_sink(
-        getattr(app.state, "observability_sink", None), logger=logger
-    )
-    await flush_traffic_log_sink(
-        getattr(app.state, "traffic_log_sink", None), logger=logger
-    )
-    await stop_traffic_log_retention_task(
-        getattr(app.state, "traffic_log_retention_task", None), logger=logger
-    )
-    await close_traffic_log_query_store(
-        getattr(app.state, "traffic_log_query_store", None), logger=logger
-    )
+    cancelled = False
+    for name, flush in (
+        ("metrics_sink", flush_metrics_sink),
+        ("observability_sink", flush_observability_sink),
+        ("traffic_log_sink", flush_traffic_log_sink),
+    ):
+        try:
+            await asyncio.wait_for(
+                flush(getattr(app.state, name, None), logger=logger),
+                timeout=TELEMETRY_FLUSH_TIMEOUT_SECONDS,
+            )
+        except asyncio.TimeoutError:
+            logger.warning("{} flush timed out; pending telemetry is discarded", name)
+        except asyncio.CancelledError:
+            cancelled = True
+        # A failed drain must not skip the owner of a provider or backend.
+        # Queue aclose abandons work before closing; it never repeats join().
+        close = getattr(getattr(app.state, name, None), "aclose", None)
+        if close is not None:
+            try:
+                await asyncio.wait_for(close(), timeout=TELEMETRY_CLOSE_TIMEOUT_SECONDS)
+            except asyncio.TimeoutError:
+                logger.warning("{} close timed out; continuing shutdown", name)
+            except asyncio.CancelledError:
+                cancelled = True
+            except Exception:
+                logger.exception("{} close failed; continuing shutdown", name)
+    closers = [
+        lambda: stop_traffic_log_retention_task(
+            getattr(app.state, "traffic_log_retention_task", None), logger=logger
+        ),
+        lambda: close_traffic_log_query_store(
+            getattr(app.state, "traffic_log_query_store", None), logger=logger
+        ),
+    ]
     runtime = getattr(app.state, "bridge_provider_runtime", None)
     if runtime is not None:
-        await runtime.aclose()
-    await close_gigachat_client(getattr(app.state, "gigachat_client", None), logger)
+        closers.append(runtime.aclose)
+    closers.append(
+        lambda: close_gigachat_client(
+            getattr(app.state, "gigachat_client", None), logger
+        )
+    )
     gigachat_pool = getattr(app.state, "gigachat_pool", None)
     if gigachat_pool is not None:
-        await gigachat_pool.aclose()
-    await attachment_processor.close()
+        closers.append(gigachat_pool.aclose)
+    closers.append(attachment_processor.close)
+    resource_store = getattr(app.state, "resource_store", None)
+    if resource_store is not None:
+        closers.append(resource_store.aclose)
+    for close in closers:
+        try:
+            await close()
+        except asyncio.CancelledError:
+            cancelled = True
+        except Exception:
+            logger.exception("Runtime dependency cleanup failed; continuing shutdown")
+    if cancelled:
+        raise asyncio.CancelledError

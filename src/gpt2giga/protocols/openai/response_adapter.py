@@ -10,7 +10,11 @@ from typing import Any
 from gpt2giga.core.context import RequestContext
 from gpt2giga.protocols.normalized.usage import cached_input_tokens
 from gpt2giga.common.tools import split_gigachat_tool_name
-from gpt2giga.protocol.response.processor import ResponseProcessor
+from gpt2giga.common.sources import extract_sources, render_text_with_sources
+from gpt2giga.protocol.response.processor import (
+    PUBLIC_CHAT_MESSAGE_EXTENSIONS,
+    ResponseProcessor,
+)
 from gpt2giga.protocols.normalized import (
     NormalizedChoice,
     NormalizedMessage,
@@ -190,7 +194,12 @@ def _message_to_openai(message: NormalizedMessage | None) -> dict[str, Any]:
             _tool_call_to_openai(index, tool_call)
             for index, tool_call in enumerate(message.tool_calls)
         ]
-        payload["content"] = message.content
+    for key in PUBLIC_CHAT_MESSAGE_EXTENSIONS:
+        if key in message.raw_extensions:
+            payload[key] = message.raw_extensions[key]
+    inline_data = payload.get("inline_data")
+    if isinstance(payload["content"], str) and extract_sources(inline_data):
+        payload["content"] = render_text_with_sources(payload["content"], inline_data)
     return payload
 
 

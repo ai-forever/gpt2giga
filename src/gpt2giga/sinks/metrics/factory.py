@@ -15,7 +15,7 @@ def create_metrics_sink(settings: ProxySettings) -> MetricsSink:
     """Create the configured metrics sink."""
     if not settings.metrics_enabled:
         return NoopMetricsSink()
-    return PrometheusMetricsSink()
+    return PrometheusMetricsSink(known_models=settings.model_max_connections)
 
 
 async def emit_metric_increment(

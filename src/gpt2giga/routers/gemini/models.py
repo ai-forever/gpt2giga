@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import base64
+import hashlib
+import json
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
@@ -13,6 +16,11 @@ from gpt2giga.app_state import (
     record_gigachat_model_catalog_snapshot,
 )
 from gpt2giga.common.exceptions import exceptions_handler
+from gpt2giga.capabilities import (
+    CapabilityKey,
+    CapabilityState,
+    resolve_gigachat_model_layer,
+)
 from gpt2giga.common.gigachat_options import (
     extract_gigachat_request_options,
     gigachat_request_options,
@@ -24,16 +32,10 @@ from gpt2giga.providers.profiles.static_catalog import static_registry_model_pay
 
 router = APIRouter(tags=[OPENAPI_TAG_GEMINI_MODELS])
 
-_GENERATION_METHODS = [
-    "generateContent",
-    "streamGenerateContent",
-    "countTokens",
-]
 _EMBEDDING_METHODS = [
     "embedContent",
     "batchEmbedContents",
 ]
-_CONSERVATIVE_METHODS = ["countTokens"]
 _MODEL_PROJECTION_QUERY_PARAMS = (
     "page_size",
     "pageSize",
@@ -56,15 +58,17 @@ async def list_models(request: Request):
             request,
             exclude_query_params=_MODEL_PROJECTION_QUERY_PARAMS,
         )
-        async with gigachat_request_options(giga_client, request_options):
+        async with gigachat_request_options(
+            giga_client, request_options, include_body=False
+        ) as request_client:
             snapshot = await catalog.list_models(
-                giga_client,
+                request_client,
                 provider_profile_id=get_gigachat_model_catalog_profile_id(request),
                 refresh=_catalog_refresh_requested(request),
             )
         record_gigachat_model_catalog_snapshot(request, snapshot)
         models = [catalog_model_payload(item) for item in snapshot.models]
-    return build_gemini_model_list(models)
+    return build_gemini_model_list(models, request=request)
 
 
 @router.get(
@@ -93,11 +97,13 @@ async def get_model(model: str, request: Request):
             request,
             exclude_query_params=_MODEL_PROJECTION_QUERY_PARAMS,
         )
-        async with gigachat_request_options(giga_client, request_options):
+        async with gigachat_request_options(
+            giga_client, request_options, include_body=False
+        ) as request_client:
             try:
                 descriptor = await catalog.get_model(
                     requested_model,
-                    giga_client,
+                    request_client,
                     provider_profile_id=get_gigachat_model_catalog_profile_id(request),
                     refresh=_catalog_refresh_requested(request),
                 )
@@ -135,11 +141,50 @@ def _catalog_refresh_requested(request: Request) -> bool:
     return request.query_params.get("refresh", "").casefold() in {"1", "true", "yes"}
 
 
-def build_gemini_model_list(models: list[dict[str, Any]]) -> dict[str, Any]:
+def build_gemini_model_list(
+    models: list[dict[str, Any]], *, request: Request | None = None
+) -> dict[str, Any]:
     """Build a Gemini-compatible model list payload."""
+    projected = [build_gemini_model(model) for model in models]
+    if request is None:
+        return {"models": projected, "nextPageToken": ""}
+    query = request.query_params
+    try:
+        page_size = int(query.get("pageSize", query.get("page_size", "50")))
+    except ValueError as exc:
+        raise HTTPException(400, "pageSize must be a positive integer") from exc
+    if not 1 <= page_size <= 1000:
+        raise HTTPException(400, "pageSize must be between 1 and 1000")
+    # Bind the cursor to a stable ordering and the current visible inventory.
+    projected.sort(key=lambda item: item["name"])
+    revision = hashlib.sha256(
+        json.dumps(projected, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    offset = 0
+    token = query.get("pageToken", query.get("page_token", ""))
+    if token:
+        try:
+            if len(token) > 1024:
+                raise ValueError
+            cursor = json.loads(base64.b64decode(token, altchars=b"-_", validate=True))
+            offset = cursor["offset"]
+            if (
+                type(offset) is not int
+                or not 0 < offset < len(projected)
+                or cursor["revision"] != revision
+            ):
+                raise ValueError
+        except (ValueError, KeyError, TypeError) as exc:
+            raise HTTPException(400, "Invalid or stale pageToken") from exc
+    end = offset + page_size
+    next_token = ""
+    if end < len(projected):
+        next_token = base64.urlsafe_b64encode(
+            json.dumps({"offset": end, "revision": revision}).encode()
+        ).decode()
     return {
-        "models": [build_gemini_model(model) for model in models],
-        "nextPageToken": "",
+        "models": projected[offset:end],
+        "nextPageToken": next_token,
     }
 
 
@@ -163,54 +208,57 @@ def _supported_generation_methods(
     model: dict[str, Any],
     model_id: str,
 ) -> list[str]:
-    explicit = model.get("supportedGenerationMethods") or model.get(
-        "supported_generation_methods"
+    explicit = model.get(
+        "supportedGenerationMethods", model.get("supported_generation_methods")
     )
     if isinstance(explicit, list) and all(isinstance(item, str) for item in explicit):
         return list(explicit)
 
-    capability_text = _capability_text(model, model_id)
-    if _is_embedding_model(capability_text):
-        return list(_EMBEDDING_METHODS)
-    if _is_generation_model(capability_text):
-        return list(_GENERATION_METHODS)
-    return list(_CONSERVATIVE_METHODS)
-
-
-def _capability_text(model: dict[str, Any], model_id: str) -> str:
-    values: list[str] = [model_id]
-    for key in (
-        "type",
-        "object",
-        "display_name",
-        "description",
-        "owned_by",
-        "capabilities",
-        "supported_methods",
+    model_type = str(model.get("type") or "").casefold()
+    declared = model.get("capabilities")
+    labels = (
+        {item for item in declared if isinstance(item, str)}
+        if isinstance(declared, list)
+        else set()
+    )
+    if (
+        model_type in {"embedder", "embedding", "embeddings"}
+        or labels & {"embedder", "embedding", "embeddings"}
+        or model_id in {"Embeddings", "EmbeddingsGigaR"}
     ):
-        value = model.get(key)
-        if isinstance(value, list):
-            values.extend(str(item) for item in value)
-        elif value is not None:
-            values.append(str(value))
-    return " ".join(values).lower()
-
-
-def _is_embedding_model(capability_text: str) -> bool:
-    return any(
-        marker in capability_text for marker in ("embedding", "embeddings", "embed")
+        return list(_EMBEDDING_METHODS)
+    layer = resolve_gigachat_model_layer(model_id, "v2")
+    text = (
+        layer.capabilities[CapabilityKey.TEXT_INPUT].state is CapabilityState.SUPPORTED
     )
-
-
-def _is_generation_model(capability_text: str) -> bool:
-    return any(
-        marker in capability_text
-        for marker in (
-            "gigachat",
-            "chat",
-            "completion",
-            "generation",
-            "gpt",
-            "llm",
-        )
+    streaming = (
+        layer.capabilities[CapabilityKey.STREAMING].state is CapabilityState.SUPPORTED
     )
+    # Exact legacy aliases retain their existing text contract. Names of future
+    # models, owners and free-text descriptions are never capability evidence.
+    if (
+        model_type in {"chat", "text", "generation", "completion", "llm"}
+        or labels & {"chat", "generation", "text"}
+        or model_id in {"GigaChat", "GigaChat-Pro", "GigaChat-Plus", "GigaChat-Max"}
+    ):
+        text = streaming = True
+    if isinstance(declared, dict):
+        text = _declared_support(declared.get("text_input"), text)
+        streaming = _declared_support(declared.get("streaming"), streaming)
+    methods = []
+    if text:
+        methods.append("generateContent")
+        if streaming:
+            methods.append("streamGenerateContent")
+        methods.append("countTokens")
+    return methods
+
+
+def _declared_support(value: Any, default: bool) -> bool:
+    if isinstance(value, dict):
+        value = value.get("state")
+    if value is True or value == "supported":
+        return True
+    if value is False or value in ("unsupported", "unknown"):
+        return False
+    return default

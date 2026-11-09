@@ -5,11 +5,10 @@ Anthropic и Gemini, и проверить каждый протокол пер�
 
 ## Требования
 
-- Python 3.10–3.14 для локального запуска.
-- Поддержка Python 3.15 экспериментальная (preview). Отдельный неблокирующий CI-job
-  запускает тесты, собирает wheel/sdist и проверяет установленный пакет.
-- Текущему checkout нужен GigaChat Python SDK `>=0.2.4,<0.3.0`.
-  SDK `0.2.4` опубликован в PyPI и устанавливается автоматически вместе со шлюзом.
+- Python 3.10–3.15 для локального запуска.
+- Стабильный Python 3.15 включён в обязательные CI-проверки тестов и установленного пакета.
+- Текущему checkout нужен GigaChat Python SDK `gigachat[aiohttp]==0.3.0a1`.
+  SDK `0.3.0a1` опубликован в PyPI и устанавливается автоматически вместе со шлюзом.
 - `uv` для локальной разработки.
 - Docker с плагином Compose для контейнерного запуска.
 - Учётные данные и scope GigaChat для нужного аккаунта.
@@ -192,7 +191,8 @@ GPT2GIGA_PASS_TOKEN=True
 
 ## Preview-образы Python 3.15
 
-Поддержка Python 3.15 в контейнерах экспериментальная. Оба реестра публикуют
+Python 3.15 использует стабильный базовый образ. Preview aliases сохраняются;
+опубликованные образы 0.3.1 доступны в обоих реестрах:
 образы для `linux/amd64` и `linux/arm64`:
 
 ```sh
@@ -203,4 +203,4 @@ docker pull ghcr.io/ai-forever/gpt2giga:0.3.1-preview
 Подвижный тег — `preview`. Теги с версией Python — `python3.15-preview`
 в Docker Hub и `py3.15-preview` в GHCR; для релиза добавляется префикс
 `0.3.1-`. Теги `latest` и `0.3.1` используют Python 3.13.
-Локальная сборка: `docker build --build-arg PYTHON_VERSION=3.15-rc -t gpt2giga:preview .`.
+Локальная сборка: `docker build --build-arg PYTHON_VERSION=3.15 -t gpt2giga:preview .`.

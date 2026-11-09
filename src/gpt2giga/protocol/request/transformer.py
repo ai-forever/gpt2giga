@@ -1,8 +1,10 @@
 import json
+from copy import deepcopy
 from collections.abc import Mapping
 from typing import Any, Dict, List, Optional, Tuple
 
 from gigachat import GigaChat
+from gigachat.exceptions import APIResponseValidationError
 from gigachat.models import (
     ChatCompletionRequest,
     ChatFunctionSpecification,
@@ -39,8 +41,16 @@ from gpt2giga.providers.gigachat.model_resolution import (
 )
 from gpt2giga.protocol.attachment.attachments import AttachmentProcessor
 from gpt2giga.protocol.request.params import (
+    _apply_tool_choice_policy,
     sanitize_openai_chat_parameters,
     sanitize_openai_responses_parameters,
+)
+
+
+from gpt2giga.protocols.normalized.models import (
+    NormalizedChatRequest,
+    NormalizedMessage,
+    NormalizedToolKind,
 )
 
 
@@ -107,6 +117,8 @@ class RequestTransformer:
         size_totals = {"audio_image_total": 0}
 
         for i, message in enumerate(messages):
+            if isinstance(message, NormalizedMessage):
+                message = normalized_message_fields(message)
             self.logger.debug(f"Processing message {i}: role={message.get('role')}")
 
             original_role = message.get("role", "user")
@@ -481,6 +493,10 @@ class RequestTransformer:
                                 url,
                                 max_audio_image_total_remaining=remaining,
                             )
+                            if not upload_result:
+                                raise APIResponseValidationError(
+                                    "Attachment preparation returned no file"
+                                )
                             if upload_result:
                                 attachments.append(upload_result.file_id)
                                 if (
@@ -496,6 +512,10 @@ class RequestTransformer:
                                 )
                         else:
                             file_id = await processor.upload_file(giga_client, url)
+                            if not file_id:
+                                raise APIResponseValidationError(
+                                    "Attachment preparation returned no file"
+                                )
                             if file_id:
                                 attachments.append(file_id)
                                 logger.info(f"Added attachment: {file_id}")
@@ -520,6 +540,10 @@ class RequestTransformer:
                             filename,
                             max_audio_image_total_remaining=remaining,
                         )
+                        if not upload_result:
+                            raise APIResponseValidationError(
+                                "Attachment preparation returned no file"
+                            )
                         if upload_result:
                             attachments.append(upload_result.file_id)
                             if (
@@ -535,6 +559,10 @@ class RequestTransformer:
                         file_id = await processor.upload_file(
                             giga_client, file_data, filename
                         )
+                        if not file_id:
+                            raise APIResponseValidationError(
+                                "Attachment preparation returned no file"
+                            )
                         if file_id:
                             attachments.append(file_id)
                             logger.info(f"Added attachment: {file_id}")
@@ -735,6 +763,9 @@ class RequestTransformer:
             if builtin_tools:
                 transformed["_gpt2giga_builtin_tools"] = builtin_tools
 
+        return self._transform_response_format_parameter(transformed)
+
+    def _transform_response_format_parameter(self, transformed: dict) -> dict:
         response_format: dict | None = transformed.pop("response_format", None)
         if response_format:
             if response_format.get("type") == "json_schema":
@@ -1081,6 +1112,10 @@ class RequestTransformer:
             giga_client,
             allow_parallel_tool_calls=False,
         )
+        return self.build_chat_request(transformed_data)
+
+    def build_chat_request(self, transformed_data: dict) -> dict:
+        """Build a v1 SDK payload from prepared provider fields, without I/O."""
         self._sanitize_legacy_message_state_ids(transformed_data["messages"])
 
         messages_objs = [
@@ -1130,6 +1165,12 @@ class RequestTransformer:
             allow_parallel_tool_calls=True,
         )
 
+        return self.build_chat_completion_request(transformed_data)
+
+    def build_chat_completion_request(
+        self, transformed_data: dict
+    ) -> ChatCompletionRequest:
+        """Build a v2 SDK request from prepared provider fields, without I/O."""
         messages = self._build_chat_completion_messages(transformed_data["messages"])
         request_payload = self._build_chat_completion_request_payload(
             transformed_data,
@@ -1553,6 +1594,120 @@ class RequestTransformer:
             "function_name": map_tool_name_to_gigachat(name),
         }
 
+    async def prepare_normalized(
+        self,
+        request: NormalizedChatRequest,
+        giga_client: Optional[GigaChat] = None,
+        *,
+        api_mode: str,
+        forced_model: str | None = None,
+    ) -> dict | ChatCompletionRequest:
+        """Prepare typed intent directly through the shared Giga SDK builders."""
+        fields = request.generation_config.model_dump(exclude_none=True)
+        fields.pop("raw_extensions", None)
+        fields.pop("provider_metadata", None)
+        # Only generation controls supported by the legacy Giga contract.
+        for ignored in ("presence_penalty", "frequency_penalty", "seed"):
+            fields.pop(ignored, None)
+        fields.update(model=request.model, stream=request.stream)
+        if request.protocol == "openai":
+            fields.update(deepcopy(request.raw_extensions))
+        metadata = request.provider_metadata.get("gigachat", {})
+        if isinstance(metadata, Mapping) and isinstance(
+            metadata.get("additional_fields"), Mapping
+        ):
+            fields["additional_fields"] = deepcopy(dict(metadata["additional_fields"]))
+        if request.response_format is not None:
+            fields["response_format"] = request.response_format.to_json_dict()
+        if request.reasoning is not None:
+            fields["reasoning"] = {
+                **request.reasoning.raw_extensions,
+                **(
+                    {"effort": request.reasoning.effort}
+                    if request.reasoning.effort is not None
+                    else {}
+                ),
+                **(
+                    {"max_tokens": request.reasoning.max_tokens}
+                    if request.reasoning.max_tokens is not None
+                    else {}
+                ),
+            }
+        elif request.protocol == "anthropic":
+            fields.update(
+                {
+                    key: deepcopy(value)
+                    for key, value in request.generation_config.raw_extensions.items()
+                    if key in {"reasoning", "reasoning_effort"}
+                }
+            )
+        functions = []
+        builtins = []
+        for tool in request.tools:
+            if tool.kind is NormalizedToolKind.NAMESPACE:
+                if api_mode == "v2":
+                    functions.extend(
+                        iter_function_tool_payloads(
+                            {
+                                "tools": [
+                                    {
+                                        "type": "namespace",
+                                        "name": tool.name,
+                                        **tool.configuration,
+                                    }
+                                ]
+                            },
+                            require_parameters=False,
+                        )
+                    )
+                continue
+            source = {"type": tool.type, **tool.configuration, **tool.raw_extensions}
+            builtin = build_gigachat_builtin_tool_payload(source)
+            if builtin:
+                if api_mode == "v2" and builtin not in builtins:
+                    builtins.append(builtin)
+                continue
+            if tool.kind is NormalizedToolKind.HOSTED:
+                raise ValueError(f"GigaChat cannot map hosted tool type {tool.type!r}")
+            function = {"name": tool.name, "parameters": deepcopy(tool.parameters)}
+            if tool.description is not None:
+                function["description"] = tool.description
+            function.update(
+                deepcopy(
+                    {
+                        key: value
+                        for key, value in tool.raw_extensions.items()
+                        if key != "function"
+                    }
+                )
+            )
+            function.update(deepcopy(tool.raw_extensions.get("function", {})))
+            functions.append(function)
+        if functions:
+            fields["functions"] = functions
+        if builtins:
+            fields["_gpt2giga_builtin_tools"] = builtins
+        if isinstance(metadata, Mapping) and metadata.get("function_call") is not None:
+            fields["function_call"] = deepcopy(metadata["function_call"])
+        elif request.tool_choice is not None:
+            fields["tool_choice"] = deepcopy(request.tool_choice)
+            _apply_tool_choice_policy(fields, allow_builtin_tools=api_mode == "v2")
+            if request.tool_choice == "none" or request.tool_choice == {"type": "none"}:
+                fields.pop("_gpt2giga_builtin_tools", None)
+        if api_mode == "v2" and request.parallel_tool_calls is not None:
+            fields["parallel_tool_calls"] = request.parallel_tool_calls
+        transformed = self._transform_response_format_parameter(
+            self._transform_common_parameters(fields)
+        )
+        transformed["messages"] = request.messages
+        if api_mode == "v2":
+            return await self._finalize_chat_completion_transformation(
+                transformed, giga_client, forced_model=forced_model
+            )
+        return await self._finalize_chat_transformation(
+            transformed, giga_client, forced_model=forced_model
+        )
+
     async def prepare_chat(
         self,
         data: dict,
@@ -1595,16 +1750,21 @@ class RequestTransformer:
         giga_client: Optional[GigaChat] = None,
         *,
         attachment_ids: tuple[str, ...] = (),
+        forced_model: str | None = None,
     ) -> Dict[str, Any]:
         """Prepare a Responses API request for the legacy GigaChat chat path."""
         transformed_data = self.transform_responses_parameters(
             data, allow_builtin_tools=False, allow_stateful=False
         )
+        if forced_model is not None:
+            transformed_data["model"] = forced_model
         transformed_data["messages"] = self.transform_response_format(
             transformed_data,
             attachment_ids=attachment_ids,
         )
-        return await self._finalize_chat_transformation(transformed_data, giga_client)
+        return await self._finalize_chat_transformation(
+            transformed_data, giga_client, forced_model=forced_model
+        )
 
     async def prepare_response_chat_completion(
         self,
@@ -1612,12 +1772,15 @@ class RequestTransformer:
         giga_client: Optional[GigaChat] = None,
         *,
         attachment_ids: tuple[str, ...] = (),
+        forced_model: str | None = None,
     ) -> ChatCompletionRequest:
         """Prepare a Responses API request for the GigaChat chat completion path."""
         transformed_data = self.transform_responses_parameters(
             data, allow_builtin_tools=True, allow_stateful=True
         )
         transformed_data["_gpt2giga_responses_api"] = True
+        if forced_model is not None:
+            transformed_data["model"] = forced_model
         transformed_data["messages"] = self.transform_response_format(
             transformed_data,
             attachment_ids=attachment_ids,
@@ -1625,4 +1788,43 @@ class RequestTransformer:
         return await self._finalize_chat_completion_transformation(
             transformed_data,
             giga_client,
+            forced_model=forced_model,
         )
+
+
+def normalized_message_fields(message: NormalizedMessage) -> dict:
+    """Expose message fields to the shared role, attachment and tool-state preparation."""
+    content = message.content
+    if isinstance(content, list):
+        parts = []
+        for part in content:
+            value = {"type": part.type, **part.raw_extensions}
+            if part.type == "text":
+                value["text"] = part.text or ""
+            elif part.type == "image_reference" and part.image_reference is not None:
+                value.update(
+                    type="image_url", image_url={"url": part.image_reference.uri}
+                )
+            elif part.type in {"image_url", "file"}:
+                value[part.type] = part.data
+            else:
+                value["data"] = part.data
+            parts.append(value)
+        content = parts
+    fields = {"role": message.role, "content": content}
+    if message.name is not None:
+        fields["name"] = message.name
+    if message.tool_call_id is not None:
+        fields["tool_call_id"] = message.tool_call_id
+    if message.tool_calls:
+        calls = []
+        for call in message.tool_calls:
+            extensions = deepcopy(call.raw_extensions)
+            function = {"name": call.name, "arguments": call.arguments}
+            function.update(extensions.pop("function", {}))
+            calls.append(
+                {"id": call.id, "type": call.type, "function": function, **extensions}
+            )
+        fields["tool_calls"] = calls
+    fields.update(deepcopy(message.raw_extensions))
+    return {key: value for key, value in fields.items() if value is not None}

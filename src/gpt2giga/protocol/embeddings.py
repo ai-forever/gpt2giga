@@ -3,12 +3,14 @@
 import base64
 import copy
 import functools
+import math
 import struct
 from typing import Any, Dict, List, Optional
 
 import anyio
 import tiktoken
 from fastapi import HTTPException
+from gigachat.exceptions import APIResponseValidationError
 
 from gpt2giga.common.client_params import extract_gigachat_response_metadata
 
@@ -59,7 +61,7 @@ async def transform_embedding_body(
 
 
 def normalize_embedding_response(
-    response: Any, model: Optional[str] = None
+    response: Any, model: Optional[str] = None, *, expected_count: int | None = None
 ) -> Dict[str, Any]:
     """Shape a GigaChat embeddings response like OpenAI's response envelope."""
     body = _to_dict(response)
@@ -67,15 +69,36 @@ def normalize_embedding_response(
         body = {}
 
     raw_data = body.get("data")
-    if not isinstance(raw_data, list):
-        raw_data = []
+    if not isinstance(raw_data, list) or not raw_data:
+        _invalid_embedding_response(body)
+    if expected_count is not None and len(raw_data) != expected_count:
+        _invalid_embedding_response(body)
 
     data = []
+    indices = set()
     item_prompt_tokens = 0
-    for index, raw_item in enumerate(raw_data):
+    for raw_item in raw_data:
         item = _to_dict(raw_item)
         if not isinstance(item, dict):
-            item = {}
+            _invalid_embedding_response(body)
+        index = item.get("index")
+        vector = item.get("embedding")
+        if (
+            not isinstance(index, int)
+            or isinstance(index, bool)
+            or not 0 <= index < len(raw_data)
+            or index in indices
+            or not isinstance(vector, list)
+            or not vector
+            or any(
+                not isinstance(value, (int, float))
+                or isinstance(value, bool)
+                or not math.isfinite(value)
+                for value in vector
+            )
+        ):
+            _invalid_embedding_response(body)
+        indices.add(index)
 
         usage = _to_dict(item.get("usage"))
         if isinstance(usage, dict):
@@ -84,8 +107,8 @@ def normalize_embedding_response(
         data.append(
             {
                 "object": "embedding",
-                "embedding": item.get("embedding", []),
-                "index": _embedding_index(item.get("index"), index),
+                "embedding": vector,
+                "index": index,
             }
         )
 
@@ -99,7 +122,7 @@ def normalize_embedding_response(
 
     result = {
         "object": "list",
-        "data": data,
+        "data": sorted(data, key=lambda item: item["index"]),
         "model": _non_empty_string(body.get("model")) or _non_empty_string(model) or "",
         "usage": {
             "prompt_tokens": prompt_tokens,
@@ -110,6 +133,14 @@ def normalize_embedding_response(
     if response_metadata:
         result["metadata"] = response_metadata
     return result
+
+
+def _invalid_embedding_response(body: dict[str, Any]) -> None:
+    headers = body.get("x_headers")
+    request_id = headers.get("x-request-id") if isinstance(headers, dict) else None
+    raise APIResponseValidationError(
+        "The upstream embeddings response was invalid.", request_id=request_id
+    )
 
 
 def apply_embedding_encoding_format(response: Any, encoding_format: Any) -> Any:
@@ -270,12 +301,6 @@ def _int_or_zero(value: Any, default: int = 0) -> int:
     if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
         return value
     return default
-
-
-def _embedding_index(value: Any, fallback: int) -> int:
-    if isinstance(value, int) and not isinstance(value, bool):
-        return value
-    return fallback
 
 
 def _non_empty_string(value: Any) -> Optional[str]:

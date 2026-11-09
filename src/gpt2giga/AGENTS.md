@@ -39,10 +39,9 @@ duplicating them in routes. Put shared application state in lifecycle wiring and
   compatibility contract.
 - Do not reorder middleware or change app-factory registration without
   app-level tests; Starlette request execution order is significant.
-- Router code for OpenAI Files/Batches, Anthropic Message Batches, and Gemini
-  Files/Batches is intentionally not mounted. Mount it only in explicit
-  end-to-end scope with an executable backend, compatibility tests, examples,
-  and docs.
+- Files and Batches for OpenAI, Anthropic and Gemini are mounted. Their
+  durable metadata, native execution and protocol projections require mounted
+  SDK-boundary tests; importing a router alone never establishes reachability.
 - Keep upstream calls async. Reuse the existing provider/helper for the path
   being changed; do not migrate a mounted legacy execution path without
   explicit scope. Preserve per-request token handoff, model concurrency limits,

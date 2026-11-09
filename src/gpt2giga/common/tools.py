@@ -227,7 +227,7 @@ def build_namespaced_tool_name_map(
         for nested_tool in nested_tools:
             if not isinstance(nested_tool, Mapping):
                 continue
-            function = _function_tool_payload(
+            function = function_tool_payload(
                 nested_tool,
                 require_parameters=False,
             )
@@ -262,7 +262,7 @@ def iter_function_tool_payloads(data: dict, *, require_parameters: bool = True):
 
         if "function" in tool and not isinstance(tool["function"], Mapping):
             continue
-        function = _function_tool_payload(tool, require_parameters=require_parameters)
+        function = function_tool_payload(tool, require_parameters=require_parameters)
         if function is None:
             continue
         function = dict(function)
@@ -288,7 +288,7 @@ def _iter_namespace_function_payloads(
     for nested_tool in nested_tools:
         if not isinstance(nested_tool, Mapping):
             continue
-        function = _function_tool_payload(
+        function = function_tool_payload(
             nested_tool,
             require_parameters=require_parameters,
         )
@@ -305,11 +305,12 @@ def _iter_namespace_function_payloads(
         yield function
 
 
-def _function_tool_payload(
+def function_tool_payload(
     tool: Mapping[str, Any],
     *,
     require_parameters: bool = True,
 ) -> Mapping[str, Any] | None:
+    """Select the accepted function schema, including flat input_schema precedence."""
     if "function" in tool:
         function = tool["function"]
         if not isinstance(function, Mapping):

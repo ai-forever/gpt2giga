@@ -92,6 +92,15 @@ class FakeTransformer:
         self.calls = []
         self.chat_completion_calls = []
 
+    async def prepare_normalized(
+        self, request, giga_client=None, *, api_mode, **kwargs
+    ):
+        data = normalized_chat_to_openai_payload(request)
+        prepare = (
+            self.prepare_chat_completion if api_mode == "v2" else self.prepare_chat
+        )
+        return await prepare(data, giga_client)
+
     async def prepare_chat(self, data, giga_client=None):
         self.calls.append((data, giga_client))
         return {"model": data["model"], "messages": data["messages"]}
@@ -738,3 +747,39 @@ async def test_gigachat_provider_adapter_stream_disconnect_stops_after_start():
     ]
 
     assert [event.type for event in events] == ["message_start"]
+
+
+@pytest.mark.parametrize("mode", ["v1", "v2"])
+async def test_stream_preparation_sdk_timeout_becomes_safe_error(mode):
+    from gigachat.exceptions import APITimeoutError
+
+    class FailingPreparation:
+        async def prepare_chat(self, *args, **kwargs):
+            raise APITimeoutError("secret request body", request_id="upstream-id")
+
+        prepare_chat_completion = prepare_chat
+        prepare_normalized = prepare_chat
+
+    adapter = GigaChatProviderAdapter(
+        config=ProxyConfig(proxy=ProxySettings(gigachat_api_mode=mode)),
+        request_transformer=FailingPreparation(),
+        giga_client=FakeClient(),
+        model_limiter=ModelConcurrencyLimiter({}),
+        response_processor=ResponseProcessor(),
+    )
+    events = [
+        event
+        async for event in adapter.stream_chat(
+            NormalizedChatRequest(
+                model="GigaChat",
+                stream=True,
+                messages=[NormalizedMessage(role="user", content="hello")],
+            )
+        )
+    ]
+    assert [event.type for event in events] == ["error"]
+    assert events[0].error.code == "upstream_timeout"
+    assert events[0].error.provider_metadata == {
+        "gigachat": {"request_id": "upstream-id"}
+    }
+    assert "secret" not in events[0].error.message

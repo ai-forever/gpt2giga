@@ -13,7 +13,8 @@ import pytest
 
 from gpt2giga.common.model_concurrency import ModelConcurrencyLimiter
 from gpt2giga.models.config import ProxyConfig, ProxySettings
-from gpt2giga.protocol import ResponseProcessor
+from gpt2giga.protocol import RequestTransformer, ResponseProcessor
+from gpt2giga.providers.gigachat.adapter import normalized_chat_to_openai_payload
 from gpt2giga.protocols.openai import OpenAIProtocolAdapter
 from gpt2giga.providers.gigachat import GigaChatProviderAdapter
 from gpt2giga.routers.openai.responses import router as responses_router
@@ -92,20 +93,21 @@ class _GigaChat:
         return generate()
 
 
-class _Transformer:
-    def __init__(self) -> None:
+class _Transformer(RequestTransformer):
+    def __init__(self, config) -> None:
+        super().__init__(config, logger)
         self.chat_calls: list[dict] = []
 
-    async def prepare_chat(self, payload: dict, giga_client=None) -> dict:
-        self.chat_calls.append(payload)
-        return payload
+    async def prepare_normalized(self, request, giga_client=None, **kwargs):
+        # Keep protocol-intent observations while exercising the real SDK builder.
+        self.chat_calls.append(normalized_chat_to_openai_payload(request))
+        return await super().prepare_normalized(request, giga_client, **kwargs)
 
 
 def _app() -> tuple[FastAPI, _GigaChat, _Transformer]:
     app = FastAPI()
     app.include_router(responses_router, prefix="/v1")
     giga_client = _GigaChat()
-    transformer = _Transformer()
     app.state.config = ProxyConfig(
         proxy=ProxySettings(gigachat_api_mode="v1"),
         gigachat={"model": "GigaChat-2-Max"},
@@ -115,6 +117,7 @@ def _app() -> tuple[FastAPI, _GigaChat, _Transformer]:
     model_limiter = ModelConcurrencyLimiter({})
     app.state.model_concurrency_limiter = model_limiter
     app.state.openai_protocol_adapter = OpenAIProtocolAdapter()
+    transformer = _Transformer(app.state.config)
     app.state.request_transformer = transformer
     response_processor = ResponseProcessor(logger=logger)
     app.state.response_processor = response_processor

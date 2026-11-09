@@ -18,6 +18,7 @@ from gpt2giga.capabilities.models import (
 from gpt2giga.capabilities.overlays import resolve_gigachat_model_layer
 from gpt2giga.capabilities.resolver import (
     EffectiveCapabilityResolver,
+    apply_provider_capability_metadata,
     build_capability_layer,
 )
 from gpt2giga.protocols.normalized.loss_matrix import BridgeSemantic
@@ -98,6 +99,8 @@ def resolve_gigachat_route_capabilities(
     api_mode: Literal["v1", "v2"],
     route_id: str,
     builtin_tools_enabled: bool = True,
+    provider_capabilities: Mapping[CapabilityKey | str, CapabilityState | str | bool]
+    | None = None,
 ) -> EffectiveModelCapabilities:
     """Resolve current normalized GigaChat adapter capabilities for one route."""
     protocol_layer = build_capability_layer(
@@ -120,6 +123,12 @@ def resolve_gigachat_route_capabilities(
         evidence_ids=("GIGACHAT-NORMALIZED-ADAPTER-2026-08-03",),
     )
     model_layer = resolve_gigachat_model_layer(model_id, api_mode)
+    if provider_capabilities:
+        model_layer = apply_provider_capability_metadata(
+            model_layer,
+            provider_capabilities,
+            evidence_id="EXPLICIT-PROVIDER-MODEL-CAPABILITIES",
+        )
     api_states = {
         key: (
             CapabilityState.UNSUPPORTED

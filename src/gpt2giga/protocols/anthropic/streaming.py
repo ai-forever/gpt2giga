@@ -17,6 +17,7 @@ class AnthropicStreamProjector:
         *,
         requested_model: str,
         response_id: str,
+        include_cache_read_tokens: bool = False,
     ) -> None:
         self.requested_model = requested_model
         self.response_id = response_id
@@ -24,7 +25,10 @@ class AnthropicStreamProjector:
         self._block_type: str | None = None
         self._input_tokens = 0
         self._output_tokens = 0
-        self._cache_usage: dict[str, int] = {}
+        self._include_cache_read_tokens = include_cache_read_tokens
+        self._cache_usage: dict[str, int] = (
+            {"cache_read_input_tokens": 0} if include_cache_read_tokens else {}
+        )
 
     def project(self, event: NormalizedStreamEvent) -> list[str]:
         """Render zero or more Anthropic SSE frames for one normalized event."""
@@ -32,7 +36,16 @@ class AnthropicStreamProjector:
             usage = _usage_to_anthropic(event.usage)
             self._input_tokens = usage["input_tokens"]
             self._cache_usage = {
-                key: value for key, value in usage.items() if key.startswith("cache_")
+                **(
+                    {"cache_read_input_tokens": 0}
+                    if self._include_cache_read_tokens
+                    else {}
+                ),
+                **{
+                    key: value
+                    for key, value in usage.items()
+                    if key.startswith("cache_")
+                },
             }
         if event.usage is not None and event.usage.output_tokens is not None:
             self._output_tokens = int(event.usage.output_tokens)
@@ -56,23 +69,39 @@ class AnthropicStreamProjector:
                 ),
                 _sse("ping", {"type": "ping"}),
             ]
-        if event.type == "content_delta":
-            return self._text_delta(event.content_delta or "")
-        if event.type == "reasoning_delta":
-            return self._thinking_delta(event.reasoning_delta or "")
-        if event.type in {"tool_call_start", "tool_call_delta"}:
-            frames = (
-                self._tool_start(event.tool_call)
-                if event.type == "tool_call_start"
-                else self._tool_delta(event.tool_call)
-            )
-            if event.finish_reason is not None:
+        if event.type in {
+            "content_delta",
+            "reasoning_delta",
+            "tool_call_start",
+            "tool_call_delta",
+            "message_end",
+        }:
+            frames = []
+            if event.reasoning_delta:
+                frames.extend(self._thinking_delta(event.reasoning_delta))
+            if event.content_delta:
+                frames.extend(self._text_delta(event.content_delta))
+            if event.type in {"tool_call_start", "tool_call_delta"}:
+                frames.extend(
+                    self._tool_start(event.tool_call)
+                    if event.type == "tool_call_start"
+                    else self._tool_delta(event.tool_call)
+                )
+            if event.type == "message_end" or event.finish_reason is not None:
                 frames.extend(self._message_end(event))
             return frames
-        if event.type == "message_end":
-            return self._message_end(event)
         if event.type == "error":
             error = event.error
+            request_id = (
+                error.provider_metadata.get("gigachat", {}).get("request_id")
+                if error
+                else None
+            )
+            diagnostics = (
+                {"metadata": {"gigachat_x_request_id": request_id}}
+                if isinstance(request_id, str) and request_id
+                else {}
+            )
             return [
                 _sse(
                     "error",
@@ -80,6 +109,7 @@ class AnthropicStreamProjector:
                         "type": "error",
                         "error": {
                             "type": error.type if error else "api_error",
+                            **diagnostics,
                             "message": (
                                 error.message if error else "Stream interrupted"
                             ),
@@ -186,10 +216,6 @@ class AnthropicStreamProjector:
 
     def _message_end(self, event: NormalizedStreamEvent) -> list[str]:
         frames = []
-        if event.reasoning_delta:
-            frames.extend(self._thinking_delta(event.reasoning_delta))
-        if event.content_delta:
-            frames.extend(self._text_delta(event.content_delta))
         frames.extend(self._stop_block())
         stop_reason = {
             "length": "max_tokens",

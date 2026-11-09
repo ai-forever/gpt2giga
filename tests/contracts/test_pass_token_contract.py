@@ -71,7 +71,7 @@ def test_pass_token_builds_sdk_client_with_one_public_auth_mode(
     for excluded in {"access_token", "credentials", "scope", "user", "password"} - set(
         expected_constructor
     ):
-        assert excluded not in kwargs
+        assert kwargs[excluded] == ""
     assert kwargs["base_url"] == "https://gigachat.test/v1"
     assert kwargs["verify_ssl_certs"] is False
     assert kwargs["model"] == "configured-model"

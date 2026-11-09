@@ -25,6 +25,70 @@ SAFE_EXTRA_QUERY_DESCRIPTION = (
 )
 
 
+def images_openapi_extra() -> Dict[str, Any]:
+    """Describe the supported v2 image-generation subset."""
+    return {
+        "requestBody": {
+            "required": True,
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "required": ["prompt"],
+                        "properties": {
+                            "prompt": {"type": "string", "minLength": 1},
+                            "model": {
+                                "type": "string",
+                                "description": "GigaChat model/profile alias; known OpenAI image aliases use GIGACHAT_MODEL.",
+                            },
+                            "n": {"type": "integer", "enum": [1], "default": 1},
+                            "response_format": {
+                                "type": "string",
+                                "enum": ["b64_json"],
+                                "default": "b64_json",
+                            },
+                            "size": {
+                                "type": "string",
+                                "enum": ["auto"],
+                                "default": "auto",
+                            },
+                            "user": {
+                                "type": "string",
+                                "description": "Accepted without upstream billing semantics.",
+                            },
+                        },
+                        "additionalProperties": False,
+                    }
+                }
+            },
+        },
+        "description": "Generate one image with GigaChat v2 and download its bytes. Requires /v2 or root configured for v2. No edits, streaming, dimensions, or URL responses.",
+        "responses": {
+            "200": {
+                "description": "Generated image bytes",
+                "content": {
+                    "application/json": {
+                        "schema": {
+                            "type": "object",
+                            "required": ["created", "data"],
+                            "properties": {
+                                "created": {"type": "integer"},
+                                "data": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {"b64_json": {"type": "string"}},
+                                    },
+                                },
+                            },
+                        }
+                    }
+                },
+            }
+        },
+    }
+
+
 def chat_completions_openapi_extra() -> Dict[str, Any]:
     """OpenAPI extras for POST /chat/completions."""
     minimal_schema: Dict[str, Any] = {
@@ -645,6 +709,12 @@ def batches_openapi_extra() -> Dict[str, Any]:
     description = (
         "**Required**: `completion_window`, `endpoint`, `input_file_id`.\n\n"
         "**Notes**:\n"
+        "- `24h` is a gateway result-acceptance deadline. Without polling before it, "
+        "unresolved results expire even if the backend finished earlier. Native jobs "
+        "can continue and be billed after expiry; cancel/delete are unsupported.\n"
+        "- Requires an account with GigaChat batch access (pay-as-you-go). One "
+        "non-streaming model/endpoint family per batch; hosted tools and stateful "
+        "Responses are rejected.\n"
         "- Input JSONL is accepted in OpenAI batch format and translated before "
         "submission to GigaChat.\n"
         "- Supported endpoints: `/v1/chat/completions`, `/v1/responses`, "
@@ -686,3 +756,87 @@ def batches_openapi_extra() -> Dict[str, Any]:
         extra_examples=extra_examples,
         description=description,
     )
+
+
+def responses_input_tokens_openapi_extra() -> dict:
+    """Describe the text-only Responses token estimate contract."""
+    return {
+        "requestBody": {
+            "required": True,
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "required": ["input"],
+                        "properties": {
+                            "model": {"type": "string"},
+                            "input": {
+                                "oneOf": [
+                                    {"type": "string"},
+                                    {"type": "array", "items": {"type": "object"}},
+                                ]
+                            },
+                            "instructions": {"type": "string"},
+                            "tools": {"type": "array", "items": {"type": "object"}},
+                            "text": {"type": "object"},
+                        },
+                    },
+                    "example": {"model": "GigaChat", "input": "Hello"},
+                }
+            },
+        },
+        "responses": {
+            "200": {
+                "description": "GigaChat textual estimate, not exact OpenAI tokenization.",
+                "content": {
+                    "application/json": {
+                        "schema": {
+                            "type": "object",
+                            "required": ["object", "input_tokens"],
+                            "properties": {
+                                "object": {
+                                    "type": "string",
+                                    "enum": ["response.input_tokens"],
+                                },
+                                "input_tokens": {"type": "integer", "minimum": 0},
+                            },
+                        }
+                    }
+                },
+            }
+        },
+    }
+
+
+def conversation_openapi_extra(*, items: bool = False) -> dict:
+    """Describe the supported durable conversation input subset."""
+    return {
+        "requestBody": {
+            "required": True,
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "items": {
+                                "type": "array",
+                                "items": {"type": "object"},
+                                "description": "Textual messages and custom function calls/outputs only.",
+                            },
+                            "metadata": {
+                                "type": "object",
+                                "additionalProperties": {"type": "string"},
+                            },
+                        },
+                    },
+                    "example": {
+                        "items": [
+                            {"type": "message", "role": "user", "content": "Hello"}
+                        ]
+                    }
+                    if items
+                    else {"metadata": {"topic": "example"}},
+                }
+            },
+        }
+    }

@@ -119,3 +119,14 @@ def test_refresh_traffic_log_drop_metric_reads_queue_sinks():
     refresh_traffic_log_drop_metric(sink, QueueSink())
 
     assert 'gpt2giga_traffic_log_dropped_total{sink="all"} 7' in sink.render()
+
+
+async def test_metrics_bound_untrusted_model_and_error_labels():
+    sink = PrometheusMetricsSink()
+    for index in range(1000):
+        await sink.increment(
+            "gpt2giga_upstream_errors_total",
+            attributes={"model": f"private-{index}", "error_type": f"Error{index}"},
+        )
+    assert len(sink._counters) == 1
+    assert 'error_type="other",model="other"' in sink.render()

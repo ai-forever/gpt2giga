@@ -25,6 +25,7 @@ from gpt2giga.common.model_concurrency import (
     ModelConcurrencyTimeoutError,
 )
 from gpt2giga.common.reasoning import ReasoningContentParser
+from gpt2giga.common.response_storage import finish_snapshot, project_snapshot_response
 from gpt2giga.common.sources import (
     SourceMarkerStreamRenderer,
     extract_sources,
@@ -42,6 +43,10 @@ from gpt2giga.protocol.response import (
 from gpt2giga.protocol.response.processor import ResponseProcessor
 from gpt2giga.providers.gigachat.model_options import parallel_tool_calls_enabled
 from gpt2giga.providers.gigachat.model_resolution import resolve_upstream_model
+from gpt2giga.providers.gigachat.streaming import (
+    sdk_transport_error,
+    sdk_error_metadata,
+)
 
 
 def _deduplicate_tool_call_identity(
@@ -143,9 +148,12 @@ async def stream_chat_generator(
             emitted_tool_identity: set[tuple[int, int, str]] = set()
             call_indexes: dict[tuple[int, str], int] = {}
             known_state_id: Optional[str] = None
-            async with gigachat_request_options(giga_client, request_options):
+            pending_terminal_chunks = []
+            async with gigachat_request_options(
+                giga_client, request_options
+            ) as request_client:
                 async with closing_stream(
-                    giga_client.astream(chat_messages)
+                    request_client.astream(chat_messages)
                 ) as _delegated_stream:
                     async for chunk in _delegated_stream:
                         if await request.is_disconnected():
@@ -153,6 +161,7 @@ async def stream_chat_generator(
                                 logger.info(
                                     f"[{rquid}] Client disconnected during streaming"
                                 )
+                            pending_terminal_chunks.clear()
                             break
                         processed = (
                             request.app.state.response_processor.process_stream_chunk(
@@ -168,8 +177,16 @@ async def stream_chat_generator(
                             call_indexes,
                             known_state_id,
                         )
-                        yield f"data: {json.dumps(processed)}\n\n"
+                        if pending_terminal_chunks or any(
+                            choice.get("finish_reason") is not None
+                            for choice in processed.get("choices", [])
+                        ):
+                            pending_terminal_chunks.append(processed)
+                        else:
+                            yield f"data: {json.dumps(processed)}\n\n"
 
+            for processed in pending_terminal_chunks:
+                yield f"data: {json.dumps(processed)}\n\n"
             response_processor = request.app.state.response_processor
             flush_stream_reasoning = getattr(
                 response_processor, "flush_stream_reasoning", None
@@ -249,17 +266,18 @@ async def stream_chat_generator(
         yield "data: [DONE]\n\n"
 
     except gigachat.exceptions.GigaChatException as e:
-        error_type = type(e).__name__
-        error_message = str(e)
-        if logger:
-            logger.error(
-                f"[{rquid}] GigaChat streaming error: {error_type}: {error_message}"
-            )
+        transport_error = sdk_transport_error(e)
+        error_type = "api_error" if transport_error else type(e).__name__
+        code = transport_error[1] if transport_error else "stream_error"
+        message = transport_error[2] if transport_error else "Upstream service error"
+        if logger and transport_error is None:
+            logger.error(f"[{rquid}] GigaChat streaming error: {error_type}: {e}")
         error_response = {
             "error": {
-                "message": "Upstream service error",
+                "message": message,
                 "type": error_type,
-                "code": "stream_error",
+                "code": code,
+                **sdk_error_metadata(e),
             }
         }
         yield f"data: {json.dumps(error_response)}\n\n"
@@ -282,6 +300,15 @@ async def stream_chat_generator(
         }
         yield f"data: {json.dumps(error_response)}\n\n"
         yield "data: [DONE]\n\n"
+
+    finally:
+        discard = getattr(
+            getattr(request.app.state, "response_processor", None),
+            "discard_stream_state",
+            None,
+        )
+        if discard is not None:
+            discard(response_id, family="chat")
 
 
 async def stream_chat_completion_generator(
@@ -317,9 +344,12 @@ async def stream_chat_completion_generator(
             emitted_tool_identity: set[tuple[int, int, str]] = set()
             call_indexes: dict[tuple[int, str], int] = {}
             known_state_id: Optional[str] = None
-            async with gigachat_request_options(giga_client, request_options):
+            pending_terminal_chunks = []
+            async with gigachat_request_options(
+                giga_client, request_options
+            ) as request_client:
                 async with closing_stream(
-                    giga_client.achat.stream(chat_request)
+                    request_client.achat.stream(chat_request)
                 ) as _delegated_stream:
                     async for chunk in _delegated_stream:
                         if await request.is_disconnected():
@@ -327,6 +357,7 @@ async def stream_chat_completion_generator(
                                 logger.info(
                                     f"[{rquid}] Client disconnected during streaming"
                                 )
+                            pending_terminal_chunks.clear()
                             break
                         adapted = adapt_chat_completion_chunk_to_chat_chunk_shape(
                             chunk,
@@ -346,8 +377,16 @@ async def stream_chat_completion_generator(
                             call_indexes,
                             known_state_id,
                         )
-                        yield f"data: {json.dumps(processed)}\n\n"
+                        if pending_terminal_chunks or any(
+                            choice.get("finish_reason") is not None
+                            for choice in processed.get("choices", [])
+                        ):
+                            pending_terminal_chunks.append(processed)
+                        else:
+                            yield f"data: {json.dumps(processed)}\n\n"
 
+            for processed in pending_terminal_chunks:
+                yield f"data: {json.dumps(processed)}\n\n"
             response_processor = request.app.state.response_processor
             flush_stream_reasoning = getattr(
                 response_processor, "flush_stream_reasoning", None
@@ -427,17 +466,18 @@ async def stream_chat_completion_generator(
         yield "data: [DONE]\n\n"
 
     except gigachat.exceptions.GigaChatException as e:
-        error_type = type(e).__name__
-        error_message = str(e)
-        if logger:
-            logger.error(
-                f"[{rquid}] GigaChat streaming error: {error_type}: {error_message}"
-            )
+        transport_error = sdk_transport_error(e)
+        error_type = "api_error" if transport_error else type(e).__name__
+        code = transport_error[1] if transport_error else "stream_error"
+        message = transport_error[2] if transport_error else "Upstream service error"
+        if logger and transport_error is None:
+            logger.error(f"[{rquid}] GigaChat streaming error: {error_type}: {e}")
         error_response = {
             "error": {
-                "message": "Upstream service error",
+                "message": message,
                 "type": error_type,
-                "code": "stream_error",
+                "code": code,
+                **sdk_error_metadata(e),
             }
         }
         yield f"data: {json.dumps(error_response)}\n\n"
@@ -460,6 +500,15 @@ async def stream_chat_completion_generator(
         yield f"data: {json.dumps(error_response)}\n\n"
         yield "data: [DONE]\n\n"
 
+    finally:
+        discard = getattr(
+            getattr(request.app.state, "response_processor", None),
+            "discard_stream_state",
+            None,
+        )
+        if discard is not None:
+            discard(response_id, family="chat")
+
 
 class _ChatCompletionResponsesStreamClient:
     def __init__(
@@ -476,19 +525,21 @@ class _ChatCompletionResponsesStreamClient:
         async def gen():
             async with gigachat_request_options(
                 self._giga_client, self._request_options
-            ):
+            ) as request_client:
                 async with closing_stream(
-                    self._giga_client.achat.stream(chat_request)
+                    request_client.achat.stream(chat_request)
                 ) as _delegated_stream:
                     async for chunk in _delegated_stream:
                         adapted = adapt_chat_completion_chunk_to_chat_chunk_shape(
                             chunk,
                             default_model=self._model,
                         )
-                        await hydrate_chat_completion_image_files(
-                            adapted,
-                            self._giga_client,
-                        )
+                        async with gigachat_request_options(
+                            self._giga_client, self._request_options, include_body=False
+                        ) as ancillary_client:
+                            await hydrate_chat_completion_image_files(
+                                adapted, ancillary_client
+                            )
                         yield SimpleNamespace(
                             model_dump=lambda adapted=adapted: adapted
                         )
@@ -496,8 +547,10 @@ class _ChatCompletionResponsesStreamClient:
         return gen()
 
     async def aget_image(self, file_id: str):
-        async with gigachat_request_options(self._giga_client, self._request_options):
-            return await self._giga_client.aget_image(file_id)
+        async with gigachat_request_options(
+            self._giga_client, self._request_options, include_body=False
+        ) as request_client:
+            return await request_client.aget_image(file_id)
 
 
 async def stream_responses_chat_completion_generator(
@@ -729,6 +782,7 @@ async def stream_responses_generator(
     fc_id = f"fc_{response_id}"  # ID for function call item
     response_metadata: dict[str, str] = {}
     incomplete_reason: str | None = None
+    upstream_terminal = False
 
     def build_reasoning_config() -> dict:
         reasoning_data = request_data.get("reasoning") if request_data else None
@@ -740,7 +794,18 @@ async def stream_responses_generator(
         effort = request_data.get("reasoning_effort") if request_data else None
         return {"effort": effort, "summary": None}
 
+    snapshot_turn = getattr(request.state, "gateway_snapshot_turn", None)
+    observer = getattr(request.state, "responses_stream_observer", None)
+
     def sse_event(event_type: str, data: dict) -> str:
+        if observer is not None:
+            try:
+                observer.observe_payload(event_type, data)
+            except Exception as exc:
+                if logger is not None:
+                    logger.warning(
+                        "OpenAI Responses stream observability observe failed: {}", exc
+                    )
         return f"event: {event_type}\ndata: {json.dumps(data)}\n\n"
 
     def update_response_identity() -> None:
@@ -755,42 +820,49 @@ async def stream_responses_generator(
         fc_id = f"fc_{response_id}"
 
     def build_response_obj(status: str, output: list = None, usage: dict = None):
-        return {
-            "id": f"resp_{response_id}",
-            "object": "response",
-            "created_at": created_at,
-            "status": status,
-            "error": None,
-            "incomplete_details": (
-                {"reason": incomplete_reason} if status == "incomplete" else None
-            ),
-            "instructions": request_data.get("instructions") if request_data else None,
-            "max_output_tokens": (
-                request_data.get("max_output_tokens") if request_data else None
-            ),
-            "model": model,
-            "output": output or [],
-            "parallel_tool_calls": parallel_tool_calls_enabled(chat_messages),
-            "previous_response_id": (
-                request_data.get("previous_response_id") if request_data else None
-            ),
-            "reasoning": build_reasoning_config(),
-            "store": request_data.get("store", False) if request_data else False,
-            "temperature": request_data.get("temperature") if request_data else None,
-            "text": {"format": {"type": "text"}},
-            "tool_choice": request_data.get("tool_choice", "auto")
-            if request_data
-            else "auto",
-            "tools": request_data.get("tools", []) if request_data else [],
-            "top_p": request_data.get("top_p") if request_data else None,
-            "truncation": "disabled",
-            "usage": usage,
-            "user": None,
-            "metadata": merge_openai_response_metadata(
-                request_data.get("metadata", {}) if request_data else {},
-                response_metadata,
-            ),
-        }
+        return project_snapshot_response(
+            snapshot_turn,
+            {
+                "id": f"resp_{response_id}",
+                "object": "response",
+                "created_at": created_at,
+                "status": status,
+                "error": None,
+                "incomplete_details": (
+                    {"reason": incomplete_reason} if status == "incomplete" else None
+                ),
+                "instructions": request_data.get("instructions")
+                if request_data
+                else None,
+                "max_output_tokens": (
+                    request_data.get("max_output_tokens") if request_data else None
+                ),
+                "model": model,
+                "output": output or [],
+                "parallel_tool_calls": parallel_tool_calls_enabled(chat_messages),
+                "previous_response_id": (
+                    request_data.get("previous_response_id") if request_data else None
+                ),
+                "reasoning": build_reasoning_config(),
+                "store": request_data.get("store", False) if request_data else False,
+                "temperature": request_data.get("temperature")
+                if request_data
+                else None,
+                "text": {"format": {"type": "text"}},
+                "tool_choice": request_data.get("tool_choice", "auto")
+                if request_data
+                else "auto",
+                "tools": request_data.get("tools", []) if request_data else [],
+                "top_p": request_data.get("top_p") if request_data else None,
+                "truncation": "disabled",
+                "usage": usage,
+                "user": None,
+                "metadata": merge_openai_response_metadata(
+                    request_data.get("metadata", {}) if request_data else {},
+                    response_metadata,
+                ),
+            },
+        )
 
     def response_start_events() -> list[str]:
         nonlocal sequence_number
@@ -1148,9 +1220,11 @@ async def stream_responses_generator(
             output_item_added = True
             return events
 
-        async def iterate_chunks_with_optional_prefetch():
+        async def iterate_chunks_with_optional_prefetch(request_client):
             async with (
-                closing_stream(giga_client.astream(chat_messages)) as upstream_stream,
+                closing_stream(
+                    request_client.astream(chat_messages)
+                ) as upstream_stream,
                 closing_stream(aio_enumerate(upstream_stream)) as stream,
             ):
                 if not response_id_from_stream_metadata:
@@ -1190,12 +1264,14 @@ async def stream_responses_generator(
 
         async def emit_upstream_events() -> AsyncGenerator[str, None]:
             nonlocal final_usage, full_text, functions_state_id
-            nonlocal incomplete_reason
+            nonlocal incomplete_reason, upstream_terminal
             nonlocal output_item_added, raw_full_text, reasoning_text
             nonlocal sequence_number, source_rendering_enabled, text_output_index
-            async with gigachat_request_options(giga_client, request_options):
+            async with gigachat_request_options(
+                giga_client, request_options
+            ) as request_client:
                 async with closing_stream(
-                    iterate_chunks_with_optional_prefetch()
+                    iterate_chunks_with_optional_prefetch(request_client)
                 ) as _delegated_stream:
                     async for (
                         prebuilt_event,
@@ -1235,6 +1311,8 @@ async def stream_responses_generator(
                             )
                         choice = giga_dict["choices"][0]
                         finish_reason = choice.get("finish_reason")
+                        if finish_reason is not None:
+                            upstream_terminal = True
                         if finish_reason in {"length", "max_tokens"}:
                             incomplete_reason = "max_output_tokens"
                         elif finish_reason == "content_filter":
@@ -1431,6 +1509,18 @@ async def stream_responses_generator(
                     async for event in _delegated_stream:
                         yield event
 
+        if not upstream_terminal:
+            yield sse_event(
+                "error",
+                {
+                    "type": "error",
+                    "code": "invalid_upstream_response",
+                    "message": "Upstream stream ended without a terminal result.",
+                    "sequence_number": sequence_number,
+                },
+            )
+            return
+
         flushed_reasoning = reasoning_parser.flush()
         if flushed_reasoning.content:
             raw_full_text += flushed_reasoning.content
@@ -1459,6 +1549,40 @@ async def stream_responses_generator(
                 yield event
         if flushed_reasoning.reasoning_content:
             reasoning_text += flushed_reasoning.reasoning_content
+
+        async def complete_response(output):
+            result = build_response_obj(final_status, output=output, usage=final_usage)
+            if await request.is_disconnected():
+                return None
+            await finish_snapshot(request, snapshot_turn, result)
+            callback = getattr(request.state, "responses_stream_completed", None)
+            if callback is not None:
+                await callback(result)
+            return result
+
+        async def final_frame(output):
+            try:
+                result = await complete_response(output)
+            except Exception:
+                # No completed event/history after a failed durable commit.
+                return sse_event(
+                    "error",
+                    {
+                        "type": "error",
+                        "code": "response_storage_error",
+                        "message": "The response could not be completed or stored.",
+                        "param": None,
+                        "sequence_number": sequence_number,
+                        **(
+                            {"response_id": snapshot_turn.response_id}
+                            if snapshot_turn
+                            else {}
+                        ),
+                    },
+                )
+            if result is None:
+                return None
+            return emit_sequenced_event(final_event_type, {"response": result})
 
         final_status = "incomplete" if incomplete_reason else "completed"
         final_event_type = f"response.{final_status}"
@@ -1497,14 +1621,10 @@ async def stream_responses_generator(
                     {"output_index": output_index, "item": done_item},
                 )
                 final_output.append(done_item)
-            yield emit_sequenced_event(
-                final_event_type,
-                {
-                    "response": build_response_obj(
-                        final_status, output=final_output, usage=final_usage
-                    )
-                },
-            )
+            frame = await final_frame(final_output)
+            if frame is not None:
+                yield frame
+
         else:
             metadata_message = {
                 "content": full_text,
@@ -1610,16 +1730,9 @@ async def stream_responses_generator(
                         "content": [output_text_part],
                     }
                 )
-            yield sse_event(
-                final_event_type,
-                {
-                    "type": final_event_type,
-                    "response": build_response_obj(
-                        final_status, output=final_output, usage=final_usage
-                    ),
-                    "sequence_number": sequence_number,
-                },
-            )
+            frame = await final_frame(final_output)
+            if frame is not None:
+                yield frame
 
     except ModelConcurrencyTimeoutError:
         error_response = {
@@ -1632,16 +1745,17 @@ async def stream_responses_generator(
         yield sse_event("error", error_response)
 
     except gigachat.exceptions.GigaChatException as e:
-        error_type = type(e).__name__
-        error_message = str(e)
-        if logger:
-            logger.error(
-                f"[{rquid}] GigaChat streaming error: {error_type}: {error_message}"
-            )
+        transport_error = sdk_transport_error(e)
+        error_type = "api_error" if transport_error else type(e).__name__
+        code = transport_error[1] if transport_error else "stream_error"
+        message = transport_error[2] if transport_error else "Upstream service error"
+        if logger and transport_error is None:
+            logger.error(f"[{rquid}] GigaChat streaming error: {error_type}: {e}")
         error_response = {
             "type": "error",
-            "code": "stream_error",
-            "message": "Upstream service error",
+            "code": code,
+            "message": message,
+            **sdk_error_metadata(e),
             "param": None,
             "sequence_number": sequence_number,
         }

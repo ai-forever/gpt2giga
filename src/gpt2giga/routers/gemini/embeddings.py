@@ -7,6 +7,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 
+from gpt2giga.app.providers import bind_model_request
 from gpt2giga.app_state import get_gigachat_client, get_model_concurrency_limiter
 from gpt2giga.common.exceptions import exceptions_handler
 from gpt2giga.common.gigachat_options import (
@@ -31,6 +32,7 @@ router = APIRouter(tags=[OPENAPI_TAG_GEMINI_EMBEDDINGS])
     "/models/{model}:embedContent",
     openapi_extra=gemini_embed_content_openapi_extra(batch=False),
 )
+@router.post("/models/{model:path}:embedContent", include_in_schema=False)
 @exceptions_handler
 async def embed_content(model: str, request: Request):
     """Create one Gemini-compatible embedding."""
@@ -49,6 +51,7 @@ async def embed_content(model: str, request: Request):
     "/models/{model}:batchEmbedContents",
     openapi_extra=gemini_embed_content_openapi_extra(batch=True),
 )
+@router.post("/models/{model:path}:batchEmbedContents", include_in_schema=False)
 @exceptions_handler
 async def batch_embed_contents(model: str, request: Request):
     """Create Gemini-compatible embeddings for multiple requests."""
@@ -78,24 +81,32 @@ async def _embed_texts(
     requested_model: str,
     texts: list[str],
 ) -> dict[str, Any]:
+    await bind_model_request(request, requested_model, None)
     proxy_settings = request.app.state.config.proxy_settings
     transformed = await transform_embedding_body(
         {"model": requested_model, "input": texts},
         proxy_settings.embeddings,
         pass_model=proxy_settings.pass_model,
     )
-    effective_model = transformed["model"]
+    effective_model = (
+        getattr(request.state, "upstream_model", None) or transformed["model"]
+    )
+    transformed["model"] = effective_model
     update_request_context(model_effective=effective_model)
     giga_client = get_gigachat_client(request)
     model_limiter = get_model_concurrency_limiter(request)
     request_options = extract_gigachat_request_options(request, original_data)
     async with model_limiter.limit(effective_model, provider="gemini"):
-        async with gigachat_request_options(giga_client, request_options):
-            response = await giga_client.aembeddings(
+        async with gigachat_request_options(
+            giga_client, request_options
+        ) as request_client:
+            response = await request_client.aembeddings(
                 texts=transformed["input"],
                 model=effective_model,
             )
-    result = normalize_embedding_response(response, model=effective_model)
+    result = normalize_embedding_response(
+        response, model=effective_model, expected_count=len(texts)
+    )
     await emit_openai_embeddings_observability(
         request.app.state,
         _normalized_embedding_request(
@@ -130,13 +141,10 @@ def _openai_embedding_to_gemini(
     *,
     index: int,
 ) -> dict[str, Any]:
-    data = response.get("data")
-    item = data[index] if isinstance(data, list) and index < len(data) else {}
+    item = response["data"][index]
     usage = response.get("usage") if isinstance(response.get("usage"), dict) else {}
     return {
-        "embedding": {
-            "values": item.get("embedding", []) if isinstance(item, dict) else []
-        },
+        "embedding": {"values": item["embedding"]},
         "usageMetadata": {
             "promptTokenCount": usage.get("prompt_tokens"),
             "totalTokenCount": usage.get("total_tokens"),

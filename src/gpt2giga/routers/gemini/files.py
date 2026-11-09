@@ -1,206 +1,365 @@
-"""Gemini-compatible Files API handlers.
-
-These routes are intentionally not mounted by ``gpt2giga.api.gemini.routes`` yet.
-"""
+"""Gemini Files projection and durable resumable upload sessions."""
 
 from __future__ import annotations
 
 import time
+import uuid
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import JSONResponse, Response
 
-from gpt2giga.app_state import get_file_store, get_gigachat_client
+from gpt2giga.app_state import get_resource_owner, get_resource_store
 from gpt2giga.common.exceptions import exceptions_handler
-from gpt2giga.common.gigachat_options import (
-    extract_gigachat_request_options,
-    gigachat_request_options,
+from gpt2giga.common.files import (
+    bind_file_upload_profile,
+    file_content,
+    file_metadata,
+    file_not_found,
+    list_stored_files,
+    remove_file,
+    upload_file_resource,
 )
-from gpt2giga.common.request_form import read_request_multipart
 from gpt2giga.common.request_json import read_request_json
-from gpt2giga.openapi_specs.gemini import gemini_files_openapi_extra
+from gpt2giga.core.context import update_request_context
 from gpt2giga.openapi_tags import OPENAPI_TAG_GEMINI_FILES
+from gpt2giga.openapi_specs.gemini import gemini_files_openapi_extra
+from gpt2giga.storage.resources import (
+    ResourceConflictError,
+    ResourceLimitError,
+    ResourceNotFoundError,
+)
 
 router = APIRouter(tags=[OPENAPI_TAG_GEMINI_FILES])
+upload_router = APIRouter(tags=[OPENAPI_TAG_GEMINI_FILES])
 
 
-@router.post("/files", openapi_extra=gemini_files_openapi_extra())
+def _context() -> None:
+    update_request_context(metadata={"protocol": "gemini", "api_format": "files"})
+
+
+def _invalid(message: str, status: int = 400) -> HTTPException:
+    return HTTPException(status, detail=message)
+
+
+def _file_id(value: str) -> str:
+    value = value.removeprefix("files/")
+    if not value or "/" in value or ":" in value:
+        raise file_not_found()
+    return value
+
+
+def _rfc3339(value: Any) -> str:
+    return (
+        datetime.fromtimestamp(float(value or 0), timezone.utc)
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
+
+
+def gemini_file(metadata: dict, request: Request) -> dict[str, Any]:
+    """Project only known file facts; uploaded files are not downloadable."""
+    file_id = metadata["id"]
+    result = {
+        "name": f"files/{file_id}",
+        "displayName": metadata.get("display_name")
+        or metadata.get("filename", file_id),
+        "mimeType": metadata.get("mime_type", "application/octet-stream"),
+        "sizeBytes": str(metadata.get("bytes", 0)),
+        "createTime": _rfc3339(metadata.get("created_at")),
+        "updateTime": _rfc3339(metadata.get("created_at")),
+        "uri": f"files/{file_id}",
+        "state": "ACTIVE",
+        "source": "GENERATED" if metadata.get("downloadable") else "UPLOADED",
+    }
+    if metadata.get("downloadable"):
+        prefix = request.url.path.split("/files", 1)[0]
+        result["downloadUri"] = (
+            f"{str(request.base_url).rstrip('/')}{prefix}/files/{file_id}:download?alt=media"
+        )
+    return result
+
+
+@upload_router.post("/files", openapi_extra=gemini_files_openapi_extra())
+@exceptions_handler
+async def resumable_upload(request: Request):
+    """Start, query, append, or finalize one bounded upload under its owner."""
+    _context()
+    command = {
+        part.strip()
+        for part in request.headers.get("x-goog-upload-command", "").split(",")
+    }
+    if command == {"start"}:
+        return await _start_upload(request)
+    session_id = request.query_params.get("upload_id")
+    if not session_id:
+        raise _invalid("A resumable upload session is required.")
+    store, owner = get_resource_store(request), get_resource_owner(request)
+    session = await store.get(owner, "upload", session_id)
+    runtime = getattr(request.app.state, "bridge_provider_runtime", None)
+    if session is None and runtime is not None:
+        for profile_id in runtime._giga_settings:
+            candidate_owner = get_resource_owner(request, profile=profile_id)
+            session = await store.get(candidate_owner, "upload", session_id)
+            if session is not None:
+                owner = candidate_owner
+                break
+    if session is None:
+        raise file_not_found()
+    profile_id = session.metadata.get("provider_profile")
+    if profile_id is not None:
+        from gpt2giga.app.providers import bind_gigachat_profile
+
+        await bind_gigachat_profile(request, profile_id)
+    if command == {"query"}:
+        return Response(
+            headers={
+                "X-Goog-Upload-Status": session.metadata["status"],
+                "X-Goog-Upload-Size-Received": str(session.blob_size),
+            }
+        )
+    if command == {"cancel"}:
+        try:
+            deleted = await store.delete(
+                owner, "upload", session_id, expected_status="active"
+            )
+        except ResourceConflictError as exc:
+            raise _invalid("Upload finalization has already started.", 409) from exc
+        if not deleted:
+            raise file_not_found()
+        return Response(headers={"X-Goog-Upload-Status": "cancelled"})
+    if (
+        not command
+        or command - {"upload", "finalize"}
+        or session.metadata.get("status") != "active"
+    ):
+        raise _invalid(
+            "The upload session is not active or the command is unsupported.", 409
+        )
+    try:
+        offset = int(request.headers.get("x-goog-upload-offset", "-1"))
+    except ValueError as exc:
+        raise _invalid("Upload offset must be an integer.") from exc
+    content = await request.body()
+    declared = session.metadata["size_bytes"]
+    if offset < 0 or offset != session.blob_size:
+        raise _invalid("Upload offset does not match received bytes.", 409)
+    if len(content) + offset > declared:
+        raise _invalid("Upload exceeds the declared file length.")
+    if "upload" not in command and content:
+        raise _invalid("Bytes require the upload command.")
+    if "finalize" in command and offset + len(content) != declared:
+        raise _invalid("Final upload length does not match the declared file length.")
+    try:
+        if content:
+            appended = await store.append_blob(
+                owner, "upload", session_id, content, offset=offset
+            )
+            if appended is None:
+                raise file_not_found()
+        if "finalize" not in command:
+            return Response(
+                headers={
+                    "X-Goog-Upload-Status": "active",
+                    "X-Goog-Upload-Size-Received": str(offset + len(content)),
+                }
+            )
+
+        def claim(metadata):
+            if metadata.get("status") != "active":
+                raise _invalid("Upload finalization has already started.", 409)
+            if metadata.get("upload_offset", 0) != declared:
+                raise _invalid("Upload content length is incomplete.")
+            return {**metadata, "status": "finalizing"}
+
+        claimed = await store.update(owner, "upload", session_id, claim)
+        if claimed is None:
+            raise file_not_found()
+        try:
+            content = await store.read_blob(owner, "upload", session_id)
+            if content is None or len(content) != declared:
+                raise _invalid("Upload content length is incomplete.")
+            metadata = await upload_file_resource(
+                request,
+                content=content,
+                filename=session.metadata["filename"],
+                mime_type=session.metadata["mime_type"],
+                protocol="gemini",
+                upload_session_id=session_id,
+            )
+            metadata["display_name"] = session.metadata["display_name"]
+            await store.update(
+                owner,
+                "file",
+                metadata["id"],
+                {"display_name": metadata["display_name"]},
+            )
+            return JSONResponse(
+                {"file": gemini_file(metadata, request)},
+                headers={"X-Goog-Upload-Status": "final"},
+            )
+        finally:
+            await store.delete(owner, "upload", session_id)
+    except ResourceLimitError as exc:
+        raise _invalid(str(exc), 413) from exc
+    except ResourceConflictError as exc:
+        raise _invalid("Upload state changed concurrently.", 409) from exc
+    except ResourceNotFoundError as exc:
+        raise file_not_found() from exc
+
+
+async def _start_upload(request: Request) -> Response:
+    await bind_file_upload_profile(request)
+    if request.headers.get("x-goog-upload-protocol") != "resumable":
+        raise _invalid("Only the resumable upload protocol is supported.")
+    data = await read_request_json(request)
+    metadata = data.get("file")
+    if not isinstance(metadata, dict):
+        raise _invalid("Upload metadata must contain a file object.")
+    try:
+        length = int(request.headers.get("x-goog-upload-header-content-length", "-1"))
+    except ValueError as exc:
+        raise _invalid("Declared file length must be an integer.") from exc
+    store = get_resource_store(request)
+    if length <= 0:
+        raise _invalid("Declared file length must be positive.")
+    if length > store.max_blob_bytes:
+        raise _invalid("File exceeds the configured upload limit.", 413)
+    mime_type = (
+        request.headers.get("x-goog-upload-header-content-type")
+        or metadata.get("mimeType")
+        or metadata.get("mime_type")
+    )
+    if not isinstance(mime_type, str) or "/" not in mime_type:
+        raise _invalid("A file MIME type is required.")
+    display_name = (
+        metadata.get("displayName") or metadata.get("display_name") or "upload"
+    )
+    filename = request.headers.get("x-goog-upload-file-name") or display_name
+    if not isinstance(filename, str) or not filename:
+        raise _invalid("File displayName must be a string.")
+    session_id = uuid.uuid4().hex
+    await store.put(
+        get_resource_owner(request),
+        "upload",
+        session_id,
+        {
+            "status": "active",
+            "provider_profile": getattr(request.state, "provider_profile_id", None),
+            "upload_offset": 0,
+            "size_bytes": length,
+            "mime_type": mime_type,
+            "filename": filename,
+            "display_name": display_name,
+        },
+        blob=b"",
+        expires_at=time.time() + 86400,
+    )
+    url = str(request.url.replace(query=f"upload_id={session_id}"))
+    return JSONResponse(
+        {}, headers={"X-Goog-Upload-URL": url, "X-Goog-Upload-Status": "active"}
+    )
+
+
+@router.post("/files")
 @exceptions_handler
 async def create_file(request: Request):
-    """Create Gemini-compatible file metadata or upload multipart content."""
-    content_type = request.headers.get("content-type", "")
-    if "multipart/form-data" in content_type:
-        return await _create_multipart_file(request)
-
-    data = await read_request_json(request)
-    file_payload = data.get("file") if isinstance(data.get("file"), dict) else {}
-    store = get_file_store(request)
-    name = str(file_payload.get("name") or f"files/{len(store) + 1}")
-    metadata = _file_metadata(
-        name=name,
-        display_name=file_payload.get("displayName")
-        or file_payload.get("display_name"),
-        mime_type=file_payload.get("mimeType") or file_payload.get("mime_type"),
-        size_bytes=file_payload.get("sizeBytes")
-        or file_payload.get("size_bytes")
-        or "0",
-        uri=file_payload.get("uri"),
-    )
-    store[name] = metadata
-    return {"file": metadata}
+    """Reject metadata-only publication; bytes use the resumable upload route."""
+    _context()
+    raise _invalid("Use /upload/v1beta/files with the resumable upload protocol.")
 
 
 @router.get("/files")
 @exceptions_handler
 async def list_files(request: Request):
-    """List Gemini-compatible files."""
-    store = get_file_store(request)
-    return {"files": list(store.values()), "nextPageToken": ""}
+    """List owned durable Files with stable page tokens."""
+    _context()
+    records = await list_stored_files(request)
+    try:
+        limit = int(request.query_params.get("pageSize", "100"))
+    except ValueError as exc:
+        raise _invalid("pageSize must be an integer.") from exc
+    if not 1 <= limit <= 100:
+        raise _invalid("pageSize must be between 1 and 100.")
+    token = request.query_params.get("pageToken")
+    ids = [record.public_id for record in records]
+    if token is not None and token not in ids:
+        raise _invalid("Invalid pageToken.")
+    start = ids.index(token) + 1 if token else 0
+    page = records[start : start + limit]
+    result = {"files": [gemini_file(record.metadata, request) for record in page]}
+    if start + limit < len(records):
+        result["nextPageToken"] = page[-1].public_id
+    return result
 
 
-@router.get("/files/{file_id:path}")
+@router.get("/files/{file_id}:download")
+@exceptions_handler
+async def download_file(file_id: str, request: Request):
+    """Download only generated/batch artifacts with a real bytes resource."""
+    _context()
+    file_id = _file_id(file_id)
+    metadata = await file_metadata(request, file_id)
+    if not metadata.get("downloadable"):
+        raise _invalid(
+            "User-uploaded files cannot be downloaded through Gemini Files.", 403
+        )
+    return Response(
+        await file_content(request, file_id),
+        media_type=metadata.get("mime_type", "application/octet-stream"),
+    )
+
+
+@router.get("/files/{file_id}")
 @exceptions_handler
 async def get_file(file_id: str, request: Request):
-    """Return Gemini-compatible file metadata."""
-    name = _file_name(file_id)
-    store = get_file_store(request)
-    if name in store:
-        return store[name]
-
-    giga_client = get_gigachat_client(request)
-    if not hasattr(giga_client, "aget_file"):
-        raise _not_found(name)
-    request_options = extract_gigachat_request_options(request)
-    async with gigachat_request_options(giga_client, request_options):
-        file_obj = await giga_client.aget_file(file=name.removeprefix("files/"))
-    metadata = _gigachat_file_to_gemini(file_obj, stored=None)
-    store[name] = metadata
-    return metadata
+    """Return facts for an owned file, including retained MIME and purpose."""
+    _context()
+    return gemini_file(await file_metadata(request, _file_id(file_id)), request)
 
 
-@router.delete("/files/{file_id:path}")
+@router.delete("/files/{file_id}")
 @exceptions_handler
 async def delete_file(file_id: str, request: Request):
-    """Delete a Gemini-compatible file."""
-    name = _file_name(file_id)
-    giga_client = get_gigachat_client(request)
-    if hasattr(giga_client, "adelete_file"):
-        request_options = extract_gigachat_request_options(request)
-        async with gigachat_request_options(giga_client, request_options):
-            await giga_client.adelete_file(file=name.removeprefix("files/"))
-    get_file_store(request).pop(name, None)
+    """Remove bytes and owner metadata through the shared file lifecycle."""
+    _context()
+    await remove_file(request, _file_id(file_id))
     return {}
 
 
-async def _create_multipart_file(request: Request) -> dict[str, Any]:
-    multipart = await read_request_multipart(request)
-    upload = multipart["files"].get("file")
-    if upload is None:
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "error": {
-                    "message": "Multipart upload requires a `file` field.",
-                    "type": "invalid_request_error",
-                    "param": "file",
-                    "code": "invalid_multipart",
-                }
-            },
-        )
-
-    giga_client = get_gigachat_client(request)
-    uploaded = None
-    if hasattr(giga_client, "aupload_file"):
-        request_options = extract_gigachat_request_options(request)
-        async with gigachat_request_options(giga_client, request_options):
-            uploaded = await giga_client.aupload_file(
-                (
-                    upload["filename"],
-                    upload["content"],
-                    upload["content_type"],
-                ),
-                purpose="general",
+async def resolve_file_references(request: Request, normalized_request: Any) -> None:
+    """Resolve gateway file URIs to verified owner-scoped native attachments."""
+    for message in normalized_request.messages:
+        if not isinstance(message.content, list):
+            continue
+        retained_parts = []
+        attachments = list(message.raw_extensions.get("attachments", []))
+        for part in message.content:
+            if part.type != "file" or not isinstance(part.data, dict):
+                retained_parts.append(part)
+                continue
+            uri = part.data.get("file_id")
+            if uri is None:
+                retained_parts.append(part)
+                continue
+            if not isinstance(uri, str) or not uri.startswith("files/"):
+                raise _invalid("fileUri must reference an uploaded gateway file.")
+            file_id = _file_id(uri)
+            resource = await get_resource_store(request).get(
+                get_resource_owner(request), "file", file_id
             )
-    name = f"files/{getattr(uploaded, 'id_', None) or len(get_file_store(request)) + 1}"
-    metadata = _gigachat_file_to_gemini(
-        uploaded,
-        stored={
-            "name": name,
-            "displayName": upload["filename"],
-            "mimeType": upload["content_type"],
-            "sizeBytes": str(len(upload["content"])),
-        },
-    )
-    get_file_store(request)[metadata["name"]] = metadata
-    return {"file": metadata}
-
-
-def _gigachat_file_to_gemini(
-    file_obj: Any,
-    *,
-    stored: dict[str, Any] | None,
-) -> dict[str, Any]:
-    if file_obj is None:
-        file_obj = {}
-    data = file_obj.model_dump(by_alias=True) if hasattr(file_obj, "model_dump") else {}
-    if isinstance(file_obj, dict):
-        data = dict(file_obj)
-    stored = stored or {}
-    file_id = data.get("id") or data.get("id_") or stored.get("name", "files/unknown")
-    name = str(file_id)
-    if not name.startswith("files/"):
-        name = f"files/{name}"
-    return _file_metadata(
-        name=name,
-        display_name=stored.get("displayName") or data.get("filename") or name,
-        mime_type=stored.get("mimeType") or data.get("mime_type"),
-        size_bytes=stored.get("sizeBytes")
-        or data.get("bytes")
-        or data.get("bytes_")
-        or "0",
-        uri=data.get("uri") or name,
-    )
-
-
-def _file_metadata(
-    *,
-    name: str,
-    display_name: Any,
-    mime_type: Any,
-    size_bytes: Any,
-    uri: Any,
-) -> dict[str, Any]:
-    now = _rfc3339_now()
-    return {
-        "name": name if name.startswith("files/") else f"files/{name}",
-        "displayName": str(display_name or name),
-        "mimeType": str(mime_type or "application/octet-stream"),
-        "sizeBytes": str(size_bytes or "0"),
-        "createTime": now,
-        "updateTime": now,
-        "uri": str(uri or name),
-        "state": "ACTIVE",
-        "source": "UPLOADED",
-    }
-
-
-def _file_name(value: str) -> str:
-    return value if value.startswith("files/") else f"files/{value}"
-
-
-def _not_found(name: str) -> HTTPException:
-    return HTTPException(
-        status_code=404,
-        detail={
-            "error": {
-                "message": f"File `{name}` not found.",
-                "type": "not_found_error",
-                "param": "name",
-                "code": None,
-            }
-        },
-    )
-
-
-def _rfc3339_now() -> str:
-    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            if resource is None:
+                raise file_not_found()
+            metadata = resource.metadata
+            if metadata.get("local") or not metadata.get("upstream_id"):
+                raise _invalid(
+                    "Batch JSONL and local result files cannot be used as document attachments."
+                )
+            mime = metadata.get("mime_type")
+            if part.mime_type and mime and part.mime_type != mime:
+                raise _invalid("fileData MIME type does not match the uploaded file.")
+            attachments.append(metadata["upstream_id"])
+        message.content = retained_parts
+        if attachments:
+            message.raw_extensions["attachments"] = attachments

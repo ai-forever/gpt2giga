@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from dataclasses import replace
 from typing import Any
 
 from starlette.datastructures import Headers, MutableHeaders
 from starlette.requests import Request
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from gpt2giga.common.model_concurrency import model_request_disconnected
 from gpt2giga.core.context import build_request_context, request_context_var
 from gpt2giga.logger import logger, rquid_context
 from gpt2giga.sinks.base import is_sink_active
@@ -71,7 +73,11 @@ class RquidMiddleware:
         try:
             await self.app(scope, receive, send_with_lifecycle)
             if response.started and not response.completed:
-                await response.complete()
+                disconnected = model_request_disconnected.get()
+                if disconnected is not None and disconnected.is_set():
+                    await response.fail(cancelled=True)
+                else:
+                    await response.complete()
         except asyncio.CancelledError:
             await response.fail(cancelled=True)
             raise
@@ -222,7 +228,12 @@ class _ResponseLifecycle:
             emissions.append(
                 emit_request_metrics(
                     metrics_sink,
-                    self.context,
+                    replace(
+                        self.context,
+                        route=getattr(
+                            self.request.scope.get("route"), "path", "unmatched"
+                        ),
+                    ),
                     status_code=status_code,
                     lifecycle=lifecycle,
                     logger=app_logger,

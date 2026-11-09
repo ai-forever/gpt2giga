@@ -1,19 +1,25 @@
 """Anthropic message endpoints."""
 
 from collections.abc import AsyncIterator
-from typing import Any, Dict, List
+from contextlib import AsyncExitStack
+from typing import Any, List
 
 from fastapi import APIRouter, Request
-from fastapi.responses import StreamingResponse
 
+from gpt2giga.common.streaming_response import ModelLimitedStreamingResponse
+
+from gpt2giga.common.streaming_response import closing_stream
+
+from gpt2giga.app.providers import bind_model_request
+from gpt2giga.common.files import validate_model_attachments
+from gpt2giga.app_state import get_request_transformer
 from gpt2giga.app_state import get_gigachat_client, get_model_concurrency_limiter
 from gpt2giga.common.api_mode import resolve_gigachat_api_mode
-from gpt2giga.common.cache_session import apply_cache_session_id
 from gpt2giga.common.client_params import ClientCompatibilityError
 from gpt2giga.common.conversation import (
     commit_anthropic_response,
     stitch_anthropic_stream,
-    stitch_chat_payload,
+    stitch_normalized_chat,
 )
 from gpt2giga.common.exceptions import exceptions_handler
 from gpt2giga.common.gigachat_options import (
@@ -21,7 +27,6 @@ from gpt2giga.common.gigachat_options import (
     gigachat_request_options,
 )
 from gpt2giga.common.signed_model_override import (
-    apply_model_override,
     resolve_signed_model_override,
 )
 from gpt2giga.common.request_json import read_request_json
@@ -32,29 +37,28 @@ from gpt2giga.openapi_specs.anthropic import (
     anthropic_messages_openapi_extra,
 )
 from gpt2giga.openapi_tags import OPENAPI_TAG_ANTHROPIC_MESSAGES
-from gpt2giga.protocol.anthropic.params import sanitize_anthropic_messages_parameters
+from gpt2giga.protocol.anthropic.params import (
+    sanitize_anthropic_messages_parameters,
+    validate_anthropic_version,
+)
+from gpt2giga.protocol.anthropic.files import resolve_anthropic_file_references
 from gpt2giga.protocol.anthropic.request import (
-    _build_openai_data_from_anthropic_request,
     _convert_anthropic_messages_to_openai,
     _extract_text_from_openai_messages,
     _extract_structured_output_text,
     _extract_tool_definitions_text,
 )
-from gpt2giga.protocol.anthropic.response import _build_anthropic_response
-from gpt2giga.protocol.anthropic.streaming import (
-    _stream_anthropic_generator,
-    _stream_anthropic_chat_completion_generator,
-)
-from gpt2giga.protocol.response import adapt_chat_completion_to_chat_shape
 from gpt2giga.protocols.anthropic import (
     AnthropicProtocolAdapter,
     AnthropicStreamProjector,
     normalized_chat_response_to_anthropic,
 )
 from gpt2giga.protocols.normalized import BridgeMatrixAdmissionError, PublicProtocol
-from gpt2giga.protocols.openai import OpenAIProtocolAdapter
 from gpt2giga.providers.gigachat import GigaChatProviderAdapter
-from gpt2giga.providers.gigachat.adapter import normalized_chat_to_openai_payload
+from gpt2giga.providers.gigachat.adapter import (
+    normalized_chat_to_openai_payload,
+    _normalized_token_count_texts,
+)
 from gpt2giga.providers.gigachat.model_resolution import resolve_upstream_model
 from gpt2giga.providers.profiles import (
     ProviderAliasError,
@@ -84,22 +88,35 @@ def _claude_cli_model_override(request: Request) -> str | None:
 @exceptions_handler
 async def count_tokens(request: Request):
     """Anthropic Messages count_tokens API compatible endpoint."""
-    data = sanitize_anthropic_messages_parameters(await read_request_json(request))
-    request_options = extract_gigachat_request_options(request, dict(data))
-    normalized = await _try_normalized_count_tokens(
-        request,
-        data,
-        request_options=request_options,
+    data = sanitize_anthropic_messages_parameters(
+        await read_request_json(request),
+        version=request.headers.get("anthropic-version"),
     )
-    if normalized is not None:
-        return normalized
+    await bind_model_request(
+        request, data.get("model"), PublicProtocol.ANTHROPIC_MESSAGES
+    )
+    request_options = extract_gigachat_request_options(request, dict(data))
+    if _external_provider_route(request, data.get("model")) is not None:
+        context = get_request_context()
+        normalized = _anthropic_adapter(request).count_tokens_to_normalized(
+            data, context=context
+        )
+        provider = _provider_adapter(
+            request,
+            normalized_request=normalized.input,
+            request_options=request_options,
+            pinned_model=_claude_cli_model_override(request),
+        )
+        result = await provider.count_tokens(normalized, context=context)
+        return {"input_tokens": result.input_tokens}
 
     giga_client = get_gigachat_client(request)
     model_limiter = get_model_concurrency_limiter(request)
     resolution = resolve_upstream_model(
         data,
         request.app.state.config,
-        forced_model=_claude_cli_model_override(request),
+        forced_model=getattr(request.state, "upstream_model", None)
+        or _claude_cli_model_override(request),
         provider="anthropic",
     )
     update_request_context(
@@ -107,22 +124,31 @@ async def count_tokens(request: Request):
         metadata={"model_source": resolution.source},
     )
 
-    openai_messages = _convert_anthropic_messages_to_openai(
-        data.get("system"),
-        data.get("messages", []),
-    )
-    texts: List[str] = _extract_text_from_openai_messages(openai_messages)
+    if request.app.state.config.proxy_settings.normalization_mode == "on":
+        texts = _normalized_token_count_texts(
+            _anthropic_adapter(request).count_tokens_to_normalized(
+                data, context=get_request_context()
+            )
+        )
+    else:
+        openai_messages = _convert_anthropic_messages_to_openai(
+            data.get("system"),
+            data.get("messages", []),
+        )
+        texts: List[str] = _extract_text_from_openai_messages(openai_messages)
 
-    if "tools" in data and data["tools"]:
-        texts.extend(_extract_tool_definitions_text(data["tools"]))
-    texts.extend(_extract_structured_output_text(data))
+        if "tools" in data and data["tools"]:
+            texts.extend(_extract_tool_definitions_text(data["tools"]))
+        texts.extend(_extract_structured_output_text(data))
 
     if not texts:
         return {"input_tokens": 0}
 
     async with model_limiter.limit(resolution.limiter_key, provider="anthropic"):
-        async with gigachat_request_options(giga_client, request_options):
-            token_counts = await giga_client.atokens_count(
+        async with gigachat_request_options(
+            giga_client, request_options
+        ) as request_client:
+            token_counts = await request_client.atokens_count(
                 texts,
                 model=resolution.model,
             )
@@ -135,411 +161,121 @@ async def count_tokens(request: Request):
 async def messages(request: Request):
     """Anthropic Messages API compatible endpoint."""
     data = await read_request_json(request)
-    pinned_model = _claude_cli_model_override(request)
+    validate_anthropic_version(data, request.headers.get("anthropic-version"))
+    await bind_model_request(
+        request, data.get("model"), PublicProtocol.ANTHROPIC_MESSAGES
+    )
+    await validate_model_attachments(request, data)
+    await resolve_anthropic_file_references(request, data)
+    pinned_model = getattr(
+        request.state, "upstream_model", None
+    ) or _claude_cli_model_override(request)
     request_options = extract_gigachat_request_options(request, data)
-    stream = data.get("stream", False)
-    current_rquid = rquid_context.get()
-    state = request.app.state
-    giga_client = get_gigachat_client(request)
-    model_limiter = get_model_concurrency_limiter(request)
-
-    model = data.get("model", "unknown")
-    openai_data: Dict = _build_openai_data_from_anthropic_request(
-        data,
-        state.logger,
+    context = get_request_context()
+    normalized_request = _anthropic_adapter(request).messages_to_normalized(
+        data, context=context
     )
-    if "conversation" in data:
-        openai_data["conversation"] = data["conversation"]
-    if "metadata" in data:
-        openai_data["metadata"] = data["metadata"]
-    mode = resolve_gigachat_api_mode(request)
-
-    normalized_response = await _try_normalized_non_stream_message(
+    conversation_turn = await stitch_normalized_chat(
+        request, normalized_request, payload=data, protocol="anthropic"
+    )
+    openai_data = normalized_chat_to_openai_payload(normalized_request)
+    await validate_model_attachments(request, openai_data)
+    provider = _provider_adapter(
         request,
-        data,
-        openai_data=openai_data,
+        normalized_request=normalized_request,
         request_options=request_options,
         pinned_model=pinned_model,
+        require_streaming=normalized_request.stream,
     )
-    if normalized_response is not None:
-        return normalized_response
-
-    normalized_stream = await _try_normalized_stream_message(
-        request,
-        data,
-        openai_data=openai_data,
-        request_options=request_options,
-        pinned_model=pinned_model,
-    )
-    if normalized_stream is not None:
-        return normalized_stream
-
-    conversation_turn = await stitch_chat_payload(
-        request,
-        openai_data,
-        protocol="anthropic",
-    )
-
-    if mode == "v2":
-        async with gigachat_request_options(giga_client, request_options):
-            try:
-                chat_request = await state.request_transformer.prepare_chat_completion(
-                    openai_data,
-                    giga_client,
-                    **(
-                        {"forced_model": pinned_model}
-                        if pinned_model is not None
-                        and state.config.proxy_settings.normalize_tool_schemas
-                        else {}
-                    ),
-                )
-            except ClientCompatibilityError as exc:
-                exc.provider = "anthropic"
-                raise
-        resolution = resolve_upstream_model(
-            chat_request,
-            state.config,
-            forced_model=pinned_model,
-            api_mode=mode,
-            provider="anthropic",
-        )
-        chat_request = apply_model_override(
-            chat_request,
-            resolution.model if resolution.source == "forced" else None,
-        )
-        request_options = apply_cache_session_id(
-            request, chat_request, request_options, model=resolution.limiter_key
-        )
-        effective_model = resolution.limiter_key
-        update_request_context(
-            model_effective=resolution.model,
-            metadata={"model_source": resolution.source},
-        )
-        if not stream:
-            async with model_limiter.limit(effective_model, provider="anthropic"):
-                async with gigachat_request_options(giga_client, request_options):
-                    response = await giga_client.achat.create(chat_request)
-            giga_dict = adapt_chat_completion_to_chat_shape(
-                response,
-                default_model=model,
-            )
-            result = _build_anthropic_response(
-                giga_dict,
-                model,
-                current_rquid,
-                logger=state.logger,
-                mode=state.config.proxy_settings.mode,
-                log_level=state.config.proxy_settings.log_level,
-            )
-            await commit_anthropic_response(request, conversation_turn, result)
-            await emit_anthropic_message_observability(
-                state,
-                openai_data,
-                result,
-                context=get_request_context(),
-            )
-            return result
-
-        return StreamingResponse(
-            observe_anthropic_message_stream(
-                state,
-                stitch_anthropic_stream(
-                    request,
-                    conversation_turn,
-                    _stream_anthropic_chat_completion_generator(
-                        request,
-                        model,
-                        chat_request,
-                        current_rquid,
-                        giga_client,
-                        request_options=request_options,
-                        model_limiter=model_limiter,
-                        effective_model=effective_model,
-                    ),
-                ),
-                request_payload=openai_data,
-                context=get_request_context(),
-            ),
-            media_type="text/event-stream",
-        )
-
-    async with gigachat_request_options(giga_client, request_options):
-        try:
-            chat_messages = await state.request_transformer.prepare_chat(
-                openai_data,
-                giga_client,
-                **(
-                    {"forced_model": pinned_model}
-                    if pinned_model is not None
-                    and state.config.proxy_settings.normalize_tool_schemas
-                    else {}
-                ),
-            )
-        except ClientCompatibilityError as exc:
-            exc.provider = "anthropic"
-            raise
-    resolution = resolve_upstream_model(
-        chat_messages,
-        state.config,
-        forced_model=pinned_model,
-        api_mode=mode,
-        provider="anthropic",
-    )
-    chat_messages = apply_model_override(
-        chat_messages,
-        resolution.model if resolution.source == "forced" else None,
-    )
-    request_options = apply_cache_session_id(
-        request, chat_messages, request_options, model=resolution.limiter_key
-    )
-    effective_model = resolution.limiter_key
-    update_request_context(
-        model_effective=resolution.model,
-        metadata={"model_source": resolution.source},
-    )
-
-    if not stream:
-        async with model_limiter.limit(effective_model, provider="anthropic"):
-            async with gigachat_request_options(giga_client, request_options):
-                response = await giga_client.achat(chat_messages)
-        giga_dict = response.model_dump()
-        result = _build_anthropic_response(
-            giga_dict,
-            model,
-            current_rquid,
-            logger=state.logger,
-            mode=state.config.proxy_settings.mode,
-            log_level=state.config.proxy_settings.log_level,
-        )
-        await commit_anthropic_response(request, conversation_turn, result)
-        await emit_anthropic_message_observability(
-            state,
-            openai_data,
-            result,
-            context=get_request_context(),
-        )
-        return result
-
-    return StreamingResponse(
-        observe_anthropic_message_stream(
-            state,
-            stitch_anthropic_stream(
-                request,
-                conversation_turn,
-                _stream_anthropic_generator(
-                    request,
-                    model,
-                    chat_messages,
-                    current_rquid,
-                    giga_client,
-                    request_options=request_options,
-                    model_limiter=model_limiter,
-                    effective_model=effective_model,
-                ),
-            ),
-            request_payload=openai_data,
-            context=get_request_context(),
-        ),
-        media_type="text/event-stream",
-    )
-
-
-async def _try_normalized_count_tokens(
-    request: Request,
-    payload: dict[str, Any],
-    *,
-    request_options: Any,
-) -> dict[str, int] | None:
-    settings = _normalization_settings(request)
-    external_route = _external_provider_route(request, payload.get("model"))
-    if external_route is None and (
-        settings is None or settings.normalization_mode != "on"
-    ):
-        return None
     try:
-        context = get_request_context()
-        normalized_request = _anthropic_adapter(request).count_tokens_to_normalized(
-            payload,
-            context=context,
-        )
-        response = await _provider_adapter(
-            request,
-            normalized_request=normalized_request.input,
-            request_options=request_options,
-            pinned_model=_claude_cli_model_override(request),
-        ).count_tokens(normalized_request, context=context)
-        return {"input_tokens": response.input_tokens}
-    except Exception as exc:
-        if (
-            external_route is not None
-            or settings is None
-            or not settings.legacy_chat_fallback
-        ):
-            raise
-        _log_normalized_fallback(request, exc, event="anthropic_count_tokens_fallback")
-        return None
-
-
-async def _try_normalized_non_stream_message(
-    request: Request,
-    payload: dict[str, Any],
-    *,
-    openai_data: dict[str, Any],
-    request_options: Any,
-    pinned_model: str | None,
-) -> dict[str, Any] | None:
-    settings = _normalization_settings(request)
-    external_route = _external_provider_route(request, payload.get("model"))
-    if (
-        external_route is None
-        and (settings is None or settings.normalization_mode != "on")
-    ) or payload.get("stream", False):
-        return None
-    try:
-        context = get_request_context()
-        normalized_request = _anthropic_adapter(request).messages_to_normalized(
-            payload,
-            context=context,
-        )
-        openai_data = {
-            **openai_data,
-            "messages": normalized_chat_to_openai_payload(normalized_request)[
-                "messages"
-            ],
-        }
-        conversation_turn = await stitch_chat_payload(
-            request, openai_data, protocol="anthropic"
-        )
-        if conversation_turn is not None:
-            normalized_request.messages = (
-                OpenAIProtocolAdapter()
-                .chat_to_normalized({"messages": openai_data["messages"]})
-                .messages
+        if normalized_request.stream:
+            return await _stream_message(
+                request, normalized_request, provider, openai_data, conversation_turn
             )
-        normalized_response = await _provider_adapter(
-            request,
-            normalized_request=normalized_request,
-            request_options=request_options,
-            pinned_model=pinned_model,
-        ).chat(normalized_request, context=context)
         result = normalized_chat_response_to_anthropic(
-            normalized_response,
-            requested_model=str(payload.get("model") or "unknown"),
+            await provider.chat(normalized_request, context=context),
+            requested_model=str(data.get("model") or "unknown"),
             context=context,
         )
-        await commit_anthropic_response(request, conversation_turn, result)
-        await emit_anthropic_message_observability(
-            request.app.state,
-            openai_data,
-            result,
-            context=context,
-        )
-        return result
-    except Exception as exc:
-        if (
-            external_route is not None
-            or settings is None
-            or not settings.legacy_chat_fallback
-        ):
-            raise
-        _log_normalized_fallback(request, exc, event="anthropic_message_fallback")
-        return None
+    except ClientCompatibilityError as exc:
+        exc.provider = "anthropic"
+        raise
+    await commit_anthropic_response(request, conversation_turn, result)
+    await emit_anthropic_message_observability(
+        request.app.state, openai_data, result, context=context
+    )
+    return result
 
 
-async def _try_normalized_stream_message(
-    request: Request,
-    payload: dict[str, Any],
-    *,
-    openai_data: dict[str, Any],
-    request_options: Any,
-    pinned_model: str | None,
-) -> StreamingResponse | None:
-    settings = _normalization_settings(request)
-    external_route = _external_provider_route(request, payload.get("model"))
-    if (
-        external_route is None
-        and (settings is None or settings.normalization_mode != "on")
-    ) or not payload.get("stream", False):
-        return None
-    try:
-        context = get_request_context()
-        normalized_request = _anthropic_adapter(request).messages_to_normalized(
-            payload,
-            context=context,
-        )
-        openai_data = {
-            **openai_data,
-            "messages": normalized_chat_to_openai_payload(normalized_request)[
-                "messages"
-            ],
-        }
-        conversation_turn = await stitch_chat_payload(
-            request, openai_data, protocol="anthropic"
-        )
-        if conversation_turn is not None:
-            normalized_request.messages = (
-                OpenAIProtocolAdapter()
-                .chat_to_normalized({"messages": openai_data["messages"]})
-                .messages
+async def _stream_message(
+    request, normalized_request, provider, openai_data, conversation_turn
+):
+    """Project the shared provider stream while owning preparation and cleanup."""
+    context = get_request_context()
+    response_id = context.request_id if context is not None else rquid_context.get()
+    projector = AnthropicStreamProjector(
+        requested_model=normalized_request.model or "unknown",
+        response_id=response_id or "-",
+        include_cache_read_tokens=(
+            isinstance(provider, GigaChatProviderAdapter)
+            and request.app.state.config.proxy_settings.normalization_mode != "on"
+        ),
+    )
+    acquired_model_limit = AsyncExitStack()
+    stream_options = {}
+    if isinstance(provider, GigaChatProviderAdapter):
+        prepared = await provider._prepare_request(normalized_request, context)
+        await acquired_model_limit.enter_async_context(
+            provider.model_limiter.limit(
+                prepared[1].limiter_key, provider=provider.provider_label
             )
-        provider = _provider_adapter(
-            request,
-            normalized_request=normalized_request,
-            request_options=request_options,
-            pinned_model=pinned_model,
-            require_streaming=True,
         )
-        response_id = context.request_id if context is not None else rquid_context.get()
-        projector = AnthropicStreamProjector(
-            requested_model=str(payload.get("model") or "unknown"),
-            response_id=response_id or "-",
-        )
+        stream_options = {
+            "prepared_request": prepared,
+            "acquired_model_limit": acquired_model_limit,
+        }
 
-        async def emit_stream() -> AsyncIterator[str]:
+    async def emit_stream() -> AsyncIterator[str]:
+        try:
             pending_message_end = None
-            async for event in provider.stream_chat(
-                normalized_request,
-                context=context,
-                is_disconnected=request.is_disconnected,
-                logger=getattr(request.app.state, "logger", None),
-            ):
-                if event.type == "message_end":
-                    pending_message_end = event
-                    continue
-                if event.type == "usage" and pending_message_end is not None:
-                    pending_message_end = pending_message_end.model_copy(
-                        update={
-                            "sequence": event.sequence,
-                            "usage": event.usage,
-                        }
-                    )
-                    continue
-                for frame in projector.project(event):
-                    yield frame
+            async with closing_stream(
+                provider.stream_chat(
+                    normalized_request,
+                    context=context,
+                    is_disconnected=request.is_disconnected,
+                    logger=getattr(request.app.state, "logger", None),
+                    **stream_options,
+                )
+            ) as delegated_stream:
+                async for event in delegated_stream:
+                    if event.type == "error":
+                        pending_message_end = None
+                    if event.type == "message_end":
+                        pending_message_end = event
+                        continue
+                    if event.type == "usage" and pending_message_end is not None:
+                        pending_message_end = pending_message_end.model_copy(
+                            update={"sequence": event.sequence, "usage": event.usage}
+                        )
+                        continue
+                    for frame in projector.project(event):
+                        yield frame
             if pending_message_end is not None:
                 for frame in projector.project(pending_message_end):
                     yield frame
+        finally:
+            await acquired_model_limit.aclose()
 
-        body_iterator = observe_anthropic_message_stream(
+    return ModelLimitedStreamingResponse(
+        observe_anthropic_message_stream(
             request.app.state,
-            stitch_anthropic_stream(
-                request,
-                conversation_turn,
-                emit_stream(),
-            ),
+            stitch_anthropic_stream(request, conversation_turn, emit_stream()),
             request_payload=openai_data,
             context=context,
-        )
-        return StreamingResponse(body_iterator, media_type="text/event-stream")
-    except Exception as exc:
-        if (
-            external_route is not None
-            or settings is None
-            or not settings.legacy_chat_fallback
-        ):
-            raise
-        _log_normalized_fallback(request, exc, event="anthropic_stream_fallback")
-        return None
+        ),
+        media_type="text/event-stream",
+        acquired_model_limit=acquired_model_limit,
+    )
 
 
 def _provider_adapter(
@@ -570,7 +306,7 @@ def _provider_adapter(
             ) from exc
     return GigaChatProviderAdapter(
         config=state.config,
-        request_transformer=state.request_transformer,
+        request_transformer=get_request_transformer(request),
         giga_client=get_gigachat_client(request),
         model_limiter=get_model_concurrency_limiter(request),
         request_options=request_options,
@@ -611,29 +347,3 @@ def _anthropic_adapter(request: Request) -> AnthropicProtocolAdapter:
         adapter = AnthropicProtocolAdapter()
         request.app.state.anthropic_protocol_adapter = adapter
     return adapter
-
-
-def _normalization_settings(request: Request) -> Any:
-    return getattr(
-        getattr(request.app.state, "config", None),
-        "proxy_settings",
-        None,
-    )
-
-
-def _log_normalized_fallback(
-    request: Request,
-    exc: Exception,
-    *,
-    event: str,
-) -> None:
-    logger = getattr(request.app.state, "logger", None)
-    if logger is None:
-        return
-    context = get_request_context()
-    logger.bind(
-        event=event,
-        route=request.url.path,
-        error_type=type(exc).__name__,
-        request_id=getattr(context, "request_id", None),
-    ).warning("Normalized Anthropic path failed; using legacy fallback")

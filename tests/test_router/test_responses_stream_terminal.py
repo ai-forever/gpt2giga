@@ -93,3 +93,24 @@ def test_native_responses_stream_reports_incomplete_termination(
         assert result["output"][0]["content"][0]["text"] == "partial text"
     else:
         assert result["output"][0]["arguments"] == '{"city": "Paris"}'
+
+
+@pytest.mark.parametrize("mode", ["v1", "v2"])
+def test_native_responses_stream_requires_semantic_terminal(mode):
+    app = _app(finish_reason=None, output_kind="text")
+    response = TestClient(app).post(
+        f"/{mode}/responses",
+        json={"model": "GigaChat-2-Max", "input": "hello", "stream": True},
+    )
+    events = [
+        json.loads(line[6:])
+        for line in response.text.splitlines()
+        if line.startswith("data: ")
+    ]
+    assert not any(
+        event["type"] in {"response.completed", "response.incomplete"}
+        for event in events
+    )
+    errors = [event for event in events if event["type"] == "error"]
+    assert len(errors) == 1
+    assert errors[0]["code"] == "invalid_upstream_response"

@@ -9,15 +9,13 @@ Gemini GenerateContent, а шлюз приводит совместимые ча
 
 ## Текущий статус
 
-- `GPT2GIGA_NORMALIZATION_MODE=off`: OpenAI Chat Completions и Anthropic
-  Messages идут через прежние преобразования.
-- `GPT2GIGA_NORMALIZATION_MODE=shadow`: OpenAI Chat строит нормализованный запрос
-  рядом с прежним путём и сохраняет безопасный диагностический хеш формы без содержимого промпта.
-- `GPT2GIGA_NORMALIZATION_MODE=on`: OpenAI Chat Completions, принятое
-  подмножество Anthropic Messages v1 и Gemini `countTokens` исполняются через
-  свои protocol adapters, нормализованные модели и `GigaChatProviderAdapter`;
-  до старта ответа доступен откат к прежнему через
-  `GPT2GIGA_LEGACY_CHAT_FALLBACK=True`.
+- `GPT2GIGA_NORMALIZATION_MODE=off` остаётся значением по умолчанию.
+  `off`, `shadow` и `on` используют одно ядро исполнения chat; `shadow` сохраняет
+  безопасную диагностику уже декодированного запроса. `GPT2GIGA_LEGACY_CHAT_FALLBACK`
+  остаётся совместимой настройкой и не повторяет dispatch.
+- Публичные protocol adapters передают небольшую модель messages/events прямо
+  в общие GigaChat v1/v2 builders. Один provider adapter владеет SDK-вызовом,
+  limiter и закрытием iterator. Reasoning и hosted-tool intent сохраняются.
 - Для встроенных моделей GigaChat OpenAI Responses сохраняет существующий путь.
   Точный алиас из профиля `openai_compatible` нормализуется и исполняется через
   привязанный адаптер Chat Completions.
@@ -30,8 +28,8 @@ Gemini GenerateContent, а шлюз приводит совместимые ча
   `gigachat` для защищённых admin-сценариев.
 - Явно разрешённые OpenAI-совместимые профили и vLLM используют нормализованный
   адаптер Chat Completions как публичный маршрут для своих точных алиасов.
-  Responses, Chat Completions, Anthropic Messages и Gemini GenerateContent
-  используют одного владельца исполнения.
+  Responses, Anthropic Messages и Gemini GenerateContent используют общего
+  владельца. Chat Completions к external providers остаётся blocked в loss matrix.
 - Запросы, ответы и SSE Anthropic напрямую преобразуются через нормализованный
   слой. Точный подсчёт токенов доступен только у провайдера с такой
   возможностью; маршрут только с Chat Completions его отклоняет.
@@ -206,10 +204,13 @@ OpenAI Chat Completions в нормализованном режиме прох�
 6. Наблюдаемость получает нормализованные запрос/ответ и строит безопасные
    атрибуты спанов в стиле OpenInference.
 
-Внутри `GigaChatProviderAdapter` нормализованный запрос сейчас реконструируется в
-OpenAI-подобную полезную нагрузку, после чего используется существующий `RequestTransformer`
-для GigaChat v1/v2 SDK. Это переходный слой: нормализованный контракт уже отделён от
-роутера, но часть подготовки, специфичной для GigaChat, ещё переиспользует прежний код.
+`GigaChatProviderAdapter` готовит typed messages через
+`RequestTransformer.prepare_normalized` и общие чистые SDK builders.
+Для исполнения normalized request больше не превращается обратно в OpenAI request.
+Старый projection helper сохранён для history и public admin/preview совместимости,
+но не используется для исполнения через legacy request transformer.
+Native Responses сохраняет отдельный stateful executor и opaque thread/tool state ID;
+structured terminal result передаётся storage и observability до сериализации SSE.
 
 ## Отличия от OpenAI Chat Completions
 
@@ -286,8 +287,8 @@ Gemini GenerateContent — отдельный публичный протоко�
 - при включённом режиме нормализации `countTokens` использует тот же
   нормализованный контракт token-count request/response, что и принятый bridge.
 
-Модули роутеров Gemini Files/Batches подготовлены, но не подключены в публичном
-наборе API; они не являются частью текущего нормализованного пути выполнения.
+Gemini Files/Batches подключены с durable resources и native SDK execution.
+Жизненный цикл ресурсов отделён от модели chat messages.
 
 ## Отличия от формата GigaChat
 
@@ -331,14 +332,11 @@ Anthropic Messages — отдельный публичный протокол с
 - `usage.input_tokens` и `usage.output_tokens` в Anthropic уже совпадают с
   нормализованными именами, а `total_tokens` вычисляется при наличии обоих значений.
 
-При `GPT2GIGA_NORMALIZATION_MODE=on` `AnthropicProtocolAdapter` напрямую строит
-нормализованный запрос, `GigaChatProviderAdapter` исполняет его, а проектор
-Anthropic response/SSE восстанавливает сетевой контракт клиента. Тот же путь
-представляет `count_tokens` через `NormalizedTokenCountRequest` и
-`NormalizedTokenCountResponse`. Прежнее исполнение остаётся default и
-pre-response fallback для семантики вне принятого подмножества v1. Prompt
-caching, computer use, files и другие несмоделированные возможности Anthropic
-не объявляются поддержанными нормализованным путём.
+`AnthropicProtocolAdapter` строит normalized request, общий provider adapter
+исполняет его, а Anthropic projector восстанавливает wire contract. Token counting
+использует общий normalized контракт независимо от compatibility mode.
+File references проверяются по owner до подготовки; неподдержанные external-provider
+semantics отклоняются до I/O.
 
 ## Наблюдаемость
 
@@ -378,3 +376,23 @@ GPT2GIGA_ADMIN_API_KEY="<strong-admin-secret>"
 
 Теневая диагностика (shadow) не пишет содержимое промптов или ответов. Она сохраняет маршрут,
 статус, предупреждения/ошибки и хеш формы нормализованной полезной нагрузки.
+
+
+Token counting сохраняет узкое различие совместимости при подготовке текста: `on`
+учитывает normalized tool/schema text, а `off`/`shadow` сохраняют tolerant legacy subset.
+Все режимы используют общий token-count dispatch, client binding, limiter и cleanup.
+
+Публичная Chat projection сохраняет поддержанные native `audio`, `annotations`,
+`inline_data`, `tool_executions`, `files` через явный allowlist. Source markers
+обрабатывает общий renderer. Reference-only Chat не скачивает generated image bytes;
+consumers, которым нужны bytes, выполняют hydration явно. Владелец stream удаляет
+reasoning/source state после штатного flush и после аварийного завершения. Anthropic
+conversation stitching сохраняет typed messages текущего turn и декодирует только
+восстановленную историю на storage boundary. Legacy request builder остаётся для
+batch/admin consumers.
+
+Streaming сохраняет и отдельные delta с этими публичными расширениями, даже
+без текста или usage. Пустые keepalive и chunks только с внутренним состоянием
+провайдера не публикуются. Известное отключение клиента отменяет ожидающий stream
+при ASGI 2.3 и 2.4; upstream закрывается до освобождения model slot и credential
+lease.

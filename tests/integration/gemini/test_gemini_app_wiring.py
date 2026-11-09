@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 
 from gpt2giga.api_server import create_app
 from gpt2giga.models.config import ProxyConfig, ProxySettings
+from gpt2giga.protocol import RequestTransformer
 
 
 class MockResponse:
@@ -146,20 +147,6 @@ class FakeGigaChat:
         return None
 
 
-class FakeRequestTransformer:
-    async def prepare_chat(self, data, giga_client=None):
-        return {
-            "model": data.get("model", "GigaChat"),
-            "messages": data.get("messages", []),
-            "tools": data.get("tools"),
-            "tool_choice": data.get("tool_choice"),
-            "max_tokens": data.get("max_tokens"),
-        }
-
-    async def prepare_chat_completion(self, data, giga_client=None):
-        return await self.prepare_chat(data, giga_client)
-
-
 def make_app(monkeypatch):
     fake_client = FakeGigaChat()
     monkeypatch.setattr(
@@ -179,7 +166,9 @@ def make_app(monkeypatch):
 
 
 def install_fake_transformer(app):
-    app.state.request_transformer = FakeRequestTransformer()
+    app.state.request_transformer = RequestTransformer(
+        app.state.config, app.state.logger
+    )
 
 
 def test_gemini_v1beta_generate_count_embed_and_models(monkeypatch):
@@ -324,25 +313,25 @@ def test_gemini_v1beta_under_version_prefixes_supports_stream_and_models(
     assert '"finishReason": "STOP"' in body
 
 
-def test_gemini_prepared_routes_stay_unmounted_with_openai_files_enabled(monkeypatch):
+def test_gemini_resource_routes_are_mounted_alongside_openai_files(monkeypatch):
     app, _fake_client = make_app(monkeypatch)
     paths = app.openapi()["paths"]
 
-    assert "/v1beta/files" not in paths
-    assert "/v1beta/batches" not in paths
-    assert "/v1beta/models/{model}:batchGenerateContent" not in paths
+    assert "/v1beta/files" in paths
+    assert "/v1beta/batches" in paths
+    assert "/v1beta/models/{model}:batchGenerateContent" in paths
     assert "/v1/files" in paths
-    assert "/v1/batches" not in paths
-    assert "/v1/models/{model}:batchGenerateContent" not in paths
-    assert "/v1/v1beta/files" not in paths
-    assert "/v1/v1beta/batches" not in paths
-    assert "/v1/v1beta/models/{model}:batchGenerateContent" not in paths
+    assert "/v1/batches" in paths
+    assert "/v1/models/{model}:batchGenerateContent" in paths
+    assert "/v1/v1beta/files" in paths
+    assert "/v1/v1beta/batches" in paths
+    assert "/v1/v1beta/models/{model}:batchGenerateContent" in paths
     assert "/v2/files" in paths
-    assert "/v2/batches" not in paths
-    assert "/v2/models/{model}:batchGenerateContent" not in paths
-    assert "/v2/v1beta/files" not in paths
-    assert "/v2/v1beta/batches" not in paths
-    assert "/v2/v1beta/models/{model}:batchGenerateContent" not in paths
+    assert "/v2/batches" in paths
+    assert "/v2/models/{model}:batchGenerateContent" in paths
+    assert "/v2/v1beta/files" in paths
+    assert "/v2/v1beta/batches" in paths
+    assert "/v2/v1beta/models/{model}:batchGenerateContent" in paths
 
     with TestClient(app) as client:
         install_fake_transformer(app)
@@ -360,7 +349,7 @@ def test_gemini_prepared_routes_stay_unmounted_with_openai_files_enabled(monkeyp
             json={"batch": {"displayName": "demo"}},
         )
 
-    assert files.status_code == 404
-    assert batch.status_code in {404, 405}
-    assert v1_batch.status_code in {404, 405}
-    assert v2_v1beta_batch.status_code in {404, 405}
+    assert files.status_code == 200
+    assert batch.status_code == 400
+    assert v1_batch.status_code == 400
+    assert v2_v1beta_batch.status_code == 400

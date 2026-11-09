@@ -239,6 +239,18 @@ class FakeGigachat:
 
 
 class FakeRequestTransformer:
+    async def prepare_normalized(
+        self, request, giga_client=None, *, api_mode, forced_model=None
+    ):
+        from gpt2giga.providers.gigachat.adapter import (
+            normalized_chat_to_openai_payload,
+        )
+
+        payload = normalized_chat_to_openai_payload(request)
+        if api_mode == "v2":
+            return await self.prepare_chat_completion(payload, giga_client)
+        return await self.prepare_chat(payload, giga_client)
+
     def __init__(self):
         self.chat_calls = []
         self.chat_completion_calls = []
@@ -437,7 +449,7 @@ def test_anthropic_count_tokens_normalization_on_uses_normalized_core():
     assert app.state.gigachat_client.token_inputs[0] == "count these words"
 
 
-def test_anthropic_normalized_failure_falls_back_before_response():
+def test_anthropic_decoder_failure_never_dispatches_with_legacy_flag():
     app = make_app(
         "v2",
         normalization_mode="on",
@@ -453,11 +465,9 @@ def test_anthropic_normalized_failure_falls_back_before_response():
 
     response = client.post("/messages", json=_anthropic_payload())
 
-    assert response.status_code == 200
-    assert response.json()["content"][0]["text"] == "ok-v2"
-    assert app.state.gigachat_client.achat.chat_completion_calls == [
-        {"contract": "anthropic-v2"}
-    ]
+    assert response.status_code == 500
+    assert response.json()["error"]["type"] == "server_error"
+    assert app.state.gigachat_client.achat.chat_completion_calls == []
 
 
 def test_anthropic_messages_v2_pins_signed_claude_cli_model_override():
@@ -537,20 +547,28 @@ def test_anthropic_messages_v2_mode_passes_builtin_tools_to_transformer():
 
     assert response.status_code == 200
     transformed_data = app.state.request_transformer.chat_completion_calls[0][0]
-    assert transformed_data["tools"] == [{"type": "web_search", "max_uses": 3}]
+    assert transformed_data["tools"] == [
+        {"type": "web_search", "web_search": {"max_uses": 3}}
+    ]
     assert transformed_data["tool_choice"] == {"type": "web_search"}
     assert "functions" not in transformed_data
     assert "function_call" not in transformed_data
 
 
 async def _wait_for_chat_completion_transformer_calls(app, count: int) -> None:
-    while len(app.state.request_transformer.chat_completion_calls) < count:
-        await asyncio.sleep(0)
+    async def wait():
+        while len(app.state.request_transformer.chat_completion_calls) < count:
+            await asyncio.sleep(0)
+
+    await asyncio.wait_for(wait(), timeout=2)
 
 
 async def _wait_for_chat_completion_create_calls(app, count: int) -> None:
-    while len(app.state.gigachat_client.achat.chat_completion_calls) < count:
-        await asyncio.sleep(0)
+    async def wait():
+        while len(app.state.gigachat_client.achat.chat_completion_calls) < count:
+            await asyncio.sleep(0)
+
+    await asyncio.wait_for(wait(), timeout=2)
 
 
 def _anthropic_payload() -> dict:

@@ -23,6 +23,29 @@ def is_shadow_normalization_enabled(settings: ProxySettings) -> bool:
     return settings.normalization_mode == "shadow"
 
 
+def record_chat_normalization(
+    request: Request,
+    *,
+    normalized: NormalizedChatRequest | None = None,
+    error: Exception | None = None,
+) -> None:
+    """Record the shared decoder outcome without running another conversion."""
+    state = request.app.state
+    settings = getattr(getattr(state, "config", None), "proxy_settings", None)
+    if settings is None or not is_shadow_normalization_enabled(settings):
+        return
+    _record_shadow_diagnostic(
+        state,
+        build_normalization_diagnostic(
+            request_id=_request_id(),
+            route=request.url.path,
+            normalization_status="error" if error is not None else "ok",
+            normalized_payload=normalized,
+            errors=[type(error).__name__] if error is not None else None,
+        ),
+    )
+
+
 async def run_openai_chat_shadow_normalization(
     request: Request,
     payload: Mapping[str, Any],

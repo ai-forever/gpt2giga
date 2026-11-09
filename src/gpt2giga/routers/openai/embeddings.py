@@ -2,6 +2,7 @@
 
 from fastapi import APIRouter, Request
 
+from gpt2giga.app.providers import bind_model_request
 from gpt2giga.app_state import get_gigachat_client, get_model_concurrency_limiter
 from gpt2giga.common.exceptions import exceptions_handler
 from gpt2giga.common.gigachat_options import (
@@ -30,6 +31,7 @@ router = APIRouter(tags=[OPENAPI_TAG_OPENAI_EMBEDDINGS])
 async def embeddings(request: Request):
     """Create embeddings."""
     data = await read_request_json(request)
+    await bind_model_request(request, data.get("model"), None)
     request_options = extract_gigachat_request_options(request, data)
     giga_client = get_gigachat_client(request)
     model_limiter = get_model_concurrency_limiter(request)
@@ -39,7 +41,10 @@ async def embeddings(request: Request):
         proxy_settings.embeddings,
         pass_model=proxy_settings.pass_model,
     )
-    effective_model = transformed["model"]
+    effective_model = (
+        getattr(request.state, "upstream_model", None) or transformed["model"]
+    )
+    transformed["model"] = effective_model
     update_request_context(model_effective=effective_model)
     log_debug_payload(
         getattr(request.app.state, "logger", None),
@@ -52,11 +57,15 @@ async def embeddings(request: Request):
         model=effective_model,
     )
     async with model_limiter.limit(effective_model, provider="openai"):
-        async with gigachat_request_options(giga_client, request_options):
-            response = await giga_client.aembeddings(
+        async with gigachat_request_options(
+            giga_client, request_options
+        ) as request_client:
+            response = await request_client.aembeddings(
                 texts=transformed["input"], model=effective_model
             )
-    normalized = normalize_embedding_response(response, model=effective_model)
+    normalized = normalize_embedding_response(
+        response, model=effective_model, expected_count=len(transformed["input"])
+    )
     result = apply_embedding_encoding_format(normalized, data.get("encoding_format"))
     await emit_openai_embeddings_observability(
         request.app.state,

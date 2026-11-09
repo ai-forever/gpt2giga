@@ -59,7 +59,39 @@ class ProxySettings(BaseSettings):
     )
     pass_token_client_cache_size: PositiveInt = Field(
         default=32,
-        description="Maximum number of idle credential-specific GigaChat clients.",
+        description=(
+            "Maximum idle credential-specific GigaChat clients; total owned clients "
+            "are capped at twice this value, with HTTP 503 for new credentials at capacity."
+        ),
+    )
+    resource_store_path: str = Field(
+        default="var/resources",
+        min_length=1,
+        description="Durable SQLite and blob directory shared by gateway workers.",
+    )
+    resource_retention_seconds: PositiveInt = Field(
+        default=30 * 86400,
+        description="Resource metadata/blob retention, independent of batch delivery deadlines.",
+    )
+    resource_max_blob_bytes: PositiveInt = Field(
+        default=100 * 1024 * 1024,
+        description="Maximum bytes in one locally retained resource blob.",
+    )
+    resource_max_total_blob_bytes: PositiveInt = Field(
+        default=1024 * 1024 * 1024,
+        description="Maximum total bytes in retained resource blobs.",
+    )
+    resource_max_metadata_bytes: PositiveInt = Field(
+        default=64 * 1024 * 1024,
+        description="Maximum total serialized resource metadata bytes, independent of blob quota.",
+    )
+    resource_max_resources: PositiveInt = Field(
+        default=100_000,
+        description="Maximum retained resource records, independent of blob quota.",
+    )
+    resource_trusted_identity: Optional[str] = Field(
+        default=None,
+        description="Deployment-controlled resource identity; never read from untrusted headers.",
     )
     embeddings: str = Field(
         default="EmbeddingsGigaR", description="Модель для эмбеддингов"
@@ -113,13 +145,17 @@ class ProxySettings(BaseSettings):
     normalization_mode: Literal["off", "shadow", "on"] = Field(
         default="off",
         description=(
-            "Normalized layer execution mode: off disables it, shadow records "
-            "parallel translation only, on uses normalized execution."
+            "Compatibility mode for the shared execution core; shadow records "
+            "content-free diagnostics from the decoded request."
         ),
     )
     legacy_chat_fallback: bool = Field(
         default=True,
-        description="Allow legacy chat path fallback while modular migration is experimental.",
+        description="Accepted compatibility alias; shared execution never replays dispatch.",
+    )
+    responses_storage_mode: Literal["native", "gateway"] = Field(
+        default="native",
+        description="Native thread continuation or opt-in durable immutable Responses snapshots.",
     )
     conversation_stitching_enabled: bool = Field(
         default=False,

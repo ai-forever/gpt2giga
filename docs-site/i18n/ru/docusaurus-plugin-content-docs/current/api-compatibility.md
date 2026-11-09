@@ -20,7 +20,7 @@ OpenAI-compatible Chat Completions server.
 | Инструменты и структурированный вывод | Схемы функций/инструментов и управление через JSON-схему отличаются между провайдерами и режимами бэкенда. | Сопоставляет локальные инструменты/функции и передаёт схемы структурированного вывода через нативный GigaChat `response_format`. |
 | Авторизация | Клиенты OpenAI/Anthropic работают с API-ключами, а GigaChat требует другого механизма учётных данных и scope. | Разделяет аутентификацию по API-ключу прокси и авторизацию в вышестоящем GigaChat, при необходимости поддерживает сквозную передачу для каждого запроса. |
 | Получение списка моделей | Ответы GigaChat о моделях не совпадают с формой OpenAI/Anthropic/Gemini/LiteLLM. | Переупаковывает список и описание моделей под нужный клиент. |
-| Пакетные маршруты OpenAI/Anthropic/Gemini | У установленного SDK/бэкенда GigaChat нет полного цикла create/list/retrieve/cancel для пакетных API. | Держит роутеры Files/Batches отключёнными, пока они не смогут работать сквозным образом. |
+| Пакетные маршруты OpenAI/Anthropic/Gemini | GigaChat поддерживает create/poll, но не cancel/delete. | Реальное выполнение, устойчивые row mappings и протокольные результаты; см. [ресурсные API](resource-apis.md). |
 
 ## Подключённые маршруты
 
@@ -48,11 +48,12 @@ OpenAI-compatible Chat Completions server.
 | `POST /responses` | Stable native / normalized preview | Native GigaChat execution сохраняет compatibility surface, включая hosted tools и attachment handoff. Route-selected normalized execution остаётся technical preview и отклоняет semantics, которые выбранные route/model/API mode не сохраняют. |
 | `POST /embeddings` | Поддерживается | Использует модель из запроса или модель прокси по умолчанию для эмбеддингов, в зависимости от конфигурации. |
 | `GET /model/info` | Поддерживается | Эндпоинт информации о модели, совместимый с LiteLLM. |
-| `POST /files`, `GET /files*` | Отключено | Код роутера есть, но он не подключён: files без batches дают неполный пакетный цикл OpenAI. |
-| `POST /batches`, `GET /batches*` | Отключено | Отключено до появления create/list/retrieve/cancel для пакетов в SDK/бэкенде GigaChat. |
+| `POST /files`, `GET /files*`, `DELETE /files/{id}` | Поддерживается | Upload/list/get/delete и binary content; aliases root, `/v1` и `/v2`. |
+| `POST /batches`, `GET /batches*` | Поддержанное подмножество | Native chat/stateless Responses/embeddings; output/error files и исполняемый срок принятия результатов шлюзом. |
 | Маршруты сохранённых chat-completion | Не реализовано | Сохранённые completions сейчас вне области поддержки. |
 | Устаревший `POST /completions` | Не реализовано | Устаревшие текстовые completions сейчас вне области поддержки. |
-| Изображения, аудио, модерация, загрузки | Не реализовано | Эти семейства маршрутов OpenAI прокси не реализует. |
+| `POST /images/generations` | Поддержанное подмножество | v2, n=1, b64_json; см. [native utilities](native-utilities.md). |
+| Аудио, модерация, multipart Uploads API | Не реализовано | Нет подтверждённого backend contract. |
 | Fine-tuning, assistants, threads, runs, vector stores | Не реализовано | Сейчас вне области поддержки. |
 | Realtime/WebSocket API | Не реализовано | Сейчас вне области поддержки. |
 
@@ -62,10 +63,10 @@ OpenAI-compatible Chat Completions server.
 |---|---|---|
 | `GET /models` | Поддерживается | Возвращается в форме Anthropic, когда запрос содержит заголовки Anthropic SDK. |
 | `GET /models/{model_id}` | Поддерживается | Возвращается в форме Anthropic, когда запрос содержит заголовки Anthropic SDK. |
-| `POST /messages` | Поддерживается | Messages API, потоковая передача, локальные инструменты, сопоставление с GigaChat v2 для совместимых провайдерских инструментов Anthropic и нативный структурированный вывод. При `GPT2GIGA_NORMALIZATION_MODE=on` принятое подмножество v1 использует нормализованное ядро запросов, ответов и SSE. |
+| `POST /messages` | Поддерживается | Messages API, потоковая передача, локальные инструменты, сопоставление с GigaChat v2 для совместимых провайдерских инструментов Anthropic и нативный структурированный вывод. Все compatibility modes используют общее ядро запросов, ответов и SSE. |
 | `POST /messages/count_tokens` | Зависит от провайдера | GigaChat умеет считать текст сообщений, system, tools и structured output. Внешний алиас только с Chat Completions отклоняет операцию: точного token-count API у него нет. |
-| `POST /messages/batches`, `GET /messages/batches*` | Отключено | Код роутера есть, но он не подключён до появления пакетных методов в SDK/бэкенде GigaChat. |
-| Files API beta | Не реализовано | Сейчас вне области поддержки. |
+| `POST /messages/batches`, `GET /messages/batches*` | Поддержанное подмножество | Реальное выполнение и per-item results; native cancel отсутствует. |
+| Files API beta | Поддержанное подмножество | Явные Anthropic headers выбирают общий `/files`; upload без purpose и file references в Messages. |
 | Skills API beta | Не реализовано | Сейчас вне области поддержки. |
 | Agents, Sessions, Environments, Admin beta APIs | Не реализовано | Сейчас вне области поддержки. |
 
@@ -106,8 +107,7 @@ query-параметрах чаще попадают в журналы дост�
 модели GigaChat объявляют `generateContent`, `streamGenerateContent` и
 `countTokens`; модели типа эмбеддингов объявляют только `embedContent` и
 `batchEmbedContents`; неизвестные/пользовательские идентификаторы моделей
-объявляют только `countTokens`, если метаданные бэкенда не дают более точной
-информации. Статический алиас Chat Completions объявляет генерацию и streaming,
+не объявляют методы без подтверждения метаданными бэкенда. Статический алиас Chat Completions объявляет генерацию и streaming,
 но не `countTokens`.
 
 | Маршрут / группа | Статус | Комментарий |
@@ -119,8 +119,8 @@ query-параметрах чаще попадают в журналы дост�
 | `POST /models/{model}:countTokens`, `/v1/...`, `/v2/...`, `/v1beta/...`, `/v1/v1beta/...`, `/v2/v1beta/...` | Зависит от провайдера | GigaChat считает `systemInstruction`, `contents` и объявления функций. Внешний алиас только с Chat Completions отклоняет операцию. |
 | `POST /models/{model}:embedContent`, `/v1/...`, `/v2/...`, `/v1beta/...`, `/v1/v1beta/...`, `/v2/v1beta/...` | Поддерживается | Возвращает Gemini `embedding.values`, используя бэкенд эмбеддингов GigaChat. |
 | `POST /models/{model}:batchEmbedContents`, `/v1/...`, `/v2/...`, `/v1beta/...`, `/v1/v1beta/...`, `/v2/v1beta/...` | Поддерживается | Возвращает Gemini `embeddings[]`, используя бэкенд эмбеддингов GigaChat. |
-| `POST /v1beta/files`, `GET /v1beta/files*` | Отключено | Код роутера подготовлен, но по умолчанию не подключён. |
-| `POST /v1beta/models/{model}:batchGenerateContent`, `GET /v1beta/batches*` | Отключено | Код роутера подготовлен, но не подключён до сквозного выполнения пакетов. |
+| Resumable `/upload/v1beta/files`, `GET /v1beta/files*`, delete | Поддержанное подмножество | Настоящий SDK upload; JSON metadata не создаёт файл. См. [Gemini resources](gemini-resources.md). |
+| `:batchGenerateContent`, `:asyncBatchEmbedContent`, `GET /v1beta/batches*` | Поддержанное подмножество | Native jobs в формате SDK Operations с реальными результатами. |
 
 ### Вызов функций в Gemini
 
@@ -160,8 +160,7 @@ query-параметрах чаще попадают в журналы дост�
   `embedContent`, `batchEmbedContents`, получение списка моделей;
 - поддерживаемые префиксы: корень, `/v1`, `/v2`, `/v1beta`, `/v1/v1beta`,
   `/v2/v1beta`;
-- отключённые маршруты: роутеры Gemini Files API и `batchGenerateContent` есть в
-  коде, но не подключены публично до сквозного выполнения в вышестоящем сервисе;
+- ресурсные маршруты: resumable Files, batchGenerateContent и asyncBatchEmbedContent используют native execution и общее хранилище;
 - частично поддерживаемые поля: `safetySettings` и `cachedContent` принимаются
   для совместимости и диагностики, но не применяются; `candidateCount`, `topK` и
   `responseModalities` принимаются и фиксируются, но игнорируются при выполнении в GigaChat;
@@ -260,7 +259,7 @@ GigaChat v2.
 
 ## Согласование контрактов SDK
 
-Шлюз устанавливает `gigachat>=0.2.4,<0.3.0` из PyPI; `uv.lock` фиксирует
+Шлюз устанавливает `gigachat[aiohttp]==0.3.0a1` из PyPI; `uv.lock` фиксирует
 разрешённую версию и хэши артефактов. Совместимость шлюза и SDK проверяется
 синтетическими HTTP-ответами; эти проверки не подтверждают качество живой модели,
 права доступа к возможностям, экономию кэша или детерминированность генерации.
@@ -358,3 +357,47 @@ response = client.chat.completions.create(
 можно передать `extra_body={"assistant_id": "<ваш assistant ID>"}`:
 шлюз уберёт `model` из запроса upstream. Это не создаёт assistant и требует
 доступного в вашем аккаунте идентификатора.
+
+### Ошибки транспорта upstream
+
+До начала ответа timeout SDK возвращает 504 (`upstream_timeout`), connection,
+validation и interruption — 502 (`upstream_connection_error`,
+`invalid_upstream_response`, `stream_interrupted`). Gemini использует
+DEADLINE_EXCEEDED для 504 и UNAVAILABLE для 502. После headers ошибка передаётся
+в SSE без изменения HTTP status и без повторного chat. Gateway `X-Request-ID`
+сохраняется; upstream ID передаётся через `X-GigaChat-Request-ID` или
+`error.metadata.gigachat_x_request_id` в SSE (в Responses event:error —
+непосредственно `metadata`). Body и credentials в диагностику не попадают.
+OpenAI Files content возвращает исходные bytes.
+
+## Расширенные контракты
+
+`POST /responses/input_tokens` оценивает текст, instructions, функции и output schema через tokens/count без chat/upload. Файлы, cached/stateful input и hosted tools не входят в этот endpoint. `POST /images/generations` поддерживает узкий v2 subset с одним b64_json изображением; см. [native utilities](native-utilities.md). Responses retrieve/delete/input_items и Conversations CRUD/items доступны в opt-in режиме `GPT2GIGA_RESPONSES_STORAGE_MODE=gateway`; см. [хранение ответов](response-storage.md).
+
+Все Gemini aliases используют одинаковые HTTP/SSE errors: числовой code и Google status (timeout: 504 / DEADLINE_EXCEEDED). После ошибки нет успешного terminal event; upstream ID отделён от gateway request ID. countTokens не повторяет запрос после dispatch. Неполные/пустые embedding vectors, лишние элементы, повторные и неверные индексы дают 502; корректно переставленные indices восстанавливают порядок. Принятые outputDimensionality/taskType/title/nested model hints остаются accepted/ignored.
+
+Gemini Models применяет pageSize/pageToken и показывает методы по capability evidence. Неизвестной модели не приписываются функции. Anthropic Models использует известную дату выпуска либо постоянный epoch. Parallel calls публично заявлены для GigaChat-3-Ultra через v2, а не GigaChat-2-Max; явные проверенные provider/profile metadata имеют приоритет.
+
+Default/`2023-06-01` сохраняют legacy policy Anthropic. Явная версия `2026-10-21` запрещает temperature/top_p/top_k и прямые document blocks в assistant, в том числе в count и batch input. Files этой версии используют page/next_page; Models сохраняет after_id/before_id. Document blocks требуют поддержанного file reference; неподдержанный source возвращает ошибку вместо потери содержимого.
+
+## Batch execution и deadline
+
+Batch API требует доступа GigaChat pay-as-you-go. В одном job используется одна модель GigaChat и одно семейство endpoint, `stream=false`, уникальные custom IDs и только пользовательские функции. OpenAI поддерживает Chat Completions, stateless Responses и embeddings; Anthropic — Messages. Hosted tools и stateful Responses отклоняются до submission. JSONL input/output хранится локально в общем resource store и не загружается в GigaChat как документ. Poll только читает существующий job; неизвестные native jobs не попадают в список другого протокола. Собственного scheduler и фонового polling worker нет.
+
+OpenAI `completion_window="24h"` и Anthropic `expires_at` означают **срок принятия результатов шлюзом**, а не обещание срока native processing. Poll до deadline сохраняет подтверждённые результаты. При первом poll после deadline неразрешённые строки навсегда получают expired; подтверждённые success/error доступны до истечения resource retention. Если первый poll выполнен поздно, gateway может признать expired и job, который backend завершил вовремя: SDK `updated_at` не подтверждает момент завершения. Поздние native результаты не заменяют expired. GigaChat job может продолжаться и тарифицироваться после gateway expiry; cancel/delete возвращают 501 и не останавливают upstream. Те же ограничения действуют для примеров.
+
+Submission после неоднозначного timeout автоматически не повторяется: native job уже мог быть создан. Output/error files и соответствие строк сохраняются после restart/смены worker при сохранении resource volume. Для OpenAI проверяйте `output_file_id` и `error_file_id`, для Anthropic — `type` каждого результата. Успешный HTTP poll не означает успех всех строк.
+
+
+### Границы исполнения и ресурсов
+
+Известные GigaChat aliases связывают endpoint, credentials и upstream model до подготовки,
+в том числе при отключённом пробросе модели. Request token override сохраняет endpoint.
+Публичный Chat Completions к OpenAI-compatible остаётся blocked и не переходит на GigaChat.
+Подробнее: [provider profiles](provider-profiles.md).
+
+Ошибка обязательного вложения останавливает генерацию. Проверка владельца registered ID
+применяется к raw native ID, headers и protocol-specific ссылкам, включая batch rows.
+Подробнее: [гарантии ресурсов](resource-apis.md#отказы-и-владение-ресурсами).
+Responses stream требует semantic completion; gateway snapshots отклоняют невоспроизводимые
+attachments/native state до I/O. Подробнее: [response storage](response-storage.md).

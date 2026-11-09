@@ -11,6 +11,7 @@ from gpt2giga.common.signed_model_override import _model_override_signature
 from gpt2giga.models.config import ProxyConfig, ProxySettings
 from gpt2giga.protocol import ResponseProcessor
 from gpt2giga.protocol.request.transformer import RequestTransformer
+from gpt2giga.providers.gigachat.adapter import normalized_chat_to_openai_payload
 from gpt2giga.protocols.gemini import GeminiProtocolAdapter
 from gpt2giga.routers.gemini import router as gemini_router
 from gpt2giga.routers.gemini.batches import router as gemini_batches_router
@@ -229,23 +230,26 @@ class PartialFailingStreamGigaChat(FakeGigaChat):
         return gen()
 
 
-class FakeRequestTransformer:
-    def __init__(self):
+class FakeRequestTransformer(RequestTransformer):
+    def __init__(self, config=None):
+        super().__init__(config or ProxyConfig(_env_file=None), logger)
         self.chat_calls = []
         self.chat_completion_calls = []
 
-    async def prepare_chat(self, data, giga_client=None):
-        self.chat_calls.append((data, giga_client))
-        return {"model": data["model"], "messages": data["messages"]}
-
-    async def prepare_chat_completion(self, data, giga_client=None):
-        self.chat_completion_calls.append((data, giga_client))
-        return {"model": data["model"], "messages": data["messages"]}
+    async def prepare_normalized(self, request, giga_client=None, **kwargs):
+        payload = normalized_chat_to_openai_payload(request)
+        calls = (
+            self.chat_completion_calls
+            if kwargs["api_mode"] == "v2"
+            else self.chat_calls
+        )
+        calls.append((payload, giga_client))
+        return await super().prepare_normalized(request, giga_client, **kwargs)
 
 
 class FailingPrepareRequestTransformer(FakeRequestTransformer):
-    async def prepare_chat(self, data, giga_client=None):
-        self.chat_calls.append((data, giga_client))
+    async def prepare_normalized(self, request, giga_client=None, **kwargs):
+        self.chat_calls.append((request, giga_client))
         raise RuntimeError("prepare stream payload failed")
 
 
@@ -274,11 +278,13 @@ def make_app(
         app.include_router(gemini_files_router)
         app.include_router(gemini_batches_router)
     app.state.gigachat_client = giga_client or FakeGigaChat()
-    app.state.request_transformer = request_transformer or FakeRequestTransformer()
     app.state.response_processor = ResponseProcessor(logger=logger)
     app.state.gemini_protocol_adapter = GeminiProtocolAdapter()
     app.state.config = ProxyConfig(
         proxy=ProxySettings(gigachat_api_mode=mode, **settings)
+    )
+    app.state.request_transformer = request_transformer or FakeRequestTransformer(
+        app.state.config
     )
     return app
 
@@ -558,6 +564,7 @@ def test_gemini_generate_content_preserves_multi_function_response_payload():
                 },
                 {
                     "type": "function",
+                    "id": None,
                     "function": {
                         "name": "second",
                         "arguments": {"value": 2},
@@ -604,7 +611,7 @@ def test_gemini_generate_content_rejects_malformed_function_response():
     )
 
     assert response.status_code == 400
-    assert response.json()["detail"]["error"]["param"] == (
+    assert response.json()["error"]["param"] == (
         "contents[0].parts[0].functionResponse"
     )
     assert app.state.request_transformer.chat_calls == []
@@ -635,7 +642,7 @@ def test_gemini_generate_content_rejects_undeclared_allowed_function_name():
     )
 
     assert response.status_code == 400
-    assert response.json()["detail"]["error"]["param"] == (
+    assert response.json()["error"]["param"] == (
         "toolConfig.functionCallingConfig.allowedFunctionNames"
     )
     assert app.state.request_transformer.chat_calls == []
@@ -682,7 +689,7 @@ def test_gemini_generate_content_rejects_invalid_payload_without_upstream_call(
     response = client.post("/models/gemini-pro:generateContent", json=payload)
 
     assert response.status_code == 400
-    assert response.json()["detail"]["error"]["param"] == param
+    assert response.json()["error"]["param"] == param
     assert app.state.request_transformer.chat_calls == []
     assert app.state.gigachat_client.achat.calls == []
 
@@ -777,7 +784,7 @@ def test_gemini_stream_generate_content_rejects_malformed_payload_before_upstrea
     )
 
     assert response.status_code == 400
-    assert response.json()["detail"]["error"]["param"] == "contents"
+    assert response.json()["error"]["param"] == "contents"
     assert app.state.request_transformer.chat_calls == []
     assert app.state.gigachat_client.achat.stream_calls == []
 
@@ -824,9 +831,14 @@ def test_gemini_v2_stream_generate_content_handles_named_done_event():
     assert "[DONE]" not in body
     assert not app.state.request_transformer.chat_calls
     assert app.state.request_transformer.chat_completion_calls
-    assert app.state.gigachat_client.achat.stream_calls == [
-        {"model": "gemini-pro", "messages": [{"role": "user", "content": "Hello"}]}
-    ]
+    assert len(app.state.gigachat_client.achat.stream_calls) == 1
+    assert app.state.gigachat_client.achat.stream_calls[0].model_dump(
+        exclude_none=True
+    ) == {
+        "model": "gemini-pro",
+        "messages": [{"role": "user", "content": [{"text": "Hello"}]}],
+        "stream": True,
+    }
 
 
 def test_gemini_v2_stream_generate_content_updates_conversation():
@@ -902,9 +914,9 @@ def test_gemini_stream_generate_content_returns_error_chunk_before_first_delta()
     assert chunks == [
         {
             "error": {
-                "code": "internal_error",
+                "code": 500,
                 "message": "Stream interrupted",
-                "status": "RuntimeError",
+                "status": "INTERNAL",
             }
         }
     ]
@@ -928,9 +940,9 @@ def test_gemini_stream_generate_content_returns_error_chunk_after_partial_delta(
     assert chunks[0]["candidates"][0]["content"]["parts"] == [{"text": "Hel"}]
     assert chunks[-1] == {
         "error": {
-            "code": "internal_error",
+            "code": 500,
             "message": "Stream interrupted",
-            "status": "RuntimeError",
+            "status": "INTERNAL",
         }
     }
     assert "[DONE]" not in body
@@ -990,8 +1002,9 @@ def test_gemini_count_tokens_includes_system_contents_and_tools():
     ]
 
 
-def test_gemini_count_tokens_normalization_on_uses_normalized_contract():
-    app = make_app(normalization_mode="on", legacy_chat_fallback=False)
+@pytest.mark.parametrize("normalization", ["off", "on"])
+def test_gemini_count_tokens_preserves_schema_projection_by_mode(normalization):
+    app = make_app(normalization_mode=normalization, legacy_chat_fallback=False)
     client = TestClient(app)
 
     response = client.post(
@@ -1024,7 +1037,7 @@ def test_gemini_count_tokens_normalization_on_uses_normalized_contract():
                 "count these words",
                 "lookup",
                 "Lookup data",
-                '{"type": "object"}',
+                *(['{"type": "object"}'] if normalization == "on" else []),
             ],
             "model": "gemini-pro",
         }
@@ -1109,7 +1122,7 @@ def test_gemini_embed_content_rejects_invalid_payload_without_upstream_call(
     response = client.post("/models/gemini-embedding:embedContent", json=payload)
 
     assert response.status_code == 400
-    assert response.json()["detail"]["error"]["param"] == param
+    assert response.json()["error"]["param"] == param
     assert app.state.gigachat_client.embedding_calls == []
 
 
@@ -1144,7 +1157,7 @@ def test_gemini_batch_embed_contents_rejects_invalid_payload_without_upstream_ca
     )
 
     assert response.status_code == 400
-    assert response.json()["detail"]["error"]["param"] == param
+    assert response.json()["error"]["param"] == param
     assert app.state.gigachat_client.embedding_calls == []
 
 
@@ -1178,9 +1191,9 @@ def test_gemini_model_capabilities_are_inferred_conservatively():
         "embedContent",
         "batchEmbedContents",
     ]
-    assert build_gemini_model({"id": "custom-model"})["supportedGenerationMethods"] == [
-        "countTokens"
-    ]
+    assert (
+        build_gemini_model({"id": "custom-model"})["supportedGenerationMethods"] == []
+    )
     assert build_gemini_model(
         {
             "id": "explicit",
@@ -1189,44 +1202,21 @@ def test_gemini_model_capabilities_are_inferred_conservatively():
     )["supportedGenerationMethods"] == ["embedContent"]
 
 
-def test_gemini_files_and_batches_are_not_mounted_in_public_router():
+def test_gemini_files_and_batches_are_mounted_in_public_router():
+    paths = make_app().openapi()["paths"]
+    assert "/files" in paths
+    assert "/batches" in paths
+    assert "/models/{model}:batchGenerateContent" in paths
+    assert "/models/{model}:asyncBatchEmbedContent" in paths
+
+
+def test_gemini_resources_reject_metadata_only_and_empty_jobs():
     client = TestClient(make_app())
-
-    assert client.post("/files", json={"file": {"displayName": "x"}}).status_code == 404
-    assert client.get("/files").status_code == 404
-    assert client.get("/batches").status_code == 404
-    assert "/models/{model}:batchGenerateContent" not in make_app().openapi()["paths"]
-    assert (
-        client.post(
-            "/models/gemini-pro:batchGenerateContent",
-            json={"batch": {"displayName": "batch"}},
-        ).status_code
-        != 200
-    )
-
-
-def test_gemini_prepared_files_and_batches_work_when_mounted_directly():
-    app = make_app(include_prepared_files_batches=True)
-    client = TestClient(app)
-
-    file_response = client.post(
-        "/files",
-        files={"file": ("input.jsonl", b'{"contents":[]}\n', "application/json")},
-    )
-    batch_response = client.post(
+    response = client.post("/files", json={"file": {"displayName": "fake"}})
+    assert response.status_code == 400
+    response = client.post(
         "/models/gemini-pro:batchGenerateContent",
-        json={
-            "batch": {
-                "displayName": "batch",
-                "inputConfig": {"fileName": file_response.json()["file"]["name"]},
-            }
-        },
+        json={"batch": {"displayName": "fake"}},
     )
-
-    assert file_response.status_code == 200
-    assert file_response.json()["file"]["name"] == "files/file-1"
-    assert batch_response.status_code == 200
-    operation = batch_response.json()
-    assert operation["metadata"]["batch"]["model"] == "models/gemini-pro"
-    assert client.get("/batches").json()["batches"][0]["name"] == "batches/1"
-    assert json.dumps(operation)
+    assert response.status_code == 400
+    assert response.json()["error"]["status"] == "INVALID_ARGUMENT"

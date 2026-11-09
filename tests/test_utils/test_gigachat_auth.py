@@ -98,7 +98,12 @@ def test_create_request_client_uses_public_constructor(
     constructor.assert_called_once_with(
         base_url=BASE_URL,
         key_file_password="tls-key-password",
-        **expected_auth,
+        **{
+            **dict.fromkeys(
+                ("access_token", "credentials", "scope", "user", "password"), ""
+            ),
+            **expected_auth,
+        },
     )
 
 

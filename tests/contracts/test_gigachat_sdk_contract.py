@@ -1,17 +1,36 @@
 """Installed GigaChat SDK native function schema contract."""
 
-from importlib.metadata import version
+from importlib.metadata import distribution, version
+from pathlib import Path
+
+from packaging.requirements import Requirement
+
+try:
+    import tomllib
+except ModuleNotFoundError:
+    import tomli as tomllib
 
 from gigachat.models import ChatCompletionRequest, ChatMessage, ChatModelOptions
 from gigachat.models.chat_completions import ChatFunctionCall
-from packaging.version import Version
 
 
 def test_installed_gigachat_supports_native_function_schemas() -> None:
-    installed = Version(version("gigachat"))
-
-    assert installed >= Version("0.2.4")
-    assert installed < Version("0.3.0")
+    assert version("gigachat") == "0.3.0a1"
+    root = Path(__file__).resolve().parents[2]
+    requirements = tomllib.loads((root / "pyproject.toml").read_text())["project"][
+        "dependencies"
+    ]
+    for dependencies in (requirements, distribution("gpt2giga").requires):
+        matches = [
+            Requirement(item)
+            for item in dependencies
+            if Requirement(item).name == "gigachat"
+        ]
+        assert len(matches) == 1
+        requirement = matches[0]
+        assert requirement.extras == {"aiohttp"}
+        assert str(requirement.specifier) == "==0.3.0a1"
+        assert requirement.specifier.contains(version("gigachat"))
 
 
 def test_installed_gigachat_supports_parallel_v2_function_calls() -> None:

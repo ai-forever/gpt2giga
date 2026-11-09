@@ -19,6 +19,9 @@ from gpt2giga.core.context import (
     update_request_context,
 )
 from gpt2giga.models.config import ProxySettings
+from gpt2giga.protocol.request.transformer import normalized_message_fields
+from gpt2giga.protocols.normalized import NormalizedChatRequest
+from gpt2giga.protocols.openai import OpenAIProtocolAdapter
 
 ConversationProtocol = Literal["openai", "anthropic", "gemini"]
 
@@ -156,6 +159,33 @@ async def stitch_message_list(
     return await _stitch_messages(request, key, messages, settings=settings)
 
 
+async def stitch_normalized_chat(
+    request: Request,
+    normalized: NormalizedChatRequest,
+    *,
+    payload: Mapping[str, Any],
+    protocol: ConversationProtocol,
+) -> ConversationTurn | None:
+    """Stitch stored history while retaining the current turn's typed messages."""
+    incoming = [normalized_message_fields(message) for message in normalized.messages]
+    turn = await stitch_message_list(
+        request, incoming, payload=payload, protocol=protocol
+    )
+    if turn is not None:
+        current = {
+            _canonical_message(wire): typed
+            for wire, typed in zip(incoming, normalized.messages)
+        }
+        adapter = OpenAIProtocolAdapter()
+        normalized.messages = [
+            current[_canonical_message(message)]
+            if _canonical_message(message) in current
+            else adapter.chat_to_normalized({"messages": [message]}).messages[0]
+            for message in turn.request_messages
+        ]
+    return turn
+
+
 async def stitch_responses_payload(
     request: Request,
     payload: dict[str, Any],
@@ -163,7 +193,7 @@ async def stitch_responses_payload(
     mode: Literal["v1", "v2"],
 ) -> ConversationTurn | None:
     """Apply local conversation history to an OpenAI Responses v1 payload."""
-    if mode != "v1":
+    if mode != "v1" or getattr(request.state, "gateway_snapshot", False):
         return None
 
     settings = _settings(request)
@@ -299,17 +329,18 @@ async def stitch_anthropic_stream(
     body_iterator: AsyncIterator[str],
 ) -> AsyncIterator[str]:
     """Observe Anthropic SSE and save state after successful completion."""
-    if turn is None:
-        async for chunk in body_iterator:
-            yield chunk
-        return
+    async with closing_stream(body_iterator):
+        if turn is None:
+            async for chunk in body_iterator:
+                yield chunk
+            return
 
-    observer = _AnthropicStreamConversationObserver()
-    async for chunk in body_iterator:
-        observer.observe_chunk(chunk)
-        yield chunk
-    if observer.completed:
-        await commit_conversation_turn(request, turn, observer.response_messages())
+        observer = _AnthropicStreamConversationObserver()
+        async for chunk in body_iterator:
+            observer.observe_chunk(chunk)
+            yield chunk
+        if observer.completed:
+            await commit_conversation_turn(request, turn, observer.response_messages())
 
 
 def chat_completion_response_messages(

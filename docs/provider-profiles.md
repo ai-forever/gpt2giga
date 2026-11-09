@@ -183,3 +183,37 @@ The support decision for each client-protocol/provider combination is described
 in [Bridge compatibility, loss, and errors](bridge-compatibility.md).
 Startup preflight, supervisor lifecycle, migration, and rollback are described
 in [0.3 migration and supervisor integration](migration-0-3.md).
+
+
+### GigaChat client binding
+
+Each explicit GigaChat profile binds its own `base_url` and OAuth `credential_env`
+through the existing SDK client factory. Transport/TLS settings are inherited from the
+GigaChat configuration; default-account authentication is cleared. A profile without a
+credential is deliberately keyless. Pass-through auth overrides credentials inside the
+selected profile, retaining its endpoint. Dynamic models use the configured dynamic
+GigaChat profile. Known aliases never fall through to the default client.
+
+The Chat Completions facade to an OpenAI-compatible upstream remains blocked by the
+executable loss matrix and rejects before upstream I/O. Responses, Anthropic Messages
+and Gemini GenerateContent retain their admitted external bridge paths.
+
+For Files uploaded for an explicit GigaChat model alias, select its profile with
+`X-GPT2GIGA-Profile`. Gemini resumable uploads retain the start-time profile.
+See [upload admission and profile selection](resource-apis.md#upload-admission-and-profile-selection).
+
+### Credential pool cleanup and capacity
+
+Each pass-token pool retains ownership of clients whose close fails. Subsequent
+requests retry up to four eligible closes, with exponential backoff from 0.1 to
+30 seconds and a five-second timeout per close attempt. A successful retry
+releases the client without restarting the gateway; idle pools retry on the
+next request or shutdown. Retries never expose credential keys or close errors.
+
+`GPT2GIGA_PASS_TOKEN_CLIENT_CACHE_SIZE` sets the idle cache target (default 32).
+The total budget for active, cached, and closing clients is twice that target.
+When full, a new credential receives HTTP 503, `client_pool_capacity`
+(OpenAI/Anthropic) or `UNAVAILABLE` (Gemini), and `Retry-After: 1`. Existing
+credential leases remain usable and are never evicted while active.
+Gemini upload aliases and their resumable session URLs use the same numeric
+`error.code: 503` and `error.status: UNAVAILABLE` as Gemini generation routes.

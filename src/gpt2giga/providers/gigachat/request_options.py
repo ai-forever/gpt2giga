@@ -23,9 +23,6 @@ from gpt2giga.common.client_params import (
     filter_safe_query_items,
     normalize_header_name,
 )
-from gpt2giga.providers.gigachat.transport_compat import (
-    install_request_options_hook,
-)
 
 
 @dataclass(frozen=True)
@@ -40,16 +37,6 @@ class GigaRequestOptions:
     def is_empty(self) -> bool:
         return not self.headers and not self.query and not self.body
 
-    @property
-    def requires_transport_compat(self) -> bool:
-        """Return whether private transport support is required."""
-        return bool(self.query or self.body)
-
-
-_current_options: ContextVar[Optional[GigaRequestOptions]] = ContextVar(
-    "gpt2giga_current_gigachat_request_options",
-    default=None,
-)
 
 _GIGACHAT_HEADER_CONTEXT_VARS: Mapping[str, ContextVar[Optional[str]]] = {
     "authorization": authorization_cvar,
@@ -91,21 +78,23 @@ def extract_gigachat_request_options(
 async def gigachat_request_options(
     giga_client: Any,
     options: Optional[GigaRequestOptions],
-) -> AsyncIterator[None]:
-    """Apply request-scoped HTTP options while a GigaChat SDK call is running."""
+    *,
+    include_body: bool = True,
+) -> AsyncIterator[Any]:
+    """Yield a public SDK view while preserving request header context."""
     if not options or options.is_empty:
-        yield
+        yield giga_client
         return
-
-    if options.requires_transport_compat:
-        install_request_options_hook(giga_client, _current_options)
-
+    body = options.body if include_body else {}
+    request_client = (
+        giga_client.with_options(extra_query=options.query, extra_body=body)
+        if options.query or body
+        else giga_client
+    )
     header_tokens = _set_gigachat_header_context(options.headers)
-    token = _current_options.set(options)
     try:
-        yield
+        yield request_client
     finally:
-        _current_options.reset(token)
         _reset_context_tokens(header_tokens)
 
 

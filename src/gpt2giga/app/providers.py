@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Mapping
 import hashlib
+from copy import copy
 from typing import Any, Literal
 
 import httpx
@@ -13,6 +14,9 @@ from gpt2giga.capabilities import (
     resolve_gigachat_route_capabilities,
 )
 from gpt2giga.capabilities.models import CapabilityKey
+from gpt2giga.common.streaming_response import closing_stream
+from gpt2giga.providers.gigachat.client import create_gigachat_client
+from gpt2giga.providers.gigachat.pool import GigaChatClientPool
 from gpt2giga.common.client_params import ClientCompatibilityError
 from gpt2giga.common.tools import (
     map_namespaced_tool_name_to_gigachat,
@@ -42,6 +46,8 @@ from gpt2giga.providers.openai_compatible import (
     openai_compatible_profile,
 )
 from gpt2giga.providers.profiles import (
+    ProviderAliasError,
+    ProviderModelInventory,
     ProviderKind,
     ProviderProfileError,
     ProviderRegistry,
@@ -135,13 +141,16 @@ class _BoundOpenAICompatibleAdapter:
             self._upstream_model,
             provider=_PROVIDER_LABELS[self._public_protocol],
         ):
-            async for event in self._adapter.stream_chat(
-                prepared,
-                downstream=self._downstream,
-                downstream_capabilities=self._downstream_capabilities,
-                is_disconnected=is_disconnected,
-            ):
-                yield event
+            async with closing_stream(
+                self._adapter.stream_chat(
+                    prepared,
+                    downstream=self._downstream,
+                    downstream_capabilities=self._downstream_capabilities,
+                    is_disconnected=is_disconnected,
+                )
+            ) as stream:
+                async for event in stream:
+                    yield event
 
     async def count_tokens(self, *_args: Any, **_kwargs: Any) -> Any:
         """Reject token counting that Chat Completions cannot implement exactly."""
@@ -198,6 +207,43 @@ class BridgeProviderRuntime:
             profile.profile_id: authorizer_factory(profile)
             for profile in self.registry.config.profiles
         }
+        self._giga_clients: dict[str, Any] = {}
+        self._giga_settings: dict[str, Any] = {}
+        self._giga_pools: dict[str, GigaChatClientPool] = {}
+        for profile in self.registry.config.profiles:
+            if profile.provider_kind is not ProviderKind.GIGACHAT:
+                continue
+            if (
+                profile.model_inventory is not ProviderModelInventory.DYNAMIC
+                and not any(m.enabled for m in profile.models)
+            ):
+                continue
+            if profile.profile_id == self.registry.default_profile_id:
+                settings = state.config.gigachat_settings
+                client = state.gigachat_client
+            else:
+                # Profiles inherit transport policy, never the default account auth.
+                settings = state.config.gigachat_settings.model_copy(
+                    update={
+                        "base_url": profile.base_url,
+                        "credentials": self.registry.credential_for_profile(
+                            profile.profile_id
+                        )
+                        or "",
+                        "access_token": "",
+                        "user": "",
+                        "password": "",
+                    }
+                )
+                client = create_gigachat_client(settings)
+            self._giga_clients[profile.profile_id] = client
+            self._giga_settings[profile.profile_id] = settings
+            if state.config.proxy_settings.pass_token:
+                self._giga_pools[profile.profile_id] = GigaChatClientPool(
+                    settings,
+                    max_size=state.config.proxy_settings.pass_token_client_cache_size,
+                    logger=getattr(state, "logger", None),
+                )
         self._model_limiter = state.model_concurrency_limiter
         for public_alias in self.registry.public_aliases():
             route = self.registry.resolve(public_alias)
@@ -206,7 +252,7 @@ class BridgeProviderRuntime:
                     self._adapters[(public_alias, api_mode)] = GigaChatProviderAdapter(
                         config=state.config,
                         request_transformer=state.request_transformer,
-                        giga_client=state.gigachat_client,
+                        giga_client=self._giga_clients[route.profile_id],
                         model_limiter=state.model_concurrency_limiter,
                         response_processor=state.response_processor,
                         api_mode=api_mode,
@@ -239,6 +285,7 @@ class BridgeProviderRuntime:
         *,
         api_mode: Literal["v1", "v2"],
         public_protocol: PublicProtocol = PublicProtocol.OPENAI_RESPONSES,
+        provider_capabilities: Mapping[str, Any] | None = None,
     ) -> Any:
         """Admit and return the exact startup-owned adapter for one request."""
         route = self.registry.resolve(request.model)
@@ -247,12 +294,20 @@ class BridgeProviderRuntime:
         capability_predicate_reasons: Mapping[str, str] = {}
         capability_metadata: dict[str, str] = {}
         if route.provider_kind is ProviderKind.GIGACHAT:
+            declared = self.registry.model_alias_for(route).capabilities
+            provider_capabilities = dict(provider_capabilities or {})
+            if (
+                declared is not None
+                and BridgeFeature.PARALLEL_TOOL_CALLS in declared.features
+            ):
+                provider_capabilities[CapabilityKey.PARALLEL_TOOL_CALLS] = True
             effective = resolve_gigachat_route_capabilities(
                 model_id=route.upstream_model,
                 public_protocol=public_protocol.value,
                 api_mode=api_mode,
                 route_id=route.profile_id,
                 builtin_tools_enabled=True,
+                provider_capabilities=provider_capabilities,
             )
             predicate_admission = capability_predicates_for_semantics(
                 effective,
@@ -418,6 +473,11 @@ class BridgeProviderRuntime:
                 continue
             closed.add(identity)
             await close()
+        for pool in self._giga_pools.values():
+            await pool.aclose()
+        for profile_id, client in self._giga_clients.items():
+            if profile_id != self.registry.default_profile_id:
+                await client.aclose()
         for client in self._http_clients.values():
             identity = id(client)
             if identity in closed:
@@ -585,3 +645,110 @@ def _strip_default_function_strict(tool: NormalizedTool) -> NormalizedTool:
     if tool.raw_extensions != {"function": {"strict": False}}:
         return tool
     return tool.model_copy(update={"raw_extensions": {}})
+
+
+async def bind_gigachat_profile(request: Any, profile_id: str) -> Any:
+    """Bind profile settings and a request-auth client before upstream I/O."""
+    from gpt2giga.app_state import get_gigachat_client, get_resource_owner
+
+    runtime = getattr(request.app.state, "bridge_provider_runtime", None)
+    if runtime is None:
+        if getattr(request.app.state, "resource_store", None) is not None:
+            update_request_context(
+                metadata={"attachment_scope": get_resource_owner(request)}
+            )
+        return get_gigachat_client(request)
+    if profile_id not in runtime._giga_clients:
+        raise ClientCompatibilityError(
+            "GigaChat provider profile is unavailable.", param="model"
+        )
+    if getattr(request.state, "provider_profile_id", None) == profile_id:
+        return get_gigachat_client(request)
+    client = runtime._giga_clients[profile_id]
+    settings = runtime._giga_settings[profile_id]
+    token = request.headers.get("authorization", "")
+    if request.app.state.config.proxy_settings.pass_token and token.startswith(
+        "Bearer "
+    ):
+        if profile_id == runtime.registry.default_profile_id:
+            client = get_gigachat_client(request)
+        else:
+            stack = request.state.provider_client_stack
+            client = await stack.enter_async_context(
+                runtime._giga_pools[profile_id].acquire(token.removeprefix("Bearer "))
+            )
+    request.state.gigachat_client = client
+    request.state.provider_profile_id = profile_id
+    request.state.provider_settings = settings
+    transformer = copy(request.app.state.request_transformer)
+    transformer.config = request.app.state.config.model_copy(
+        update={"gigachat_settings": settings}
+    )
+    request.state.request_transformer = transformer
+    if getattr(request.app.state, "resource_store", None) is not None:
+        update_request_context(
+            metadata={"attachment_scope": get_resource_owner(request)}
+        )
+    return client
+
+
+async def bind_model_request(request: Any, model: Any, protocol: PublicProtocol) -> Any:
+    """Resolve known aliases and enforce route admission before preparation."""
+    state = request.app.state
+    registry = getattr(state, "provider_registry", None)
+    if registry is None:
+        return None
+    try:
+        route = registry.resolve(model)
+    except ProviderAliasError as exc:
+        dynamic = next(
+            (
+                p
+                for p in registry.config.profiles
+                if p.provider_kind is ProviderKind.GIGACHAT
+                and p.model_inventory is ProviderModelInventory.DYNAMIC
+            ),
+            None,
+        )
+        if exc.reason_id != "alias_unknown" or dynamic is None:
+            # Omitted model may still be supplied by native assistant/thread settings.
+            if model is not None or dynamic is None:
+                raise ClientCompatibilityError(
+                    exc.message, param="model", code=exc.code
+                ) from exc
+        if dynamic is not None:
+            await bind_gigachat_profile(request, dynamic.profile_id)
+        return None
+    if protocol is None and route.provider_kind is not ProviderKind.GIGACHAT:
+        raise ClientCompatibilityError(
+            "This operation requires a GigaChat provider.",
+            param="model",
+            code="unsupported_provider",
+        )
+    try:
+        if protocol is not None:
+            admit_bridge_route(
+                public_protocol=protocol,
+                public_alias=route.public_alias,
+                upstream_provider=UpstreamProvider(route.provider_kind.value),
+                profile_id=route.profile_id,
+                config_revision=route.config_revision,
+                capability_profile_revision=route.capability_profile,
+                requested_semantics={},
+            )
+    except BridgeMatrixAdmissionError as exc:
+        error = exc.as_public_error()
+        raise ClientCompatibilityError(
+            error["message"],
+            param=error["param"],
+            code=error["code"],
+            provider=_PROVIDER_LABELS[protocol],
+            error_type=error["type"],
+        ) from exc
+    request.state.provider_route = route
+    if route.provider_kind is ProviderKind.GIGACHAT:
+        await bind_gigachat_profile(request, route.profile_id)
+        if route.profile_id != registry.default_profile_id:
+            request.state.upstream_model = route.upstream_model
+    update_request_context(bridge_route=route.execution_context())
+    return route

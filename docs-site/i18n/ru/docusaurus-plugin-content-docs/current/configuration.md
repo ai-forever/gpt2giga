@@ -141,7 +141,7 @@ GPT2GIGA_TRAFFIC_LOG_SINKS=postgres,opensearch
 | `GPT2GIGA_PASS_MODEL` | `True` | Передавать `model` из запроса в GigaChat. Поставьте `False`, чтобы всегда использовать настроенную модель GigaChat. |
 | `GPT2GIGA_PASS_TOKEN` | `False` | Разбирать клиентский `Authorization` как учётные данные GigaChat для авторизации в вышестоящем сервисе для каждого запроса. |
 | `GPT2GIGA_SHUTDOWN_TIMEOUT_SECONDS` | `10.0` | Максимальное время graceful drain при остановке до отмены активных запросов. |
-| `GPT2GIGA_PASS_TOKEN_CLIENT_CACHE_SIZE` | `32` | Максимум неактивных клиентов для отдельных учётных данных, сохраняемых для переиспользования соединений. |
+| `GPT2GIGA_PASS_TOKEN_CLIENT_CACHE_SIZE` | `32` | Целевой размер кеша неактивных credential-клиентов N. Общее число клиентов во владении pool (активные, кешированные, с незавершённым или неуспешным close) ограничено 2 × N. При исчерпании бюджета новые учётные данные получают 503 с `Retry-After: 1`; действующие leases сохраняются. |
 | `GPT2GIGA_EMBEDDINGS` | `EmbeddingsGigaR` | Модель эмбеддингов по умолчанию, если модель из запроса не используется. |
 | `GPT2GIGA_ENABLE_IMAGES` | `True` | Принимать и преобразовывать поддержанные входные изображения. Отключите, если развёртывание должно запрещать обработку изображений. |
 | `GPT2GIGA_DEFAULT_MAX_TOKENS` | empty | Добавлять это положительное значение `max_tokens`, только если клиент не передал `max_tokens`, `max_completion_tokens` или `max_output_tokens`. Пустое значение не добавляет лимит. |
@@ -180,8 +180,7 @@ x-api-key: <GPT2GIGA_API_KEY>
 
 ## Настройки GigaChat
 
-Минимальная поддерживаемая версия GigaChat Python SDK — `0.2.4`; gateway
-остаётся в совместимой ветке `0.2.x`. API base URL SDK по умолчанию —
+Кандидат шлюза фиксирует `gigachat[aiohttp]==0.3.0a1`. API base URL SDK по умолчанию —
 `https://api.giga.chat/v1`.
 
 Частые настройки вышестоящего сервиса:
@@ -292,30 +291,22 @@ Assistants или Threads.
 
 ## Флаги нормализованного слоя
 
-Режим нормализации управляет встроенными GigaChat-путями OpenAI Chat
-Completions и Anthropic Messages и по умолчанию сохраняет их прежнее поведение:
+Значения конфигурации по умолчанию сохранены:
 
 ```dotenv
 GPT2GIGA_NORMALIZATION_MODE=off
 GPT2GIGA_LEGACY_CHAT_FALLBACK=True
 ```
 
-Неиспользуемый ключ `GPT2GIGA_EXPERIMENTAL_NORMALIZED_LAYER` удалён. Для
-детерминированной миграции используйте `GPT2GIGA_NORMALIZATION_MODE=on`, чтобы
-выполнять запросы через нормализованный путь, `shadow` только для диагностики
-перевода или `off`, чтобы сохранить прежний путь.
-`GPT2GIGA_LEGACY_CHAT_FALLBACK` настраивается независимо.
+`off`, `shadow` и `on` — совместимые режимы одного ядра исполнения.
+`shadow` добавляет диагностику формы декодированного запроса без его содержимого.
+Флаг legacy fallback принимается для совместимости config/admin schema;
+он не повторяет dispatch и не включает вторую реализацию исполнения.
+Устаревший `GPT2GIGA_EXPERIMENTAL_NORMALIZED_LAYER` не поддерживается.
 
-- `off`: OpenAI Chat Completions и Anthropic Messages идут через прежние пути;
-- `shadow`: строит нормализованную диагностику рядом с прежней обработкой OpenAI Chat без изменения ответов клиенту;
-- `on`: переводит OpenAI Chat, принятое подмножество Anthropic Messages v1 и
-  Gemini `countTokens` на нормализованный путь с откатом к прежнему до старта
-  ответа, если откат включён.
-
-Эти флаги не переопределяют явный внешний маршрут. Модель из профиля
-`openai_compatible` всегда проходит через нормализованный адаптер для Responses,
-Chat Completions, Anthropic Messages и Gemini GenerateContent. Отката на
-постороннюю модель GigaChat нет.
+Выбор provider выполняется до подготовки. External aliases используют допустимые
+Responses, Anthropic Messages или Gemini пути; Chat Completions к OpenAI-compatible
+остаётся blocked в executable loss matrix.
 
 Gemini GenerateContent использует свой выделенный адаптер Gemini-в-нормализованное и
 путь провайдера GigaChat независимо от этих флагов. Его принятое bridge-
@@ -661,3 +652,74 @@ GPT2GIGA_ADMIN_API_KEY="<strong-admin-secret>"
 
 `GPT2GIGA_UI_ENABLED` зарезервирован для будущего встроенного интерфейса. Сейчас не
 используйте его как средство контроля безопасности.
+
+### Alpha-кандидат SDK
+
+Шлюз 0.3.3a1 фиксирует `gigachat[aiohttp]==0.3.0a1`; проверяйте локально собранный
+wheel, публикация кандидата не заявляется. По умолчанию используется native HTTPX2.
+`GIGACHAT_ASYNC_BACKEND=aiohttp` или `--gigachat.async-backend aiohttp` включает
+альтернативный backend: HTTP/1.1, без HTTP2/SOCKS, отдельного finite write timeout
+и finite max_keepalive_connections. Явные finite connect/pool timeouts должны
+совпадать; SDK отклоняет неподдерживаемые настройки. Ускорение не обещается.
+
+`GIGACHAT_TRUST_ENV=False` игнорирует proxy/CA из окружения. Explicit CA и SSL
+contexts сохраняют семантику. Bundled trust объединяет certifi и Russian root;
+API mTLS certificate, загруженный factory, не отправляется в OAuth.
+`auth_ssl_context` задаёт отдельную OAuth trust policy. Request credentials
+не наследуют server auth fields.
+
+## Хранилище ресурсов
+
+Files, сессии загрузки и batch mappings используют общий SQLite и ограниченный каталог blobs. `GPT2GIGA_RESOURCE_STORE_PATH` по умолчанию равен `var/resources` относительно рабочего каталога. Workers должны использовать один persistent-каталог, включая секрет namespace в `resources.sqlite3`. Недоступный путь останавливает startup; перехода на словарь в памяти нет. SQLite рассчитан на workers с общим локальным диском, а не независимые узлы на произвольной сетевой файловой системе.
+
+`GPT2GIGA_RESOURCE_RETENTION_SECONDS` по умолчанию равен 2592000 (30 дней). Просроченные metadata/blobs очищаются при startup и создании ресурсов, а чтение запрещается сразу после срока. Retention не равен batch delivery deadline и не удаляет upstream documents. Лимиты локальных blobs: `GPT2GIGA_RESOURCE_MAX_BLOB_BYTES=104857600` на файл и `GPT2GIGA_RESOURCE_MAX_TOTAL_BLOB_BYTES=1073741824` суммарно. Каталог содержит контент файлов/результатов и должен быть приватным.
+
+Namespace определяется стабильным HMAC от настроенной аутентифицированной identity, provider profile и credential context. Сырые credentials в ключах не сохраняются. Anonymous local mode имеет один общий namespace; общий gateway API key также идентифицирует один namespace. Opaque pass-through token задаёт credential-scoped namespace: ротация token меняет его. `GPT2GIGA_RESOURCE_TRUSTED_IDENTITY` — доверенная настройка deployment, не HTTP header; она не отменяет разделение по upstream credentials/profile. Резервная копия должна включать БД, её секрет и blobs вместе.
+
+`GPT2GIGA_RESPONSES_STORAGE_MODE=native|gateway` по умолчанию равен `native`. Режим `gateway` включает owner-scoped immutable снимки Responses и Conversations в общем resource store с его retention policy. См. [Хранение ответов](response-storage.md).
+
+После удаления/истечения срока остаётся только небольшой маркер kind/ID без владельца и контента. Он не позволяет ранее зарегистрированным upstream IDs обходить ownership через fallback для старых файлов.
+
+
+Metadata ограничены отдельно от blobs: `GPT2GIGA_RESOURCE_MAX_METADATA_BYTES=67108864`
+и `GPT2GIGA_RESOURCE_MAX_RESOURCES=100000`. Это общие бюджеты хранилища.
+Запись, включая workload только со snapshots Responses, удаляет ограниченную порцию
+просроченных записей перед проверкой бюджета. Tombstones зарегистрированных ID
+сохраняются: foreign/expired ID не становятся неизвестными native ID.
+
+
+Token counting сохраняет узкое различие совместимости при подготовке текста: `on`
+учитывает normalized tool/schema text, а `off`/`shadow` сохраняют tolerant legacy subset.
+Все режимы используют общий token-count dispatch, client binding, limiter и cleanup.
+
+### Очередь запросов и завершение telemetry
+
+Отключившийся model request прекращает ожидание concurrency slot до dispatch.
+Пустой acquire timeout по-прежнему разрешает живому клиенту ждать без ограничения.
+Динамические model entries освобождаются после последнего holder/waiter. Client
+pool сохраняет владение cleanup выселенного клиента при отмене acquire; close
+ограничен пятью секундами. После ошибки pool сохраняет владение клиентом и повторяет
+close с backoff во время работы и при shutdown. Общий бюджет включает активных
+клиентов и ожидающий cleanup, поэтому серия close failures не создаёт
+неограниченный ledger.
+
+`GPT2GIGA_SHUTDOWN_TIMEOUT_SECONDS` ограничивает drain запросов. Отдельно каждому
+telemetry sink даётся до пяти секунд на best-effort flush. Зависший queued traffic
+sink отменяется, оставшиеся events учитываются как dropped, остальные зависимости
+продолжают закрываться. После flush, включая timeout или отмену, sink получает
+отдельные пять секунд на терминальное закрытие. Очередь отказывается от оставшихся
+событий и закрывает backend без повторного drain. Phoenix один раз закрывает
+принадлежащий приложению OpenTelemetry provider; обычный flush сохраняет exporter
+работоспособным. Async deadline не может принудительно остановить блокирующий
+SDK/exporter thread: синхронный shutdown OpenTelemetry продолжается с ограничениями
+самого SDK. Эти бюджеты не задают общий deadline завершения всех зависимостей.
+
+HTTP metrics используют route templates, например `/v1/files/{file_id}`, и
+`unmatched` для неизвестных путей. Сохраняются встроенные model names и ключи
+настроенных per-model concurrency limits; прочие model/error labels становятся
+`other`. Raw paths остаются на logging boundary с его политикой capture/redaction.
+
+Multipart Files parsing использует Starlette spooled uploads. `python-multipart`
+входит в базовые runtime dependencies, integrations extra не нужен. Общий body
+limit и ограничения размера по MIME сохраняются, включая файлы крупнее memory
+threshold spool. Временные файлы закрываются после success, error и cancellation.

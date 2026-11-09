@@ -32,9 +32,13 @@ class QueuedTrafficLogSink:
         self.emitted_events = 0
         self._queue: asyncio.Queue[Any] = asyncio.Queue(maxsize=queue_size)
         self._worker_task: asyncio.Task[None] | None = None
+        self._closed = False
 
     async def emit(self, event: Any) -> None:
         """Queue one event without waiting for the storage backend."""
+        if self._closed:
+            self.dropped_events += 1
+            return
         self._ensure_worker()
         if self.drop_on_backpressure:
             try:
@@ -49,10 +53,28 @@ class QueuedTrafficLogSink:
 
     async def flush(self) -> None:
         """Drain queued events and flush the wrapped sink best effort."""
-        if self._worker_task is not None:
-            await self._queue.join()
-        await self._flush_inner()
+        try:
+            if self._worker_task is not None:
+                await self._queue.join()
+            await self._flush_inner()
+        finally:
+            await self._stop_worker()
+            # Cancellation abandons unsent events; never retain their payloads.
+            while not self._queue.empty():
+                self._queue.get_nowait()
+                self._queue.task_done()
+                self.dropped_events += 1
+
+    async def aclose(self) -> None:
+        """Close the backend after abandoning any remaining queue work."""
+        self._closed = True
         await self._stop_worker()
+        while not self._queue.empty():
+            self._queue.get_nowait()
+            self._queue.task_done()
+            self.dropped_events += 1
+        close = getattr(self.sink, "aclose", self.sink.flush)
+        await close()
 
     def _ensure_worker(self) -> None:
         if self._worker_task is None or self._worker_task.done():
@@ -77,9 +99,14 @@ class QueuedTrafficLogSink:
                 except asyncio.QueueEmpty:
                     break
 
-            await self._emit_batch(batch)
-            for _ in batch:
-                self._queue.task_done()
+            try:
+                await self._emit_batch(batch)
+            except asyncio.CancelledError:
+                self.dropped_events += len(batch)
+                raise
+            finally:
+                for _ in batch:
+                    self._queue.task_done()
 
     async def _emit_batch(self, batch: list[Any]) -> None:
         try:
@@ -91,6 +118,7 @@ class QueuedTrafficLogSink:
                     await self.sink.emit(event)
             self.emitted_events += len(batch)
         except Exception as exc:  # pragma: no cover - covered by no-raise behavior
+            self.dropped_events += len(batch)
             if self.logger is not None:
                 self.logger.warning("Traffic log queue worker failed: {}", exc)
 

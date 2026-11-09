@@ -2,6 +2,7 @@ import base64
 
 import pytest
 from fastapi import HTTPException
+from gigachat.exceptions import APIResponseValidationError
 from loguru import logger
 
 from gpt2giga.models.config import ProxyConfig
@@ -91,10 +92,8 @@ async def test_transform_messages_audio_image_total_size_limit():
         {"type": "image_url", "image_url": {"url": "u2"}},
     ]
     messages = [{"role": "user", "content": content}]
-    out = await rt.transform_messages(messages, giga_client=object())
-
-    # Первый файл (6 байт) проходит, второй (еще 6 байт) должен быть отклонен лимитом 10 байт.
-    assert out[0]["attachments"] == ["file_1"]
+    with pytest.raises(APIResponseValidationError):
+        await rt.transform_messages(messages, giga_client=object())
 
 
 async def test_transform_messages_raises_413_on_attachment_oversize():

@@ -253,7 +253,7 @@ def check_package_urls(root: Path) -> list[Issue]:
 
 
 def check_gigachat_dependency_floor(root: Path) -> list[Issue]:
-    """Require the native-schema GigaChat SDK range in root metadata."""
+    """Require the exact GigaChat SDK candidate pin in root metadata."""
     path = root / "pyproject.toml"
     metadata = tomllib.loads(path.read_text(encoding="utf-8"))
     dependencies = metadata["project"].get("dependencies", [])
@@ -261,17 +261,17 @@ def check_gigachat_dependency_floor(root: Path) -> list[Issue]:
         dependency
         for dependency in dependencies
         if isinstance(dependency, str)
-        and re.match(r"^gigachat(?:\s|[<>=!~])", dependency, re.IGNORECASE)
+        and re.match(r"^gigachat(?:$|\s|\[|[<>=!~@])", dependency, re.IGNORECASE)
     ]
-    expected = re.compile(r"^gigachat\s*>=\s*0\.2\.4\s*,\s*<\s*0\.3\.0$", re.IGNORECASE)
+    expected = re.compile(r"^gigachat\[aiohttp\]\s*==\s*0\.3\.0a1$", re.IGNORECASE)
     if len(requirements) == 1 and expected.fullmatch(requirements[0]):
         return []
     actual = ", ".join(requirements) if requirements else "missing"
     return [
         Issue(
             path,
-            "gigachat dependency must use the native-schema range "
-            f"'>=0.2.4,<0.3.0'; found {actual!r}",
+            "gigachat dependency must use the exact alpha pin "
+            f"'gigachat[aiohttp]==0.3.0a1'; found {actual!r}",
         )
     ]
 

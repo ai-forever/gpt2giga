@@ -6,6 +6,10 @@ from collections.abc import Mapping
 from typing import Any
 
 from gpt2giga.common.client_params import ClientCompatibilityError
+from gpt2giga.common.tools import (
+    function_tool_payload,
+    normalize_gigachat_builtin_tool_type,
+)
 from gpt2giga.core.context import RequestContext
 from gpt2giga.protocol.request.params import sanitize_openai_chat_parameters
 from gpt2giga.protocols.normalized import (
@@ -15,6 +19,8 @@ from gpt2giga.protocols.normalized import (
     NormalizedImageReference,
     NormalizedMessage,
     NormalizedResponseFormat,
+    NormalizedReasoningIntent,
+    NormalizedToolKind,
     NormalizedTool,
     NormalizedToolCall,
 )
@@ -37,6 +43,7 @@ _CHAT_TOP_LEVEL_FIELDS = {
     "messages",
     "metadata",
     "model",
+    "parallel_tool_calls",
     "presence_penalty",
     "frequency_penalty",
     "reasoning",
@@ -106,12 +113,23 @@ class OpenAIProtocolAdapter:
     ) -> NormalizedChatRequest:
         """Convert an OpenAI Chat Completions payload to normalized form."""
         original = dict(payload)
-        sanitized = _map_chat_token_limit(sanitize_openai_chat_parameters(original))
+        sanitized = _map_chat_token_limit(
+            sanitize_openai_chat_parameters(
+                original,
+                allow_builtin_tools=True,
+                allow_namespace_tools=True,
+                allow_parallel_tool_calls=True,
+            )
+        )
         metadata, metadata_extension = _extract_metadata(original.get("metadata"))
         raw_extensions = _build_raw_extensions(sanitized)
         if metadata_extension is not None:
             raw_extensions["metadata"] = metadata_extension
         provider_metadata = _build_provider_metadata(sanitized)
+        if original.get("function_call") is not None:
+            provider_metadata.setdefault("gigachat", {})["function_call"] = (
+                sanitized.get("function_call", original["function_call"])
+            )
 
         return NormalizedChatRequest(
             id=context.request_id if context is not None else None,
@@ -127,6 +145,7 @@ class OpenAIProtocolAdapter:
                 sanitized.get("response_format")
             ),
             generation_config=_normalize_generation_config(sanitized),
+            reasoning=_normalize_reasoning(sanitized),
             user=original.get("user"),
             metadata=metadata,
             raw_extensions=raw_extensions,
@@ -181,9 +200,10 @@ def _build_provider_metadata(data: Mapping[str, Any]) -> dict[str, Any]:
     if isinstance(existing_additional, Mapping):
         additional_fields.update(dict(existing_additional))
 
-    if not additional_fields:
-        return {}
-    return {"gigachat": {"additional_fields": additional_fields}}
+    metadata = {}
+    if additional_fields:
+        metadata["additional_fields"] = additional_fields
+    return {"gigachat": metadata} if metadata else {}
 
 
 def _normalize_messages(value: Any) -> list[NormalizedMessage]:
@@ -334,27 +354,50 @@ def _normalize_tool_call(tool_call: Mapping[str, Any]) -> NormalizedToolCall:
 
 def _normalize_tools(data: Mapping[str, Any]) -> list[NormalizedTool]:
     source = data.get("tools")
-    if not source and data.get("functions"):
-        source = data.get("functions")
+    if "functions" in data:
+        functions = data.get("functions")
+        source = (functions if isinstance(functions, list) else []) + [
+            tool
+            for tool in source or []
+            if isinstance(tool, Mapping)
+            and normalize_gigachat_builtin_tool_type(tool.get("type")) is not None
+        ]
     if not isinstance(source, list):
         return []
     return [_normalize_tool(item) for item in source if isinstance(item, Mapping)]
 
 
 def _normalize_tool(tool: Mapping[str, Any]) -> NormalizedTool:
-    function = tool.get("function")
-    function_data = function if isinstance(function, Mapping) else tool
+    if tool.get("type") == "namespace":
+        return NormalizedTool(
+            type="namespace",
+            kind=NormalizedToolKind.NAMESPACE,
+            name=tool.get("name"),
+            configuration={
+                key: value for key, value in tool.items() if key not in {"type", "name"}
+            },
+        )
+    if normalize_gigachat_builtin_tool_type(tool.get("type")) is not None:
+        return NormalizedTool(
+            type=str(tool["type"]),
+            kind=NormalizedToolKind.HOSTED,
+            name=str(tool["type"]),
+            configuration={key: value for key, value in tool.items() if key != "type"},
+        )
+
+    function_data = function_tool_payload(tool, require_parameters=False) or tool
     raw_extensions = {
         key: value
         for key, value in tool.items()
-        if key not in {"type", "function", "name", "description", "parameters"}
+        if key
+        not in {"type", "function", "name", "description", "parameters", "input_schema"}
     }
     function_extensions = {
         key: value
         for key, value in function_data.items()
-        if key not in {"name", "description", "parameters"}
+        if key not in {"name", "description", "parameters", "input_schema"}
     }
-    if function_extensions and function_data is not tool:
+    if function_extensions and isinstance(tool.get("function"), Mapping):
         raw_extensions["function"] = function_extensions
     parameters = function_data.get("parameters")
     if not isinstance(parameters, Mapping):
@@ -432,3 +475,21 @@ def _string_or_none(value: Any) -> str | None:
 
 def _optional_bool(value: Any) -> bool | None:
     return value if isinstance(value, bool) else None
+
+
+def _normalize_reasoning(data: Mapping[str, Any]) -> NormalizedReasoningIntent | None:
+    reasoning = data.get("reasoning")
+    values = dict(reasoning) if isinstance(reasoning, Mapping) else {}
+    if not values.get("effort") and data.get("reasoning_effort") is not None:
+        values["effort"] = data["reasoning_effort"]
+    if not values:
+        return None
+    return NormalizedReasoningIntent(
+        effort=values.get("effort"),
+        max_tokens=values.get("max_tokens"),
+        raw_extensions={
+            key: value
+            for key, value in values.items()
+            if key not in {"effort", "max_tokens"}
+        },
+    )

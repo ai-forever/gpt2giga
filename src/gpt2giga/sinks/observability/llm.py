@@ -399,7 +399,9 @@ def _message_payload(
         payload["tool_call_id"] = message.tool_call_id
     if include_content:
         payload["content"] = message.content
-        reasoning_content = message.raw_extensions.get("reasoning_content")
+        reasoning_content = message.reasoning_content or message.raw_extensions.get(
+            "reasoning_content"
+        )
         if isinstance(reasoning_content, str) and reasoning_content:
             payload["reasoning_content"] = reasoning_content
     if message.tool_calls:

@@ -5,11 +5,10 @@ gateway to GigaChat and verify each protocol with a first request.
 
 ## Requirements
 
-- Python 3.10–3.14 for a local run.
-- Python 3.15 support is experimental (preview). A separate non-blocking CI job
-  runs the tests, builds the wheel/sdist, and checks the installed package.
-- This checkout requires GigaChat Python SDK `>=0.2.4,<0.3.0`.
-  SDK `0.2.4` is available on PyPI and is installed automatically with the gateway.
+- Python 3.10–3.15 for a local run.
+- Stable Python 3.15 is included in required test and installed-artifact CI matrices.
+- This checkout requires GigaChat Python SDK `gigachat[aiohttp]==0.3.0a1`.
+  SDK `0.3.0a1` is available on PyPI and is installed automatically with the gateway.
 - `uv` for local development.
 - Docker with the Compose plugin for a container run.
 - GigaChat credentials and scope for the target account.
@@ -65,7 +64,8 @@ curl http://localhost:8090/health
 
 ## Python 3.15 preview images
 
-Python 3.15 container support is experimental. Both registries publish
+Python 3.15 uses a stable base image. Existing preview aliases are retained;
+the published 0.3.1 images can be fetched from both registries:
 `linux/amd64` and `linux/arm64` images:
 
 ```sh
@@ -79,7 +79,7 @@ for this release. The `latest` and `0.3.1` tags use Python 3.13.
 Build the preview locally with:
 
 ```sh
-docker build --build-arg PYTHON_VERSION=3.15-rc -t gpt2giga:preview .
+docker build --build-arg PYTHON_VERSION=3.15 -t gpt2giga:preview .
 ```
 
 ## Install the gateway

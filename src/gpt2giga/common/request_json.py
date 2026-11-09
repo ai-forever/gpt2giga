@@ -58,6 +58,9 @@ async def read_request_json(request: Request) -> dict:
             },
         )
     update_request_context(model_requested=data.get("model"))
+    cache_key = data.get("prompt_cache_key")
+    if isinstance(cache_key, str) and cache_key:
+        request.state.prompt_cache_key = cache_key
     capture_traffic_request_body(request, data)
     state = request.app.state
     log_debug_payload(

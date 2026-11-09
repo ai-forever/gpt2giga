@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 from loguru import logger
 
 from gpt2giga.models.config import ProxyConfig, ProxySettings
-from gpt2giga.protocol import ResponseProcessor
+from gpt2giga.protocol import RequestTransformer, ResponseProcessor
 from gpt2giga.protocol.anthropic.response import _build_anthropic_response
 from gpt2giga.protocol.embeddings import (
     apply_embedding_encoding_format,
@@ -35,7 +35,7 @@ class FakeAnthropicGigachat:
             )
             yield MockResponse(
                 {
-                    "choices": [{"delta": {"content": "lo!"}}],
+                    "choices": [{"delta": {"content": "lo!"}, "finish_reason": "stop"}],
                     "usage": {
                         "prompt_tokens": 10,
                         "completion_tokens": 2,
@@ -45,11 +45,6 @@ class FakeAnthropicGigachat:
             )
 
         return gen()
-
-
-class FakeRequestTransformer:
-    async def prepare_chat(self, data, giga_client=None):
-        return {"model": data.get("model", "giga"), "messages": data.get("messages")}
 
 
 def _load_json(path: str) -> dict:
@@ -240,7 +235,7 @@ def test_anthropic_messages_streaming_matches_golden_fixture():
     app.include_router(anthropic_router)
     app.state.config = ProxyConfig(proxy=ProxySettings())
     app.state.gigachat_client = FakeAnthropicGigachat()
-    app.state.request_transformer = FakeRequestTransformer()
+    app.state.request_transformer = RequestTransformer(app.state.config, logger=logger)
     app.state.response_processor = ResponseProcessor(logger=logger, mode="PROD")
     app.state.logger = logger
 

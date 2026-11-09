@@ -1,0 +1,848 @@
+"""Mounted vendor SDK batch flows over the real alpha SDK HTTP boundary."""
+
+import json
+from contextlib import asynccontextmanager
+from types import SimpleNamespace
+
+import anthropic
+import httpx
+import httpx2
+import openai
+import pytest
+from gigachat import GigaChat
+from loguru import logger
+
+from gpt2giga.app.factory import create_app
+from gpt2giga.models.config import ProxyConfig, ProxySettings
+from gpt2giga.protocol import RequestTransformer, ResponseProcessor
+from gpt2giga.storage.resources import ResourceStore
+
+
+class NativeBatches:
+    def __init__(self):
+        self.calls = []
+        self.rows = []
+        self.status = "completed"
+        self.outputs = None
+        self.submit_timeout = False
+
+    def __call__(self, request):
+        self.calls.append(request)
+        if request.method == "POST" and request.url.path == "/v1/batches":
+            if self.submit_timeout:
+                raise httpx2.ReadTimeout("private input", request=request)
+            self.rows = [json.loads(line) for line in request.content.splitlines()]
+            assert request.url.params["method"] in {"chat_completions", "embedder"}
+            return httpx2.Response(200, json=self.batch("created"))
+        if request.url.path == "/v1/batches":
+            assert request.url.params["batch_id"] == "native-job"
+            return httpx2.Response(200, json={"batches": [self.batch(self.status)]})
+        if request.url.path == "/v1/files/native-output/content":
+            outputs = self.outputs
+            if outputs is None:
+                outputs = [
+                    {"id": row["id"], "result": self.result()}
+                    for row in reversed(self.rows)
+                ]
+            return httpx2.Response(
+                200,
+                content=("\n".join(json.dumps(row) for row in outputs) + "\n").encode(),
+            )
+        raise AssertionError(str(request.url))
+
+    @staticmethod
+    def result():
+        return {
+            "choices": [
+                {
+                    "message": {"role": "assistant", "content": "done"},
+                    "finish_reason": "stop",
+                    "index": 0,
+                }
+            ],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+            "model": "test-model",
+        }
+
+    @staticmethod
+    def batch(status):
+        return {
+            "id": "native-job",
+            "method": "chat_completions",
+            "request_counts": {"total": 2},
+            "status": status,
+            "created_at": 10,
+            "updated_at": 11,
+            "output_file_id": "native-output" if status == "completed" else None,
+        }
+
+
+@asynccontextmanager
+async def app_client(tmp_path, native, *, pass_token=False):
+    config = ProxyConfig(
+        proxy=ProxySettings(resource_store_path=str(tmp_path), pass_token=pass_token),
+        gigachat={"model": "test-model", "max_retries": 2},
+        _env_file=None,
+    )
+    app = create_app(config)
+    app.state.logger = logger
+    app.state.resource_store = await ResourceStore.open(tmp_path)
+    async with httpx2.AsyncClient(
+        transport=httpx2.MockTransport(native), trust_env=False
+    ) as wire:
+        sdk = GigaChat(
+            base_url="https://gigachat.test/v1",
+            access_token="synthetic-token",
+            credentials="",
+            user="",
+            password="",
+            scope="",
+            max_retries=2,
+            async_http_client=wire,
+            trust_env=False,
+        )
+        app.state.gigachat_client = sdk
+        app.state.request_transformer = RequestTransformer(config, logger=logger)
+        app.state.response_processor = ResponseProcessor(logger=logger)
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app), base_url="http://gateway.test"
+        ) as client:
+            yield app, client
+        await sdk.aclose()
+    await app.state.resource_store.aclose()
+
+
+def openai_rows():
+    return [
+        {
+            "custom_id": key,
+            "method": "POST",
+            "url": "/v1/chat/completions",
+            "body": {
+                "model": "test-model",
+                "messages": [{"role": "user", "content": key}],
+            },
+        }
+        for key in ["one", "two"]
+    ]
+
+
+async def upload(client, rows):
+    content = "\n".join(json.dumps(row) for row in rows).encode()
+    response = await client.post(
+        "/v1/files",
+        files={"file": ("input.jsonl", content, "application/jsonl")},
+        data={"purpose": "batch"},
+    )
+    assert response.status_code == 200, response.text
+    return response.json()["id"]
+
+
+async def test_openai_sdk_create_restart_poll_output_error_and_no_repeat(tmp_path):
+    native = NativeBatches()
+    async with app_client(tmp_path, native) as (_, client):
+        sdk = openai.AsyncOpenAI(
+            base_url="http://gateway.test/v1", api_key="0", http_client=client
+        )
+        file = await sdk.files.create(
+            file=(
+                "input.jsonl",
+                "\n".join(json.dumps(row) for row in openai_rows()).encode(),
+            ),
+            purpose="batch",
+        )
+        created = await sdk.batches.create(
+            input_file_id=file.id,
+            endpoint="/v1/chat/completions",
+            completion_window="24h",
+        )
+        assert created.status == "validating"
+        assert created.id.startswith("batch_g2g_")
+    native.outputs = [
+        {"id": "two", "error": {"type": "invalid_request_error", "message": "bad row"}},
+        {"id": "one", "result": native.result()},
+    ]
+    async with app_client(tmp_path, native) as (_, client):
+        sdk = openai.AsyncOpenAI(
+            base_url="http://gateway.test/v1", api_key="0", http_client=client
+        )
+        polled = await sdk.batches.retrieve(created.id)
+        assert polled.status == "completed"
+        assert polled.request_counts.completed == 1
+        assert polled.request_counts.failed == 1
+        success = json.loads((await sdk.files.content(polled.output_file_id)).content)
+        failure = json.loads((await sdk.files.content(polled.error_file_id)).content)
+        assert success["custom_id"] == "one"
+        assert success["response"]["body"]["choices"][0]["message"]["content"] == "done"
+        assert failure["custom_id"] == "two"
+        calls = len(native.calls)
+        assert (
+            await sdk.batches.retrieve(created.id)
+        ).output_file_id == polled.output_file_id
+        assert (await sdk.batches.list()).data[0].id == created.id
+        assert len(native.calls) == calls
+        cancel = await client.post(f"/v1/batches/{created.id}/cancel")
+        assert cancel.status_code == 501
+        assert "error" in cancel.json() and "detail" not in cancel.json()
+    assert sum(r.method == "POST" for r in native.calls) == 1
+
+
+async def test_anthropic_sdk_results_mixed_and_protocol_scoped_listing(tmp_path):
+    native = NativeBatches()
+    async with app_client(tmp_path, native) as (_, client):
+        sdk = anthropic.AsyncAnthropic(
+            base_url="http://gateway.test", api_key="0", http_client=client
+        )
+        batch = await sdk.messages.batches.create(
+            requests=[
+                {
+                    "custom_id": key,
+                    "params": {
+                        "model": "test-model",
+                        "max_tokens": 10,
+                        "messages": [{"role": "user", "content": key}],
+                    },
+                }
+                for key in ["one", "two"]
+            ]
+        )
+        native.outputs = [
+            {"id": "two", "error": {"type": "invalid_request_error", "message": "bad"}},
+            {"id": "one", "result": native.result()},
+        ]
+        polled = await sdk.messages.batches.retrieve(batch.id)
+        assert polled.processing_status == "ended"
+        assert polled.request_counts.succeeded == 1
+        assert polled.request_counts.errored == 1
+        assert polled.results_url.endswith(f"/v1/messages/batches/{batch.id}/results")
+        results = [item async for item in await sdk.messages.batches.results(batch.id)]
+        assert [item.custom_id for item in results] == ["one", "two"]
+        assert results[0].result.message.content[0].text == "done"
+        assert results[1].result.type == "errored"
+        assert (await client.get("/v1/batches")).json()["data"] == []
+        assert (await client.get(f"/v1/batches/{batch.id}")).status_code == 404
+        assert (await client.get("/v1/messages/batches")).json()["data"][0][
+            "id"
+        ] == batch.id
+
+
+async def test_deadline_first_poll_after_restart_never_fetches_late_success(
+    tmp_path, monkeypatch
+):
+    native = NativeBatches()
+    clock = [1000.0]
+    monkeypatch.setattr(
+        "gpt2giga.providers.gigachat.batches.time",
+        SimpleNamespace(time=lambda: clock[0]),
+    )
+    async with app_client(tmp_path, native) as (_, client):
+        data = {
+            "requests": [
+                {
+                    "custom_id": key,
+                    "params": {
+                        "model": "test-model",
+                        "max_tokens": 10,
+                        "messages": [{"role": "user", "content": key}],
+                    },
+                }
+                for key in ["one", "two"]
+            ]
+        }
+        response = await client.post("/v1/messages/batches", json=data)
+        assert response.status_code == 200, response.text
+        batch_id = response.json()["id"]
+    clock[0] += 86401
+    async with app_client(tmp_path, native) as (_, client):
+        polled = (await client.get(f"/v1/messages/batches/{batch_id}")).json()
+        assert polled["processing_status"] == "ended"
+        assert polled["request_counts"] == {
+            "canceled": 0,
+            "succeeded": 0,
+            "errored": 0,
+            "processing": 0,
+            "expired": 2,
+        }
+        result = await client.get(f"/v1/messages/batches/{batch_id}/results")
+        assert all(
+            json.loads(line)["result"]["type"] == "expired"
+            for line in result.content.splitlines()
+        )
+        assert len(native.calls) == 1
+
+
+async def test_ambiguous_submit_timeout_is_not_replayed(tmp_path):
+    native = NativeBatches()
+    native.submit_timeout = True
+    async with app_client(tmp_path, native) as (app, client):
+        file_id = await upload(client, openai_rows())
+        response = await client.post(
+            "/v1/batches",
+            json={
+                "input_file_id": file_id,
+                "endpoint": "/v1/chat/completions",
+                "completion_window": "24h",
+            },
+        )
+        assert response.status_code == 504
+        assert "private input" not in response.text
+        assert len(native.calls) == 1
+        listed = (await client.get("/v1/batches")).json()["data"]
+        assert len(listed) == 1
+        assert listed[0]["status"] == "failed"
+        assert listed[0]["request_counts"]["failed"] == 2
+        assert len(native.calls) == 1
+
+
+@pytest.mark.parametrize(
+    "change",
+    ["duplicate", "no_id", "stream", "stateful", "tools", "mixed", "bad_jsonl"],
+)
+async def test_invalid_batch_has_no_submission(tmp_path, change):
+    native = NativeBatches()
+    rows = openai_rows()
+    if change == "duplicate":
+        rows[1]["custom_id"] = "one"
+    elif change == "no_id":
+        rows[0].pop("custom_id")
+    elif change == "stream":
+        rows[0]["body"]["stream"] = True
+    elif change == "stateful":
+        rows[0]["body"]["previous_response_id"] = "resp-old"
+    elif change == "tools":
+        rows[0]["body"]["tools"] = [{"type": "web_search"}]
+    elif change == "mixed":
+        rows[1]["body"]["model"] = "other-model"
+    elif change == "bad_jsonl":
+        rows = ["not-an-object"]
+    async with app_client(tmp_path, native) as (_, client):
+        file_id = await upload(client, rows)
+        response = await client.post(
+            "/v1/batches",
+            json={
+                "input_file_id": file_id,
+                "endpoint": "/v1/chat/completions",
+                "completion_window": "24h",
+            },
+        )
+        assert response.status_code == 400, response.text
+    assert native.calls == []
+
+
+@pytest.mark.parametrize("problem", ["unknown_status", "duplicate", "wrong_id"])
+async def test_invalid_upstream_results_are_502(tmp_path, problem):
+    native = NativeBatches()
+    async with app_client(tmp_path, native) as (_, client):
+        file_id = await upload(client, openai_rows())
+        created = await client.post(
+            "/v1/batches",
+            json={
+                "input_file_id": file_id,
+                "endpoint": "/v1/chat/completions",
+                "completion_window": "24h",
+            },
+        )
+        assert created.status_code == 200, created.text
+        if problem == "unknown_status":
+            native.status = "unknown"
+        else:
+            ids = {
+                "duplicate": ["one", "one"],
+                "missing": ["one"],
+                "wrong_id": ["one", "wrong"],
+            }[problem]
+            native.outputs = [{"id": key, "result": native.result()} for key in ids]
+        response = await client.get(f"/v1/batches/{created.json()['id']}")
+        assert response.status_code == 502, response.text
+
+
+async def test_partial_confirmed_result_survives_deadline(tmp_path, monkeypatch):
+    native = NativeBatches()
+    native.status = "in_progress"
+    original_batch = native.batch
+    native.batch = lambda status: {
+        **original_batch(status),
+        "output_file_id": "native-output" if status == "in_progress" else None,
+    }
+    native.outputs = [{"id": "one", "result": native.result()}]
+    clock = [1000.0]
+    monkeypatch.setattr(
+        "gpt2giga.providers.gigachat.batches.time",
+        SimpleNamespace(time=lambda: clock[0]),
+    )
+    async with app_client(tmp_path, native) as (_, client):
+        file_id = await upload(client, openai_rows())
+        created = await client.post(
+            "/v1/batches",
+            json={
+                "input_file_id": file_id,
+                "endpoint": "/v1/chat/completions",
+                "completion_window": "24h",
+            },
+        )
+        batch_id = created.json()["id"]
+        polled = await client.get(f"/v1/batches/{batch_id}")
+        assert polled.json()["request_counts"] == {
+            "total": 2,
+            "completed": 1,
+            "failed": 0,
+        }
+        clock[0] += 86401
+        expired = (await client.get(f"/v1/batches/{batch_id}")).json()
+        assert expired["status"] == "expired"
+        assert expired["request_counts"] == {"total": 2, "completed": 1, "failed": 1}
+        success = await client.get(f"/v1/files/{expired['output_file_id']}/content")
+        assert json.loads(success.content)["custom_id"] == "one"
+        error = await client.get(f"/v1/files/{expired['error_file_id']}/content")
+        assert json.loads(error.content)["custom_id"] == "two"
+
+
+@pytest.mark.parametrize("kind", ["embeddings", "responses", "functions"])
+async def test_batch_supported_families_transform_outputs(tmp_path, kind):
+    native = NativeBatches()
+    if kind == "embeddings":
+        endpoint = "/v1/embeddings"
+        body = {"model": "test-model", "input": ["first", "second"]}
+        result = {
+            "data": [{"index": 1, "embedding": [2.0]}, {"index": 0, "embedding": [1.0]}]
+        }
+    elif kind == "responses":
+        endpoint = "/v1/responses"
+        body = {"model": "test-model", "input": "hi", "store": False}
+        result = native.result()
+    else:
+        endpoint = "/v1/chat/completions"
+        body = {
+            "model": "test-model",
+            "messages": [{"role": "user", "content": "call a function"}],
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "weather",
+                        "parameters": {"type": "object", "properties": {}},
+                    },
+                }
+            ],
+        }
+        result = {
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": "",
+                        "function_call": {"name": "weather", "arguments": {}},
+                    },
+                    "finish_reason": "function_call",
+                }
+            ],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        }
+    async with app_client(tmp_path, native) as (_, client):
+        file_id = await upload(
+            client,
+            [{"custom_id": "one", "method": "POST", "url": endpoint, "body": body}],
+        )
+        response = await client.post(
+            "/v1/batches",
+            json={
+                "input_file_id": file_id,
+                "endpoint": endpoint,
+                "completion_window": "24h",
+            },
+        )
+        assert response.status_code == 200, response.text
+        native.outputs = [{"id": "one", "result": result}]
+        batch = await client.get(f"/v1/batches/{response.json()['id']}")
+        assert batch.status_code == 200, batch.text
+        output = await client.get(f"/v1/files/{batch.json()['output_file_id']}/content")
+        projected = json.loads(output.content)["response"]["body"]
+        if kind == "embeddings":
+            assert [row["embedding"] for row in projected["data"]] == [[1.0], [2.0]]
+        elif kind == "responses":
+            assert projected["object"] == "response"
+            assert projected["output"][0]["content"][0]["text"] == "done"
+        else:
+            assert native.rows[0]["request"]["functions"][0]["name"] == "weather"
+            assert (
+                projected["choices"][0]["message"]["tool_calls"][0]["function"]["name"]
+                == "weather"
+            )
+
+
+async def test_batch_ownership_hides_guessed_ids_and_outputs(tmp_path):
+    native = NativeBatches()
+    async with app_client(tmp_path, native) as (app, client):
+        app.state.config.proxy_settings.resource_trusted_identity = "owner-one"
+        file_id = await upload(client, openai_rows())
+        created = await client.post(
+            "/v1/batches",
+            json={
+                "input_file_id": file_id,
+                "endpoint": "/v1/chat/completions",
+                "completion_window": "24h",
+            },
+        )
+        batch_id = created.json()["id"]
+        polled = (await client.get(f"/v1/batches/{batch_id}")).json()
+        app.state.config.proxy_settings.resource_trusted_identity = "owner-two"
+        before = len(native.calls)
+        assert (await client.get(f"/v1/batches/{batch_id}")).status_code == 404
+        assert (
+            await client.get(f"/v1/files/{polled['output_file_id']}/content")
+        ).status_code == 404
+        assert (await client.get("/v1/batches")).json()["data"] == []
+        assert len(native.calls) == before
+
+
+@pytest.mark.parametrize("failure_phase", ["intent", "mapping"])
+async def test_submit_failure_keeps_intent_or_prevents_io(
+    tmp_path, monkeypatch, failure_phase
+):
+    from gpt2giga.storage.resources import ResourceStoreError
+
+    native = NativeBatches()
+    async with app_client(tmp_path, native) as (app, client):
+        file_id = await upload(client, openai_rows())
+        store = app.state.resource_store
+        original = store.put if failure_phase == "intent" else store.update
+
+        async def fail_batch(owner, kind, *args, **kwargs):
+            if kind == "batch":
+                raise ResourceStoreError("synthetic storage failure")
+            return await original(owner, kind, *args, **kwargs)
+
+        with monkeypatch.context() as patch:
+            patch.setattr(
+                store, "put" if failure_phase == "intent" else "update", fail_batch
+            )
+            response = await client.post(
+                "/v1/batches",
+                json={
+                    "input_file_id": file_id,
+                    "endpoint": "/v1/chat/completions",
+                    "completion_window": "24h",
+                },
+            )
+        assert response.status_code == 500
+        assert len(native.calls) == (0 if failure_phase == "intent" else 1)
+        listed = (await client.get("/v1/batches")).json()["data"]
+        if failure_phase == "intent":
+            assert listed == []
+        else:
+            assert len(listed) == 1
+            assert listed[0]["status"] == "failed"
+            assert listed[0]["request_counts"] == {
+                "total": 2,
+                "completed": 0,
+                "failed": 2,
+            }
+            assert listed[0]["error_file_id"] is None
+            assert (
+                listed[0]["errors"]["data"][0]["code"] == "submission_outcome_unknown"
+            )
+            assert len(native.calls) == 1
+
+
+@pytest.mark.parametrize("status", ["failed", "completed"])
+async def test_terminal_partial_batch_preserves_success_and_accounts_missing(
+    tmp_path, status
+):
+    native = NativeBatches()
+    original_batch = native.batch
+    native.batch = lambda value: {
+        **original_batch(value),
+        "output_file_id": "native-output" if value == status else None,
+    }
+    async with app_client(tmp_path, native) as (_, client):
+        file_id = await upload(client, openai_rows())
+        created = await client.post(
+            "/v1/batches",
+            json={
+                "input_file_id": file_id,
+                "endpoint": "/v1/chat/completions",
+                "completion_window": "24h",
+            },
+        )
+        native.status = status
+        native.outputs = [{"id": "one", "result": native.result()}]
+        batch = (await client.get(f"/v1/batches/{created.json()['id']}")).json()
+        assert batch["status"] == status
+        assert batch["request_counts"] == {"total": 2, "completed": 1, "failed": 1}
+        success = await client.get(f"/v1/files/{batch['output_file_id']}/content")
+        error = await client.get(f"/v1/files/{batch['error_file_id']}/content")
+        assert json.loads(success.content)["custom_id"] == "one"
+        assert json.loads(error.content)["custom_id"] == "two"
+
+
+@pytest.mark.parametrize("override", [False, True])
+async def test_profile_batch_binding_survives_restart_and_request_token(
+    tmp_path, monkeypatch, override
+):
+    import time
+
+    profile_path = tmp_path / "providers.json"
+    profile_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "gpt2giga.provider-profiles.v3",
+                "profiles": [
+                    {
+                        "profile_id": "second",
+                        "provider_kind": "gigachat",
+                        "base_url": "https://second.giga.example/v1",
+                        "credential_env": "SECOND_GIGA_CREDENTIAL",
+                        "network_policy_ref": "public-openai",
+                        "tls_policy_ref": "system-default",
+                        "models": [
+                            {
+                                "public_alias": "second/model",
+                                "upstream_model": "fixture-upstream-model",
+                                "capability_profile": "fixture",
+                                "support_status": "technical_preview",
+                            }
+                        ],
+                    }
+                ],
+            }
+        )
+    )
+    monkeypatch.setenv("SECOND_GIGA_CREDENTIAL", "second-synthetic-credential")
+    native = NativeBatches()
+    auth_calls = []
+
+    def handle(request):
+        if (
+            request.url.host == "default.giga.example"
+            and request.url.path == "/v1/files"
+        ):
+            return httpx2.Response(200, json={"data": []})
+        if request.url.host == "auth.test":
+            auth_calls.append(request)
+            assert (
+                request.headers["authorization"] == "Basic second-synthetic-credential"
+            )
+            return httpx2.Response(
+                200,
+                json={
+                    "access_token": "second-synthetic-token",
+                    "expires_at": int((time.time() + 3600) * 1000),
+                },
+            )
+        assert request.url.host == "second.giga.example"
+        assert request.headers["authorization"] == (
+            "Bearer override-token" if override else "Bearer second-synthetic-token"
+        )
+        return native(request)
+
+    async with httpx2.AsyncClient(
+        transport=httpx2.MockTransport(handle), trust_env=False
+    ) as wire:
+
+        def injected(**kwargs):
+            return GigaChat(
+                **kwargs, async_http_client=wire, auth_async_http_client=wire
+            )
+
+        monkeypatch.setattr("gpt2giga.providers.gigachat.client.GigaChat", injected)
+
+        def configured_app():
+            return create_app(
+                ProxyConfig(
+                    config=str(profile_path),
+                    proxy=ProxySettings(
+                        mode="DEV",
+                        pass_model=True,
+                        pass_token=override,
+                        resource_store_path=str(tmp_path / "store"),
+                    ),
+                    gigachat={
+                        "base_url": "https://default.giga.example/v1",
+                        "auth_url": "https://auth.test/oauth",
+                        "access_token": "default-synthetic-token",
+                        "credentials": "",
+                        "trust_env": False,
+                        "user": "",
+                        "password": "",
+                        "max_retries": 0,
+                    },
+                    _env_file=None,
+                )
+            )
+
+        headers = (
+            {"Authorization": "Bearer giga-auth-override-token"} if override else {}
+        )
+        app = configured_app()
+        async with app.router.lifespan_context(app):
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app),
+                base_url="http://gateway.test",
+                headers=headers,
+            ) as client:
+                rows = openai_rows()
+                for row in rows:
+                    row["body"]["model"] = "second/model"
+                file_id = await upload(client, rows)
+                created = await client.post(
+                    "/v1/batches",
+                    json={
+                        "input_file_id": file_id,
+                        "endpoint": "/v1/chat/completions",
+                        "completion_window": "24h",
+                    },
+                )
+                assert created.status_code == 200, created.text
+                batch_id = created.json()["id"]
+                assert all(
+                    row["request"]["model"] == "fixture-upstream-model"
+                    for row in native.rows
+                )
+        app = configured_app()
+        async with app.router.lifespan_context(app):
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app),
+                base_url="http://gateway.test",
+                headers=headers,
+            ) as client:
+                result = await client.get(f"/v1/batches/{batch_id}")
+                assert result.status_code == 200, result.text
+                assert result.json()["status"] == "completed"
+                output_id = result.json()["output_file_id"]
+                content = await client.get(f"/v1/files/{output_id}/content")
+                assert content.status_code == 200, content.text
+                assert len(content.content.splitlines()) == 2
+                await app.state.resource_store.put(
+                    "foreign-owner",
+                    "file",
+                    "file_g2g_foreign",
+                    {"id": "file_g2g_foreign"},
+                )
+                listed = (await client.get("/v1/files")).json()["data"]
+                assert output_id in {item["id"] for item in listed}
+                assert "file_g2g_foreign" not in {item["id"] for item in listed}
+                gemini_files = (await client.get("/v1beta/files")).json()["files"]
+                assert f"files/{output_id}" in {item["name"] for item in gemini_files}
+                assert "files/file_g2g_foreign" not in {
+                    item["name"] for item in gemini_files
+                }
+                again = await client.get(f"/v1/batches/{batch_id}")
+                assert again.status_code == 200
+        assert sum(request.method == "POST" for request in native.calls) == 1
+        assert len(auth_calls) == (0 if override else 2)
+
+
+async def test_listing_pending_submission_cannot_materialize_stale_errors(tmp_path):
+    import asyncio
+
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    class PendingNative(NativeBatches):
+        async def __call__(self, request):
+            if request.method == "POST" and request.url.path == "/v1/batches":
+                entered.set()
+                await release.wait()
+            return super().__call__(request)
+
+    native = PendingNative()
+    async with app_client(tmp_path, native) as (_, client):
+        file_id = await upload(client, openai_rows())
+        submit = asyncio.create_task(
+            client.post(
+                "/v1/batches",
+                json={
+                    "input_file_id": file_id,
+                    "endpoint": "/v1/chat/completions",
+                    "completion_window": "24h",
+                },
+            )
+        )
+        await entered.wait()
+        try:
+            pending = (await client.get("/v1/batches")).json()["data"][0]
+            assert pending["errors"]["data"][0]["code"] == "submission_outcome_unknown"
+            assert pending["error_file_id"] is None
+        finally:
+            release.set()
+        created = await submit
+        assert created.status_code == 200, created.text
+        batch = (await client.get(f"/v1/batches/{created.json()['id']}")).json()
+        assert batch["request_counts"] == {"total": 2, "completed": 2, "failed": 0}
+        assert batch["errors"] is None and batch["error_file_id"] is None
+        content = await client.get(f"/v1/files/{batch['output_file_id']}/content")
+        assert len(content.content.splitlines()) == 2
+
+
+async def test_batch_native_foreign_attachment_rejected_before_submit(tmp_path):
+    native = NativeBatches()
+    async with app_client(tmp_path, native) as (app, client):
+        await app.state.resource_store.put(
+            "foreign-owner",
+            "file",
+            "native-foreign",
+            {
+                "upstream_id": "native-foreign",
+                "local": False,
+            },
+        )
+        rows = openai_rows()
+        rows[1]["body"]["messages"][0]["attachments"] = ["native-foreign"]
+        file_id = await upload(client, rows)
+        response = await client.post(
+            "/v1/batches",
+            json={
+                "input_file_id": file_id,
+                "endpoint": "/v1/chat/completions",
+                "completion_window": "24h",
+            },
+        )
+        assert response.status_code == 404, response.text
+        assert native.calls == []
+
+
+async def test_batch_list_polls_only_page_and_skips_unchanged_writes(tmp_path):
+    native = NativeBatches()
+    native.status = "in_progress"
+    async with app_client(tmp_path, native) as (app, client):
+        file_id = await upload(client, openai_rows())
+        ids = []
+        for _ in range(5):
+            result = await client.post(
+                "/v1/batches",
+                json={"input_file_id": file_id, "endpoint": "/v1/chat/completions"},
+            )
+            assert result.status_code == 200, result.text
+            ids.append(result.json()["id"])
+        native.calls.clear()
+        invalid = await client.get(
+            "/v1/batches", params={"limit": 1, "after": "foreign"}
+        )
+        assert invalid.status_code == 400
+        assert native.calls == []
+        first = await client.get("/v1/batches", params={"limit": 1})
+        assert first.status_code == 200
+        assert first.json()["has_more"] is True
+        assert [row["id"] for row in first.json()["data"]] == ids[-1:]
+        assert len(native.calls) == 1
+        statements = []
+        app.state.resource_store._db.set_trace_callback(statements.append)
+        native.calls.clear()
+        repeated = await client.get("/v1/batches", params={"limit": 1})
+        assert repeated.status_code == 200
+        assert len(native.calls) == 1
+        assert not any(sql.startswith("UPDATE resources") for sql in statements)
+        assert not any("SUM(" in sql for sql in statements)
+        next_page = await client.get(
+            "/v1/batches", params={"limit": 1, "after": ids[-1]}
+        )
+        assert [row["id"] for row in next_page.json()["data"]] == ids[-2:-1]
+        native.status = "completed"
+        completed = await client.get(f"/v1/batches/{ids[-1]}")
+        assert completed.json()["status"] == "completed"
+        native.calls.clear()
+        statements.clear()
+        terminal = await client.get("/v1/batches", params={"limit": 1})
+        assert terminal.status_code == 200
+        assert native.calls == []
+        assert not any(sql.startswith("UPDATE resources") for sql in statements)

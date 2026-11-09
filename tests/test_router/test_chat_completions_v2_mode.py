@@ -108,29 +108,6 @@ class FakeGigachat:
         self.achat = FakeAChatResource()
 
 
-class FakeRequestTransformer:
-    def __init__(self):
-        self.chat_calls = []
-        self.chat_completion_calls = []
-
-    async def prepare_chat(self, data, giga_client=None):
-        self.chat_calls.append((data, giga_client))
-        return {"contract": "v1"}
-
-    async def prepare_chat_completion(self, data, giga_client=None):
-        self.chat_completion_calls.append((data, giga_client))
-        return {"contract": "v2"}
-
-    async def prepare_response_chat(self, data, giga_client=None):
-        return {"contract": "responses-v1"}
-
-
-class ModelLessAssistantTransformer(FakeRequestTransformer):
-    async def prepare_chat_completion(self, data, giga_client=None):
-        self.chat_completion_calls.append((data, giga_client))
-        return {"contract": "v2", "assistant_id": "assistant-1"}
-
-
 def make_app(mode: str):
     app = FastAPI()
     app.include_router(router)
@@ -158,11 +135,11 @@ def make_versioned_app(mode: str):
 def configure_app_state(app: FastAPI, mode: str):
     app.state.gigachat_client = FakeGigachat()
     app.state.response_processor = ResponseProcessor(logger=logger)
-    app.state.request_transformer = FakeRequestTransformer()
     app.state.config = ProxyConfig(
         proxy=ProxySettings(gigachat_api_mode=mode),
         gigachat={"model": "GigaChat-2-Max"},
     )
+    app.state.request_transformer = RequestTransformer(app.state.config, logger=logger)
 
 
 def test_chat_completions_v1_mode_uses_root_achat():
@@ -179,9 +156,9 @@ def test_chat_completions_v1_mode_uses_root_achat():
 
     assert response.status_code == 200
     assert response.json()["choices"][0]["message"]["content"] == "ok-v1"
-    assert app.state.request_transformer.chat_calls
-    assert not app.state.request_transformer.chat_completion_calls
-    assert app.state.gigachat_client.achat.chat_calls == [{"contract": "v1"}]
+    [sent_payload] = app.state.gigachat_client.achat.chat_calls
+    assert sent_payload["model"] == "gpt-x"
+    assert sent_payload["messages"] == [{"role": "user", "content": "hi"}]
     assert app.state.gigachat_client.achat.chat_completion_calls == []
 
 
@@ -203,10 +180,10 @@ def test_chat_completions_v2_mode_uses_chat_completion_create():
     assert body["choices"][0]["message"]["content"] == "ok-v2"
     assert body["usage"]["prompt_tokens"] == 2
     assert body["usage"]["completion_tokens"] == 3
-    assert not app.state.request_transformer.chat_calls
-    assert app.state.request_transformer.chat_completion_calls
     assert app.state.gigachat_client.achat.chat_calls == []
-    assert app.state.gigachat_client.achat.chat_completion_calls == [{"contract": "v2"}]
+    [sent_payload] = app.state.gigachat_client.achat.chat_completion_calls
+    assert sent_payload.model == "gpt-x"
+    assert sent_payload.messages[0].content[0].text == "hi"
 
 
 def test_chat_completions_v2_forwards_parallel_tool_calls():
@@ -233,8 +210,8 @@ def test_chat_completions_v2_forwards_parallel_tool_calls():
     )
 
     assert response.status_code == 200
-    request_data = app.state.request_transformer.chat_completion_calls[0][0]
-    assert request_data["parallel_tool_calls"] is True
+    [sent_payload] = app.state.gigachat_client.achat.chat_completion_calls
+    assert sent_payload.model_options.parallel_tool_calls is True
 
 
 @pytest.mark.parametrize("mode", ["v1", "v2"])
@@ -245,9 +222,10 @@ def test_chat_completions_missing_upstream_model_returns_400_without_io(
 ):
     app = make_app(mode)
     app.state.config = ProxyConfig(
-        proxy=ProxySettings(gigachat_api_mode=mode),
+        proxy=ProxySettings(gigachat_api_mode=mode, pass_model=False),
         gigachat={"model": None},
     )
+    app.state.request_transformer = RequestTransformer(app.state.config, logger=logger)
     client = TestClient(app)
 
     response = client.post(
@@ -268,23 +246,26 @@ def test_chat_completions_missing_upstream_model_returns_400_without_io(
 
 def test_chat_completions_v2_assistant_path_sends_no_model_sentinel():
     app = make_app("v2")
-    app.state.config = ProxyConfig(proxy=ProxySettings(gigachat_api_mode="v2"))
-    app.state.request_transformer = ModelLessAssistantTransformer()
+    app.state.config = ProxyConfig(
+        proxy=ProxySettings(gigachat_api_mode="v2", pass_model=False),
+        gigachat={"model": None},
+    )
+    app.state.request_transformer = RequestTransformer(app.state.config, logger=logger)
     client = TestClient(app)
 
     response = client.post(
         "/chat/completions",
         json={
             "model": "public-client-alias",
+            "assistant_id": "assistant-1",
             "messages": [{"role": "user", "content": "hi"}],
         },
     )
 
     assert response.status_code == 200
-    assert app.state.gigachat_client.achat.chat_completion_calls == [
-        {"contract": "v2", "assistant_id": "assistant-1"}
-    ]
-    assert "model" not in app.state.gigachat_client.achat.chat_completion_calls[0]
+    [sent_payload] = app.state.gigachat_client.achat.chat_completion_calls
+    assert sent_payload.assistant_id == "assistant-1"
+    assert "model" not in sent_payload.model_dump(exclude_none=True)
 
 
 def test_chat_completions_v1_prefix_forces_v1_when_default_is_v2():
@@ -301,9 +282,9 @@ def test_chat_completions_v1_prefix_forces_v1_when_default_is_v2():
 
     assert response.status_code == 200
     assert response.json()["choices"][0]["message"]["content"] == "ok-v1"
-    assert app.state.request_transformer.chat_calls
-    assert not app.state.request_transformer.chat_completion_calls
-    assert app.state.gigachat_client.achat.chat_calls == [{"contract": "v1"}]
+    [sent_payload] = app.state.gigachat_client.achat.chat_calls
+    assert sent_payload["model"] == "gpt-x"
+    assert sent_payload["messages"] == [{"role": "user", "content": "hi"}]
     assert app.state.gigachat_client.achat.chat_completion_calls == []
 
 
@@ -360,10 +341,10 @@ def test_chat_completions_v2_prefix_forces_v2_when_default_is_v1():
 
     assert response.status_code == 200
     assert response.json()["choices"][0]["message"]["content"] == "ok-v2"
-    assert not app.state.request_transformer.chat_calls
-    assert app.state.request_transformer.chat_completion_calls
     assert app.state.gigachat_client.achat.chat_calls == []
-    assert app.state.gigachat_client.achat.chat_completion_calls == [{"contract": "v2"}]
+    [sent_payload] = app.state.gigachat_client.achat.chat_completion_calls
+    assert sent_payload.model == "gpt-x"
+    assert sent_payload.messages[0].content[0].text == "hi"
 
 
 def test_chat_completions_v2_stream_uses_chat_completion_stream():
@@ -391,11 +372,11 @@ def test_chat_completions_v2_stream_uses_chat_completion_stream():
     ]
     assert chunks[-1]["choices"][0]["finish_reason"] == "stop"
     assert chunks[-1]["usage"]["prompt_tokens"] == 2
-    assert not app.state.request_transformer.chat_calls
-    assert app.state.request_transformer.chat_completion_calls
     assert app.state.gigachat_client.achat.chat_calls == []
     assert app.state.gigachat_client.achat.chat_completion_calls == []
-    assert app.state.gigachat_client.achat.stream_calls == [{"contract": "v2"}]
+    [sent_payload] = app.state.gigachat_client.achat.stream_calls
+    assert sent_payload.model == "gpt-x"
+    assert sent_payload.messages[0].content[0].text == "hi"
 
 
 def test_chat_completions_v2_stream_preserves_called_tools_from_request():

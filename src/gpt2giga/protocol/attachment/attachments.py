@@ -12,6 +12,13 @@ import anyio
 import httpx
 from fastapi import HTTPException
 from gigachat import GigaChat
+from gigachat.exceptions import (
+    APIConnectionError,
+    APIResponseValidationError,
+    APITimeoutError,
+)
+
+from gpt2giga.core.context import get_request_context
 
 from gpt2giga.constants import (
     DEFAULT_MAX_AUDIO_FILE_SIZE_BYTES as CONST_DEFAULT_MAX_AUDIO_FILE_SIZE_BYTES,
@@ -31,6 +38,8 @@ class CacheEntry(NamedTuple):
 
     file_id: str
     expires_at: float
+    file_size_bytes: int
+    file_kind: Literal["audio", "image", "text", "unknown"]
 
 
 class UploadResult(NamedTuple):
@@ -92,7 +101,7 @@ class AttachmentProcessor:
             await self._http_client.aclose()
             self._http_client = None
 
-    def _get_cached(self, key: str) -> Optional[str]:
+    def _get_cached(self, key: str) -> Optional[UploadResult]:
         """Получает значение из кэша с проверкой TTL"""
         entry = self._cache.get(key)
         if entry is None:
@@ -103,9 +112,9 @@ class AttachmentProcessor:
             del self._cache[key]
             return None
 
-        return entry.file_id
+        return UploadResult(entry.file_id, entry.file_size_bytes, entry.file_kind)
 
-    def _set_cached(self, key: str, file_id: str) -> None:
+    def _set_cached(self, key: str, result: UploadResult) -> None:
         """Добавляет значение в кэш с LRU-eviction"""
         # LRU eviction: удаляем старые записи если кэш переполнен
         if len(self._cache) >= self._max_cache_size:
@@ -126,7 +135,10 @@ class AttachmentProcessor:
                     del self._cache[k]
 
         self._cache[key] = CacheEntry(
-            file_id=file_id, expires_at=time.time() + self._cache_ttl
+            file_id=result.file_id,
+            expires_at=time.time() + self._cache_ttl,
+            file_size_bytes=result.file_size_bytes,
+            file_kind=result.file_kind,
         )
 
     def clear_cache(self) -> int:
@@ -336,16 +348,38 @@ class AttachmentProcessor:
         image_url: str,
         filename: str | None = None,
         max_audio_image_total_remaining: int | None = None,
-    ) -> Optional[UploadResult]:
+        *,
+        cache_scope: str | None = None,
+    ) -> UploadResult:
         """Загружает файл в GigaChat и возвращает file_id и метаданные."""
 
         base64_matches = re.search(r"data:(.+);base64,(.+)", image_url)
-        hashed = hashlib.sha256(image_url.encode()).hexdigest()
-
-        cached_id = self._get_cached(hashed)
-        if cached_id is not None:
-            self.logger.debug(f"Image found in cache: {hashed[:16]}...")
-            return UploadResult(cached_id, 0, "unknown")
+        context = get_request_context()
+        scope = cache_scope or (
+            context.metadata.get("attachment_scope") if context is not None else None
+        )
+        # Only a resolved provider/credential namespace can authorize reuse.
+        # SDK with_options views are temporary and are not credential identities.
+        hashed = (
+            hashlib.sha256(
+                f"{scope}\0{filename or ''}\0{image_url}".encode()
+            ).hexdigest()
+            if isinstance(scope, str) and scope
+            else None
+        )
+        cached = self._get_cached(hashed) if hashed is not None else None
+        if cached is not None:
+            limit = self._get_file_size_limit(cached.file_kind)
+            if (
+                cached.file_kind in {"audio", "image"}
+                and max_audio_image_total_remaining is not None
+            ):
+                limit = min(limit, max(0, max_audio_image_total_remaining))
+            if cached.file_size_bytes > limit:
+                self._raise_size_limit_exceeded(
+                    cached.file_size_bytes, limit, "attachment cache", cached.file_kind
+                )
+            return cached
 
         try:
             if base64_matches:
@@ -384,9 +418,7 @@ class AttachmentProcessor:
                 self.logger.info("Decoded base64 file")
             else:
                 validated_url = await self._validate_remote_url(image_url)
-                self.logger.info(
-                    f"Downloading image from URL: {validated_url[:100]}..."
-                )
+                self.logger.info("Downloading attachment")
                 client = await self._get_http_client()
                 current_url = validated_url
                 response = None
@@ -406,7 +438,11 @@ class AttachmentProcessor:
                         next_url = urljoin(current_url, location)
                         current_url = await self._validate_remote_url(next_url)
                         continue
-                    response.raise_for_status()
+                    try:
+                        response.raise_for_status()
+                    except BaseException:
+                        await stream_cm.__aexit__(None, None, None)
+                        raise
                     break
                 else:
                     self._raise_disallowed_url("too many redirects")
@@ -467,29 +503,33 @@ class AttachmentProcessor:
             self.logger.info(f"Uploading file to GigaChat... with extension {ext}")
             file = await giga_client.aupload_file((filename, content_bytes))
 
-            self._set_cached(hashed, file.id_)
-            self.logger.info(f"File uploaded successfully, file_id: {file.id_}")
-            return UploadResult(file.id_, len(content_bytes), file_kind)
+            if not isinstance(file.id_, str) or not file.id_:
+                raise APIResponseValidationError(
+                    "Attachment upload returned no file ID"
+                )
+            result = UploadResult(file.id_, len(content_bytes), file_kind)
+            if hashed is not None:
+                self._set_cached(hashed, result)
+            self.logger.info("Attachment uploaded successfully")
+            return result
 
-        except httpx.HTTPStatusError as e:
-            self.logger.error(
-                f"HTTP error downloading file: {e.response.status_code} {e.request.url}"
-            )
-            return None
-        except httpx.RequestError as e:
-            self.logger.error(
-                f"Network error downloading file: {type(e).__name__}: {e}"
-            )
-            return None
-        except HTTPException:
-            raise
-        except Exception as e:
-            self.logger.error(f"Error processing file: {type(e).__name__}: {e}")
-            return None
+        except httpx.TimeoutException as exc:
+            raise APITimeoutError("Attachment download timed out") from exc
+        except httpx.RequestError as exc:
+            raise APIConnectionError("Attachment download failed") from exc
+        except httpx.HTTPStatusError as exc:
+            raise APIResponseValidationError("Attachment download failed") from exc
 
     async def upload_file(
-        self, giga_client: GigaChat, image_url: str, filename: str | None = None
-    ) -> Optional[str]:
+        self,
+        giga_client: GigaChat,
+        image_url: str,
+        filename: str | None = None,
+        *,
+        cache_scope: str | None = None,
+    ) -> str:
         """Загружает файл в GigaChat и возвращает file_id."""
-        result = await self.upload_file_with_meta(giga_client, image_url, filename)
-        return result.file_id if result else None
+        result = await self.upload_file_with_meta(
+            giga_client, image_url, filename, cache_scope=cache_scope
+        )
+        return result.file_id

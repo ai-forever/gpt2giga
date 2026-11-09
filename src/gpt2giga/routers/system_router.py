@@ -10,6 +10,7 @@ from gpt2giga.app_state import (
     record_gigachat_model_catalog_snapshot,
 )
 from gpt2giga.capabilities import resolve_gigachat_route_capabilities
+from gpt2giga.capabilities.resolver import provider_capability_states
 from gpt2giga.common.exceptions import exceptions_handler
 from gpt2giga.openapi_tags import OPENAPI_TAG_SYSTEM_HEALTH
 from gpt2giga.protocols.normalized import bridge_loss_matrix_json
@@ -90,11 +91,15 @@ async def bridge_capabilities(
     resolver = getattr(request.app.state, "effective_capability_resolver", None)
     descriptor = await _get_catalog_model(request, model)
     if resolver is None:
+        provider_capabilities = provider_capability_states(
+            descriptor.provider_metadata.get("capabilities")
+        )
         resolution = resolve_gigachat_route_capabilities(
             model_id=descriptor.id,
             public_protocol=protocol,
             api_mode=api_mode or "v2",
             route_id=descriptor.provider_profile_id,
+            provider_capabilities=provider_capabilities,
         )
     else:
         resolution = resolver.resolve(

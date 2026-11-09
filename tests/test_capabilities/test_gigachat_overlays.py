@@ -41,8 +41,23 @@ def test_exact_max_v2_overlay_adds_hosted_tools_over_family_baseline() -> None:
         CapabilityState.SUPPORTED
     )
     assert layer.capabilities[CapabilityKey.PARALLEL_TOOL_CALLS].state is (
-        CapabilityState.SUPPORTED
+        CapabilityState.UNSUPPORTED
     )
+
+
+def test_ultra_has_reviewed_baseline_and_v2_parallel_tools() -> None:
+    for mode in ("v1", "v2"):
+        layer = resolve_gigachat_model_layer("GigaChat-3-Ultra", mode)
+        for key in (
+            CapabilityKey.TEXT_INPUT,
+            CapabilityKey.STREAMING,
+            CapabilityKey.FUNCTION_TOOLS,
+            CapabilityKey.USAGE_TOKENS,
+        ):
+            assert layer.capabilities[key].state is CapabilityState.SUPPORTED
+        assert layer.capabilities[CapabilityKey.PARALLEL_TOOL_CALLS].state is (
+            CapabilityState.SUPPORTED if mode == "v2" else CapabilityState.UNKNOWN
+        )
 
 
 def test_api_mode_constraint_does_not_expand_v1_hosted_tools() -> None:

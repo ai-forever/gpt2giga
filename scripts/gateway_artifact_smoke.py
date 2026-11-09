@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import importlib.metadata
 import importlib.util
 import json
@@ -33,13 +34,46 @@ def _gigachat_specifiers(requirements: list[str] | None) -> set[str]:
     matches = []
     for requirement in requirements or []:
         normalized = requirement.partition(";")[0].replace(" ", "").lower()
-        if normalized.startswith("gigachat"):
-            matches.append(normalized.removeprefix("gigachat"))
+        match = re.fullmatch(
+            r"gigachat(?:\[[^]]+\])?(?P<specifier>(?:[<>=!~@].*)?)", normalized
+        )
+        if match:
+            matches.append(match.group("specifier"))
     if len(matches) != 1:
         raise ArtifactSmokeError(
             "gateway metadata must contain exactly one direct gigachat requirement"
         )
     return set(matches[0].split(","))
+
+
+async def _verify_multipart_parser() -> None:
+    """Exercise base-install multipart parsing without provider or storage I/O."""
+    from starlette.requests import Request
+
+    from gpt2giga.common.request_form import read_request_multipart
+
+    async def receive():
+        return {
+            "type": "http.request",
+            "body": (
+                b'--smoke\r\nContent-Disposition: form-data; name="file"; filename="sample.txt"\r\n'
+                b"Content-Type: text/plain\r\n\r\nartifact smoke\r\n--smoke--\r\n"
+            ),
+            "more_body": False,
+        }
+
+    request = Request(
+        {
+            "type": "http",
+            "headers": [(b"content-type", b"multipart/form-data; boundary=smoke")],
+        },
+        receive,
+    )
+    parsed = await read_request_multipart(request)
+    if parsed["files"]["file"]["content"] != b"artifact smoke":
+        raise ArtifactSmokeError(
+            "installed multipart parser did not preserve file bytes"
+        )
 
 
 def verify_installed_gateway(
@@ -76,8 +110,15 @@ def verify_installed_gateway(
             f"installed gigachat version {gigachat_version!r} does not match "
             f"{expected_gigachat_version!r}"
         )
-    if _gigachat_specifiers(distribution.requires) != {">=0.2.4", "<0.3.0"}:
-        raise ArtifactSmokeError("gateway metadata must require gigachat>=0.2.4,<0.3.0")
+    if _gigachat_specifiers(distribution.requires) != {"==0.3.0a1"} or not any(
+        re.fullmatch(
+            r"gigachat\[aiohttp\]==0\.3\.0a1", requirement.replace(" ", "").lower()
+        )
+        for requirement in distribution.requires or []
+    ):
+        raise ArtifactSmokeError(
+            "gateway metadata must require gigachat[aiohttp]==0.3.0a1"
+        )
 
     scripts = {
         entry.name: entry.value
@@ -116,6 +157,8 @@ def verify_installed_gateway(
         raise ArtifactSmokeError(
             f"installed gateway OpenAPI is missing paths: {sorted(missing_paths)!r}"
         )
+
+    asyncio.run(_verify_multipart_parser())
 
     return {
         "gateway_version": distribution.version,

@@ -132,22 +132,6 @@ async def test_model_precedence_reaches_sdk_limiter_and_telemetry(
     assert request_context.metadata["model_source"] == case.source
 
 
-class StatefulV2Transformer(RequestTransformer):
-    """Inject one SDK-supported model-less v2 flow after protocol conversion."""
-
-    def __init__(
-        self, *args: Any, state: Literal["assistant", "thread"], **kwargs: Any
-    ):
-        super().__init__(*args, **kwargs)
-        self.state = state
-
-    async def prepare_chat_completion(self, data: dict, giga_client: Any = None):
-        payload = await super().prepare_chat_completion(data, giga_client)
-        if self.state == "assistant":
-            return payload.model_copy(update={"assistant_id": "assistant-1"})
-        return payload.model_copy(update={"storage": {"thread_id": "thread-1"}})
-
-
 @pytest.mark.parametrize(
     ("state", "limiter_key", "source"),
     [
@@ -168,7 +152,7 @@ async def test_v2_stateful_flow_omits_model_without_sdk_sentinel(
     config = ProxyConfig(proxy=ProxySettings(pass_model=False, gigachat_api_mode="v2"))
     adapter = GigaChatProviderAdapter(
         config=config,
-        request_transformer=StatefulV2Transformer(config, logger=logger, state=state),
+        request_transformer=RequestTransformer(config, logger=logger),
         giga_client=stable_sdk_client,
         model_limiter=recording_limiter,
         response_processor=ResponseProcessor(logger=logger),
@@ -177,6 +161,13 @@ async def test_v2_stateful_flow_omits_model_without_sdk_sentinel(
     request = NormalizedChatRequest(
         stream=stream,
         messages=[NormalizedMessage(role="user", content="contract")],
+        provider_metadata={
+            "gigachat": {
+                "additional_fields": {"assistant_id": "assistant-1"}
+                if state == "assistant"
+                else {"storage": {"thread_id": "thread-1"}}
+            }
+        },
     )
     token = request_context_var.set(request_context)
     try:

@@ -16,8 +16,13 @@ from gpt2giga.common.model_concurrency import (
     MODEL_CONCURRENCY_LIMIT_MESSAGE,
     ModelConcurrencyTimeoutError,
 )
+from gpt2giga.common.gemini_errors import gemini_error_payload, gemini_error_status
+from gpt2giga.core.context import _infer_protocol, get_request_context
+from gpt2giga.core.paths import normalize_api_path
 from gpt2giga.logger import rquid_context
 from gpt2giga.providers.gigachat.model_resolution import UpstreamModelRequiredError
+from gpt2giga.providers.gigachat.pool import GigaChatPoolCapacityError
+from gpt2giga.providers.gigachat.streaming import sdk_request_id, sdk_transport_error
 from gpt2giga.providers.network import ProviderNetworkAuthorizationError
 from gpt2giga.providers.openai_compatible import OpenAICompatibleUpstreamError
 
@@ -50,15 +55,65 @@ def exceptions_handler(func):
             # Allow FastAPI/Starlette to handle client disconnects and cancellations cleanly,
             # especially for streaming endpoints.
             raise
-        except HTTPException:
+        except HTTPException as e:
+            if _public_protocol(_request_argument(args, kwargs)) == "gemini":
+                detail = e.detail
+                if isinstance(detail, dict):
+                    detail = detail.get("error", detail)
+                message = (
+                    detail.get("message", "Request failed")
+                    if isinstance(detail, dict)
+                    else str(detail)
+                )
+                payload = gemini_error_payload(message, e.status_code)
+                if isinstance(detail, dict) and detail.get("param") is not None:
+                    payload["error"]["param"] = detail["param"]
+                return JSONResponse(
+                    status_code=e.status_code, content=payload, headers=e.headers
+                )
+            if isinstance(e.detail, str) and _resource_error_route(
+                _request_argument(args, kwargs)
+            ):
+                error_type = {
+                    401: "authentication_error",
+                    403: "permission_error",
+                    404: "not_found_error",
+                    429: "rate_limit_error",
+                }.get(
+                    e.status_code,
+                    "api_error" if e.status_code >= 500 else "invalid_request_error",
+                )
+                if _public_protocol(_request_argument(args, kwargs)) == "anthropic":
+                    response = anthropic_compatibility_response(
+                        e.detail, status_code=e.status_code, error_type=error_type
+                    )
+                    response.headers.update(e.headers or {})
+                    return response
+                return JSONResponse(
+                    status_code=e.status_code,
+                    content=openai_error_payload(e.detail, error_type=error_type),
+                    headers=e.headers,
+                )
             # Preserve FastAPI/Starlette semantics (status codes, details, headers).
             raise
         except ClientCompatibilityError as e:
+            if _public_protocol(_request_argument(args, kwargs)) == "gemini":
+                return JSONResponse(
+                    status_code=e.status_code,
+                    content=gemini_error_payload(e.message, e.status_code),
+                )
             if e.provider == "anthropic":
                 return anthropic_compatibility_response(
                     e.message,
                     status_code=e.status_code,
                     error_type=e.error_type,
+                )
+            if _resource_error_route(_request_argument(args, kwargs)):
+                return JSONResponse(
+                    status_code=e.status_code,
+                    content=openai_error_payload(
+                        e.message, error_type=e.error_type, param=e.param, code=e.code
+                    ),
                 )
             raise openai_compatibility_error(
                 e.message,
@@ -71,6 +126,13 @@ def exceptions_handler(func):
             UpstreamModelRequiredError,
             gigachat.exceptions.ModelNotSpecifiedError,
         ) as e:
+            if _public_protocol(_request_argument(args, kwargs)) == "gemini":
+                return JSONResponse(
+                    status_code=400,
+                    content=gemini_error_payload(
+                        UpstreamModelRequiredError.message, 400
+                    ),
+                )
             provider = getattr(e, "provider", "openai")
             if provider == "anthropic":
                 return anthropic_compatibility_response(
@@ -88,6 +150,8 @@ def exceptions_handler(func):
                     code="model_required",
                 ),
             )
+        except GigaChatPoolCapacityError:
+            return pool_capacity_response(_request_argument(args, kwargs))
         except ModelConcurrencyTimeoutError as e:
             from loguru import logger
 
@@ -97,6 +161,11 @@ def exceptions_handler(func):
                 model=e.model,
                 limit=e.limit,
             ).warning(str(e))
+            if _public_protocol(_request_argument(args, kwargs)) == "gemini":
+                return JSONResponse(
+                    status_code=429,
+                    content=gemini_error_payload(MODEL_CONCURRENCY_LIMIT_MESSAGE, 429),
+                )
             if e.provider == "anthropic":
                 return anthropic_compatibility_response(
                     MODEL_CONCURRENCY_LIMIT_MESSAGE,
@@ -114,6 +183,32 @@ def exceptions_handler(func):
                 ),
             )
         except gigachat.exceptions.GigaChatException as e:
+            transport_error = sdk_transport_error(e)
+            if transport_error is not None:
+                status, code, message = transport_error
+                response = _bridge_transport_error_response(
+                    message,
+                    code=code,
+                    request=_request_argument(args, kwargs),
+                    status_code=status,
+                )
+                request_id = sdk_request_id(e)
+                if request_id:
+                    response.headers["X-GigaChat-Request-ID"] = request_id
+                return response
+            request = _request_argument(args, kwargs)
+            if request is not None and isinstance(e, gigachat.exceptions.ResponseError):
+                status = getattr(e, "status_code", 502)
+                response = _bridge_transport_error_response(
+                    "The upstream request failed.",
+                    code="upstream_error",
+                    request=request,
+                    status_code=status if isinstance(status, int) else 502,
+                )
+                request_id = sdk_request_id(e)
+                if request_id:
+                    response.headers["X-GigaChat-Request-ID"] = request_id
+                return response
             # Log the exception with context
             from loguru import logger
 
@@ -198,6 +293,11 @@ def exceptions_handler(func):
 
             rquid = rquid_context.get()
             logger.exception(f"[{rquid}] Unhandled exception: {type(e).__name__}: {e}")
+            if _public_protocol(_request_argument(args, kwargs)) == "gemini":
+                return JSONResponse(
+                    status_code=500,
+                    content=gemini_error_payload("Internal server error", 500),
+                )
             return JSONResponse(
                 status_code=500,
                 content={
@@ -213,11 +313,39 @@ def exceptions_handler(func):
     return wrapper
 
 
+def pool_capacity_response(request: Request | None) -> JSONResponse:
+    """Project credential-pool backpressure without exposing credential keys."""
+    response = _bridge_transport_error_response(
+        str(GigaChatPoolCapacityError()),
+        code="client_pool_capacity",
+        request=request,
+        status_code=503,
+    )
+    response.headers["Retry-After"] = "1"
+    return response
+
+
 def _request_argument(args: tuple, kwargs: dict) -> Request | None:
     for value in (*args, *kwargs.values()):
         if isinstance(value, Request):
             return value
     return None
+
+
+def _resource_error_route(request: Request | None) -> bool:
+    """Keep legacy admin/system errors while projecting public resource failures."""
+    if request is None:
+        return False
+    path = request.url.path
+    segments = path.strip("/").split("/")
+    while segments and segments[0] in {"v1", "v2", "v1beta"}:
+        segments.pop(0)
+    return bool(
+        segments
+        and segments[0] in {"files", "batches", "responses", "conversations", "images"}
+        or segments[:2] == ["messages", "batches"]
+        or segments[:2] == ["bridge", "gigachat"]
+    )
 
 
 def _openai_compatible_error_response(
@@ -269,28 +397,29 @@ def _bridge_transport_error_response(
     *,
     code: str,
     request: Request | None,
+    status_code: int = 502,
 ) -> JSONResponse:
     protocol = _public_protocol(request)
     if protocol == "anthropic":
         return anthropic_compatibility_response(
             message,
-            status_code=502,
+            status_code=status_code,
             error_type="api_error",
             code=code,
         )
     if protocol == "gemini":
         return JSONResponse(
-            status_code=502,
+            status_code=status_code,
             content={
                 "error": {
-                    "code": 502,
+                    "code": status_code,
                     "message": message,
-                    "status": "UNAVAILABLE",
+                    "status": _gemini_error_status(status_code),
                 }
             },
         )
     return JSONResponse(
-        status_code=502,
+        status_code=status_code,
         content=openai_error_payload(
             message,
             error_type="api_error",
@@ -301,20 +430,27 @@ def _bridge_transport_error_response(
 
 
 def _public_protocol(request: Request | None) -> str:
+    context = get_request_context()
+    if context is not None:
+        protocol = context.metadata.get("protocol") or context.protocol
+        if protocol in {"anthropic", "gemini"}:
+            return protocol
     path = request.url.path if request is not None else ""
-    if "/messages" in path:
-        return "anthropic"
-    if "generateContent" in path or "countTokens" in path:
-        return "gemini"
-    return "openai"
+    path = normalize_api_path(path) or path
+    protocol = _infer_protocol(path)
+    if protocol in {"anthropic", "gemini"}:
+        return protocol
+    if request is not None:
+        shared_route = any(part in path.split("/") for part in ("models", "files"))
+        if shared_route and (
+            request.headers.get("anthropic-version")
+            or request.headers.get("anthropic-beta")
+        ):
+            return "anthropic"
+        if request.headers.get("x-goog-api-key") and "/models" in path:
+            return "gemini"
+    return protocol
 
 
 def _gemini_error_status(status_code: int) -> str:
-    return {
-        400: "INVALID_ARGUMENT",
-        401: "UNAUTHENTICATED",
-        403: "PERMISSION_DENIED",
-        404: "NOT_FOUND",
-        408: "DEADLINE_EXCEEDED",
-        429: "RESOURCE_EXHAUSTED",
-    }.get(status_code, "UNAVAILABLE" if status_code >= 500 else "UNKNOWN")
+    return gemini_error_status(status_code)

@@ -110,9 +110,11 @@ def test_unsatisfied_predicate_names_exact_model_or_adapter_reason(
     assert captured.value.reason_id == expected_reason
 
 
-def test_exact_max_v2_admits_parallel_tool_calls() -> None:
+def test_exact_ultra_v2_admits_parallel_tool_calls() -> None:
     semantics = {BridgeSemantic.PARALLEL_TOOL_CALLS: "parallel_tool_calls"}
-    predicates = capability_predicates_for_semantics(_effective(), semantics)
+    predicates = capability_predicates_for_semantics(
+        _effective("GigaChat-3-Ultra"), semantics
+    )
 
     decision = admit_bridge_route(
         **_route_kwargs(),
@@ -123,6 +125,22 @@ def test_exact_max_v2_admits_parallel_tool_calls() -> None:
 
     assert decision.satisfied_capability_predicates == (
         "capability.parallel_tool_calls",
+    )
+
+
+def test_max_parallel_tools_require_explicit_provider_evidence() -> None:
+    assert _effective().capabilities[CapabilityKey.PARALLEL_TOOL_CALLS].state is (
+        CapabilityState.UNSUPPORTED
+    )
+    effective = resolve_gigachat_route_capabilities(
+        model_id="GigaChat-2-Max",
+        public_protocol="openai_responses",
+        api_mode="v2",
+        route_id="private-reviewed-profile",
+        provider_capabilities={CapabilityKey.PARALLEL_TOOL_CALLS: True},
+    )
+    assert effective.capabilities[CapabilityKey.PARALLEL_TOOL_CALLS].state is (
+        CapabilityState.SUPPORTED
     )
 
 

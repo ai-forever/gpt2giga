@@ -247,6 +247,7 @@ def _convert_user_blocks(
     openai_content_parts: List[Dict] = []
     tool_results: List[Dict] = []
     has_images = False
+    file_ids: list[str] = []
 
     for block in content_blocks:
         if not isinstance(block, dict):
@@ -256,9 +257,19 @@ def _convert_user_blocks(
             text = block.get("text", "")
             text_parts.append(text)
             openai_content_parts.append({"type": "text", "text": text})
-        elif block_type == "image":
+        elif block_type in {"image", "document"}:
             source = block.get("source", {})
-            if source.get("type") == "base64":
+            if source.get("type") == "file":
+                file_ids.append(source["file_id"])
+            elif block_type == "document":
+                from gpt2giga.common.client_params import ClientCompatibilityError
+
+                raise ClientCompatibilityError(
+                    "Documents require a Files API source.type=file reference.",
+                    provider="anthropic",
+                    param="messages",
+                )
+            elif source.get("type") == "base64":
                 has_images = True
                 media_type = source.get("media_type", "image/png")
                 data = source.get("data", "")
@@ -305,6 +316,10 @@ def _convert_user_blocks(
         openai_messages.append({"role": "user", "content": "\n".join(text_parts)})
     elif not tool_results:
         openai_messages.append({"role": "user", "content": ""})
+    if file_ids:
+        if not openai_messages or openai_messages[-1].get("role") != "user":
+            openai_messages.append({"role": "user", "content": ""})
+        openai_messages[-1]["attachments"] = file_ids
 
 
 def _build_openai_data_from_anthropic_request(

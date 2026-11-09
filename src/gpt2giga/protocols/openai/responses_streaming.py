@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 import time
 from typing import Any
 
@@ -33,8 +34,11 @@ class ResponsesStreamProjector:
         response_id: str,
         created_at: int | None = None,
         default_parallel_tool_calls: bool = True,
+        observe_payload: Callable[[str, dict[str, Any]], None] | None = None,
     ) -> None:
         self.request_payload = request_payload
+        self._observe_payload = observe_payload
+        self.terminal_response: dict[str, Any] | None = None
         self.requested_model = requested_model
         self.response_id = response_id
         self.created_at = int(time.time()) if created_at is None else created_at
@@ -88,25 +92,26 @@ class ResponsesStreamProjector:
             return []
         if event.type == "usage":
             return []
-        if event.type == "reasoning_delta":
-            return self._reasoning_delta(event.reasoning_delta or "")
-        if event.type == "content_delta":
-            return self._content_delta(event.content_delta or "")
-        if event.type == "tool_call_start":
-            frames = self._tool_delta(event.tool_call, start=True)
-            if event.finish_reason is not None:
-                frames.extend(self._complete(event.finish_reason))
-            return frames
-        if event.type == "tool_call_delta":
-            frames = self._tool_delta(event.tool_call, start=False)
-            if event.finish_reason is not None:
-                frames.extend(self._complete(event.finish_reason))
-            return frames
-        if event.type == "message_end":
+        if event.type in {
+            "reasoning_delta",
+            "content_delta",
+            "tool_call_start",
+            "tool_call_delta",
+            "message_end",
+        }:
             frames = []
+            if event.reasoning_delta:
+                frames.extend(self._reasoning_delta(event.reasoning_delta))
             if event.content_delta:
                 frames.extend(self._content_delta(event.content_delta))
-            frames.extend(self._complete(event.finish_reason or event.stop_reason))
+            if event.type in {"tool_call_start", "tool_call_delta"}:
+                frames.extend(
+                    self._tool_delta(
+                        event.tool_call, start=event.type == "tool_call_start"
+                    )
+                )
+            if event.type == "message_end" or event.finish_reason is not None:
+                frames.extend(self._complete(event.finish_reason or event.stop_reason))
             return frames
         if event.type == "cancelled":
             return self._incomplete("client_disconnected")
@@ -131,6 +136,19 @@ class ResponsesStreamProjector:
             {
                 "code": "provider_protocol_error",
                 "message": "The upstream stream violated its protocol contract.",
+                "param": None,
+            },
+        )
+
+    def completion_error_frame(self) -> str:
+        """Replace an undelivered terminal result after a history commit failure."""
+        self._terminal = True
+        self.terminal_response = None
+        return self._frame(
+            "error",
+            {
+                "code": "response_storage_error",
+                "message": "The response could not be completed or stored.",
                 "param": None,
             },
         )
@@ -542,6 +560,16 @@ class ResponsesStreamProjector:
     def _error(self, event: NormalizedStreamEvent) -> list[str]:
         self._terminal = True
         error = event.error
+        request_id = (
+            error.provider_metadata.get("gigachat", {}).get("request_id")
+            if error
+            else None
+        )
+        diagnostics = (
+            {"metadata": {"gigachat_x_request_id": request_id}}
+            if isinstance(request_id, str) and request_id
+            else {}
+        )
         return [
             self._frame(
                 "error",
@@ -553,6 +581,7 @@ class ResponsesStreamProjector:
                         else "Provider stream failed."
                     ),
                     "param": error.param if error is not None else None,
+                    **diagnostics,
                 },
             )
         ]
@@ -597,6 +626,10 @@ class ResponsesStreamProjector:
         data["type"] = event_type
         data["sequence_number"] = self._sequence
         self._sequence += 1
+        if event_type in {"response.completed", "response.incomplete"}:
+            self.terminal_response = data["response"]
+        if self._observe_payload is not None:
+            self._observe_payload(event_type, data)
         return f"event: {event_type}\ndata: {json.dumps(data)}\n\n"
 
     def _validate_sequence(self, event: NormalizedStreamEvent) -> None:

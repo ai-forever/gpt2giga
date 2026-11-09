@@ -86,6 +86,7 @@ async def observe_openai_response_stream(
     *,
     request_payload: Mapping[str, Any],
     context: RequestContext | None,
+    observer: OpenAIResponseStreamObserver | None = None,
 ) -> AsyncIterator[str]:
     """Observe Responses SSE chunks and emit one final LLM span."""
     async with closing_stream(body_iterator):
@@ -96,10 +97,12 @@ async def observe_openai_response_stream(
             return
 
         settings = getattr(getattr(state, "config", None), "proxy_settings", None)
-        observer = OpenAIResponseStreamObserver(settings=settings)
+        parse_sse = observer is None
+        observer = observer or OpenAIResponseStreamObserver(settings=settings)
         async for chunk in body_iterator:
             try:
-                observer.observe_chunk(chunk)
+                if parse_sse:
+                    observer.observe_chunk(chunk)
             except Exception as exc:
                 logger = getattr(state, "logger", None)
                 if logger is not None:

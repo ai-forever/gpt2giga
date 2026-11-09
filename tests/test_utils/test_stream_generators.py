@@ -59,7 +59,7 @@ class FakeClient:
             )
             yield SimpleNamespace(
                 model_dump=lambda: {
-                    "choices": [{"delta": {"content": "B"}}],
+                    "choices": [{"delta": {"content": "B"}, "finish_reason": "stop"}],
                     "usage": None,
                     "model": "giga",
                 }
@@ -103,7 +103,12 @@ class FakeClientThinkTags:
             )
             yield SimpleNamespace(
                 model_dump=lambda: {
-                    "choices": [{"delta": {"content": "</think>Answer"}}],
+                    "choices": [
+                        {
+                            "delta": {"content": "</think>Answer"},
+                            "finish_reason": "stop",
+                        }
+                    ],
                     "usage": None,
                     "model": "giga",
                 }
@@ -124,7 +129,12 @@ class FakeClientNullReasoning:
             )
             yield SimpleNamespace(
                 model_dump=lambda: {
-                    "choices": [{"delta": {"content": "B", "reasoning_content": None}}],
+                    "choices": [
+                        {
+                            "delta": {"content": "B", "reasoning_content": None},
+                            "finish_reason": "stop",
+                        }
+                    ],
                     "usage": None,
                     "model": "giga",
                 }
@@ -203,6 +213,7 @@ class FakeAppState:
 class FakeRequest:
     def __init__(self, client, disconnected: bool = False, logger=None):
         self.app = SimpleNamespace(state=FakeAppState(client, logger))
+        self.state = SimpleNamespace()
         self._disconnected = disconnected
 
     async def is_disconnected(self):
@@ -569,6 +580,7 @@ async def test_stream_responses_chat_completion_generator_text_and_usage():
             }
         ),
     ]
+    chunks[-1].finish_reason = "stop"
     req = FakeRequest(FakeClientV2Stream(chunks=chunks))
     lines = []
 
@@ -645,6 +657,7 @@ async def test_stream_responses_chat_completion_generator_builtin_tool_outputs()
             }
         ),
     ]
+    chunks[-1].finish_reason = "stop"
     req = FakeRequest(
         FakeClientV2Stream(chunks=chunks, images={"image-file-1": "aW1n"})
     )
@@ -697,6 +710,7 @@ async def test_stream_maps_image_generate_to_codex_imagegen_function_call():
             }
         )
     ]
+    chunks[-1].finish_reason = "stop"
     req = FakeRequest(FakeClientV2Stream(chunks=chunks))
     lines = []
 
@@ -787,6 +801,7 @@ async def test_stream_responses_chat_completion_generator_emits_source_annotatio
             }
         ),
     ]
+    chunks[-1].finish_reason = "stop"
     req = FakeRequest(FakeClientV2Stream(chunks=chunks))
     lines = []
 
@@ -958,6 +973,7 @@ async def test_stream_responses_chat_completion_generator_emits_builtin_tool_pro
             }
         ),
     ]
+    chunks[-1].finish_reason = "stop"
     req = FakeRequest(
         FakeClientV2Stream(chunks=chunks, images={"image-file-1": "aW1n"})
     )
@@ -1043,6 +1059,7 @@ async def test_stream_responses_chat_completion_generator_maps_reasoning_role_to
             {"messages": [{"role": "assistant", "content": [{"text": "Paris"}]}]}
         ),
     ]
+    chunks[-1].finish_reason = "stop"
     req = FakeRequest(FakeClientV2Stream(chunks=chunks))
     lines = []
 

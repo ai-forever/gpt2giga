@@ -23,6 +23,7 @@ from gpt2giga.api.gemini import (
     operations_router as gemini_operations_router,
 )
 from gpt2giga.api.gemini import router as gemini_router
+from gpt2giga.routers.gemini.files import upload_router as gemini_upload_router
 from gpt2giga.api.openai import router as openai_router
 from gpt2giga.api.system.metrics import mount_metrics_endpoint
 from gpt2giga.auth import verify_api_key
@@ -31,6 +32,7 @@ from gpt2giga.common.app_meta import get_app_version
 from gpt2giga.common.conversation import MemoryConversationStore
 from gpt2giga.middlewares.pass_token import PassTokenMiddleware
 from gpt2giga.middlewares.path_normalizer import PathNormalizationMiddleware
+from gpt2giga.core.paths import GATEWAY_API_ROOTS
 from gpt2giga.middlewares.request_validation import RequestValidationMiddleware
 from gpt2giga.middlewares.rquid_context import RquidMiddleware
 from gpt2giga.models.config import ProxyConfig
@@ -42,6 +44,7 @@ from gpt2giga.providers.profiles import ProviderMachineContracts
 from gpt2giga.routers.litellm import router as litellm_router
 from gpt2giga.routers.logs_router import logs_api_router, logs_router
 from gpt2giga.routers.system_router import system_router
+from gpt2giga.routers.gigachat_native import router as gigachat_native_router
 from gpt2giga.sinks.logs.factory import create_traffic_log_sink
 from gpt2giga.sinks.logs.query import create_traffic_log_query_store
 from gpt2giga.sinks.metrics.factory import create_metrics_sink
@@ -98,23 +101,7 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
     # /api/v1/embeddings -> /v1/embeddings/
     app.add_middleware(
         PathNormalizationMiddleware,
-        valid_roots=[
-            "v1",
-            "v2",
-            "v1beta",
-            "chat",
-            "models",
-            "embeddings",
-            "responses",
-            "messages",
-            "model",
-            "files",
-            "batches",
-            "bridge",
-            "health",
-            "ping",
-            "ready",
-        ],
+        valid_roots=GATEWAY_API_ROOTS,
     )
     app.add_middleware(
         RequestValidationMiddleware,
@@ -148,6 +135,7 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
             dependencies=api_dependencies,
         )
     app.include_router(system_router)
+    app.include_router(gigachat_native_router, dependencies=api_dependencies)
     app.include_router(openai_router, dependencies=api_dependencies)
     app.include_router(
         openai_router,
@@ -171,6 +159,16 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
     )
     app.include_router(anthropic_router, dependencies=api_dependencies)
     app.include_router(gemini_operations_router, dependencies=api_dependencies)
+    for prefix, dependencies in (
+        ("/upload/v1beta", api_dependencies),
+        ("/v1/upload/v1beta", v1_dependencies),
+        ("/v2/upload/v1beta", v2_dependencies),
+        ("/upload/v1/v1beta", v1_dependencies),
+        ("/upload/v2/v1beta", v2_dependencies),
+    ):
+        app.include_router(
+            gemini_upload_router, prefix=prefix, dependencies=dependencies
+        )
     app.include_router(
         gemini_operations_router,
         prefix="/v1",

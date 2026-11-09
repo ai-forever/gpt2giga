@@ -49,8 +49,11 @@ async def _post_embedding(client: httpx.AsyncClient, model: str):
 
 
 async def _wait_for_call_count(gigachat: GateEmbeddingsClient, count: int) -> None:
-    while len(gigachat.calls) < count:
-        await asyncio.sleep(0)
+    async def wait():
+        while len(gigachat.calls) < count:
+            await asyncio.sleep(0)
+
+    await asyncio.wait_for(wait(), timeout=2)
 
 
 async def test_embeddings_same_model_serializes() -> None:

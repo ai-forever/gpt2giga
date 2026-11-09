@@ -59,6 +59,10 @@ jobs:
         working-directory: docs-site
         run: npm ci
 
+      - name: Typecheck Docusaurus site
+        working-directory: docs-site
+        run: npm run typecheck
+
       - name: Build Docusaurus site
         working-directory: docs-site
         run: npm run build

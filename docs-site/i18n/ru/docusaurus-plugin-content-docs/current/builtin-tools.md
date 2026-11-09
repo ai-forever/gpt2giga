@@ -6,7 +6,7 @@ GigaChat Chat Completions v2. Источник истины для GigaChat зд
 
 ## Источник истины
 
-В `pyproject.toml` пакет требует `gigachat>=0.2.4,<0.3.0`.
+В `pyproject.toml` пакет требует `gigachat[aiohttp]==0.3.0a1`.
 Для этого диапазона канонический список встроенных инструментов берётся из
 SDK-моделей:
 
@@ -155,3 +155,5 @@ GigaChat `ChatToolConfig(mode="tool", tool_name="<canonical tool>")`.
 4. Добавить тесты сборщика запросов и адаптера.
 5. Обновить этот документ, а также `api-compatibility.md` и
    `client-parameter-compatibility.md`, если меняется публичное поведение.
+
+Параллельные вызовы функций поддерживает GigaChat-3-Ultra через API v2 (`model_options.parallel_tool_calls`). GigaChat-2-Max не объявляет эту возможность без явных проверенных provider/profile metadata. Возможности неизвестных моделей остаются unknown. Источник: [GigaChat chat API](https://developers.sber.ru/docs/ru/gigachat/api/reference/rest/post-chat).

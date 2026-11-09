@@ -6,8 +6,8 @@ installed `gigachat` SDK, not the website or external documentation.
 
 ## Source of truth
 
-In `pyproject.toml` the package requires `gigachat>=0.2.4,<0.3.0`.
-For this range, the canonical list of built-in tools comes from the SDK models:
+In `pyproject.toml` the package requires `gigachat[aiohttp]==0.3.0a1`.
+For this version, the canonical list of built-in tools comes from the SDK models:
 
 - `gigachat.models.chat_completions.ChatTool`;
 - the SDK shorthand normalizer `_normalize_tool`;
@@ -154,3 +154,5 @@ When a provider SDK adds or renames built-in tools:
 4. Add request-builder and adapter tests.
 5. Update this document, as well as `api-compatibility.md` and
    `client-parameter-compatibility.md`, if the public behavior changes.
+
+Parallel function calls: GigaChat-3-Ultra via API v2 (`model_options.parallel_tool_calls`). GigaChat-2-Max does not advertise this capability without explicit verified provider/profile metadata. Unknown model capabilities stay unknown. Source: [GigaChat chat API](https://developers.sber.ru/docs/ru/gigachat/api/reference/rest/post-chat).

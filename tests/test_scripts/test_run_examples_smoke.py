@@ -47,6 +47,11 @@ def test_discover_examples_skips_known_unsupported_by_default():
     assert "examples/openai/chat_completions/basic/chat_completion.py" in by_path
     assert by_path["examples/openai/files/basic.py"].skip_reason is not None
     assert by_path["examples/openai/agents/weather_handoff.py"].skip_reason is not None
+    assert by_path["examples/anthropic/files/document.py"].skip_reason is not None
+    assert (
+        by_path["examples/openai/responses/storage/snapshots.py"].skip_reason
+        is not None
+    )
     assert "examples/__init__.py" not in by_path
 
 

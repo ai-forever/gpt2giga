@@ -6,6 +6,14 @@ from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import Any
 
+from gigachat.exceptions import (
+    APIConnectionError,
+    APIResponseValidationError,
+    APITimeoutError,
+    StreamInterruptedError,
+)
+
+from gpt2giga.protocol.response.processor import PUBLIC_CHAT_MESSAGE_EXTENSIONS
 from gpt2giga.protocols.normalized import (
     NormalizedError,
     NormalizedMessage,
@@ -13,6 +21,54 @@ from gpt2giga.protocols.normalized import (
     NormalizedToolCall,
     NormalizedUsage,
 )
+
+
+def sdk_transport_error(error: BaseException) -> tuple[int, str, str] | None:
+    """Classify transport failures without exposing SDK diagnostic contents."""
+    for kind, status, code, message in (
+        (APITimeoutError, 504, "upstream_timeout", "The upstream request timed out."),
+        (
+            StreamInterruptedError,
+            502,
+            "stream_interrupted",
+            "The upstream stream was interrupted.",
+        ),
+        (
+            APIConnectionError,
+            502,
+            "upstream_connection_error",
+            "The upstream connection failed.",
+        ),
+        (
+            APIResponseValidationError,
+            502,
+            "invalid_upstream_response",
+            "The upstream response was invalid.",
+        ),
+    ):
+        if isinstance(error, kind):
+            return status, code, message
+    return None
+
+
+def sdk_request_id(error: BaseException) -> str | None:
+    """Select only a printable request ID from SDK diagnostics."""
+    value = getattr(error, "request_id", None)
+    if (
+        isinstance(value, str)
+        and value
+        and len(value) <= 256
+        and value.isascii()
+        and all(32 <= ord(char) < 127 for char in value)
+    ):
+        return value
+    return None
+
+
+def sdk_error_metadata(error: BaseException) -> dict[str, Any]:
+    """Return the optional public SSE diagnostic extension."""
+    request_id = sdk_request_id(error)
+    return {"metadata": {"gigachat_x_request_id": request_id}} if request_id else {}
 
 
 class GigaChatNormalizedStreamMapper:
@@ -37,6 +93,13 @@ class GigaChatNormalizedStreamMapper:
         self._emitted_roles: set[int] = set()
         self._pending_tool_chunks: list[dict[str, Any]] = []
         self._tool_state_id: str | None = None
+
+    def discard(self) -> None:
+        """Drop all request-owned buffers after success, error, or cancellation."""
+        self._pending_tool_chunks.clear()
+        discard = getattr(self.response_processor, "discard_stream_state", None)
+        if discard is not None:
+            discard(self.response_id, family="chat")
 
     def message_start(self) -> NormalizedStreamEvent:
         """Build the canonical stream start event."""
@@ -119,10 +182,14 @@ class GigaChatNormalizedStreamMapper:
         if flush_stream_reasoning is None:
             return []
         flushed = flush_stream_reasoning(self.response_id, family="chat")
-        if not flushed.content and not flushed.reasoning_content:
+        flush_sources = getattr(self.response_processor, "flush_stream_sources", None)
+        source_text = (
+            flush_sources(self.response_id, family="chat") if flush_sources else ""
+        )
+        if not flushed.content and not flushed.reasoning_content and not source_text:
             return []
 
-        delta: dict[str, Any] = {"content": flushed.content}
+        delta: dict[str, Any] = {"content": flushed.content + source_text}
         if flushed.reasoning_content:
             delta["reasoning_content"] = flushed.reasoning_content
         processed = {
@@ -148,8 +215,9 @@ class GigaChatNormalizedStreamMapper:
         *,
         message: str,
         error_type: str,
-        code: str,
+        code: str | int,
         raw_message: str | None = None,
+        request_id: str | None = None,
     ) -> NormalizedStreamEvent:
         """Build a canonical stream error event."""
         return self._event(
@@ -158,6 +226,9 @@ class GigaChatNormalizedStreamMapper:
                 type=error_type,
                 message=raw_message or message,
                 code=code,
+                provider_metadata={"gigachat": {"request_id": request_id}}
+                if request_id
+                else {},
             ),
         )
 
@@ -207,6 +278,10 @@ class GigaChatNormalizedStreamMapper:
             event_type = "reasoning_delta"
         elif usage is not None:
             event_type = "usage"
+        elif any(delta.get(field) for field in PUBLIC_CHAT_MESSAGE_EXTENSIONS):
+            # A file/source/tool result is a public content delta even when no
+            # text accompanies it. State-only chunks remain private heartbeats.
+            event_type = "content_delta"
 
         return self._event(
             event_type,

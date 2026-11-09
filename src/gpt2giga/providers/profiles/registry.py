@@ -67,6 +67,7 @@ class ProviderRegistry:
         loaded: LoadedProviderProfileSet,
         *,
         loss_matrix_revision: str,
+        default_profile_id: str | None = None,
     ) -> None:
         if not _REVISION.fullmatch(loss_matrix_revision):
             raise ProviderProfileError(
@@ -99,6 +100,7 @@ class ProviderRegistry:
                         deprecated=model.deprecated,
                     )
         self._loaded = loaded
+        self.default_profile_id = default_profile_id
         self.schema_version = loaded.schema_version
         self._config_revision = config_revision
         self._loss_matrix_revision = loss_matrix_revision
@@ -151,6 +153,10 @@ class ProviderRegistry:
         if not model.enabled:
             raise ProviderAliasError("alias_disabled")
         raise ProviderAliasError("alias_unknown")  # pragma: no cover
+
+    def credential_for_profile(self, profile_id: str) -> str | None:
+        """Resolve a startup credential for a validated profile identity."""
+        return self._loaded.credential_for(profile_id)
 
     def credential_for(self, route: ResolvedProviderRoute) -> str | None:
         """Resolve a credential only after an exact route has been selected."""

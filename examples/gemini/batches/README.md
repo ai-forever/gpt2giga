@@ -1,33 +1,20 @@
-# Gemini batches examples
+# Gemini batch examples
 
-Эта папка содержит prepared-пример для Gemini-compatible batch flows. Router-код
-реализован, но default public app пока не монтирует batch routes.
+Run `uv run python examples/gemini/batches/batches.py` against a configured gateway
+and a GigaChat account with native batch access. The example uploads JSONL to the
+local resource store, submits native `batchGenerateContent`, polls once and lists
+jobs. If complete, it downloads the generated result JSONL. Poll again later when
+pending; the gateway does not run a background scheduler.
 
-## Быстрый старт
+Use `api_version="v1beta"`, including with a base URL ending in `/v1` or `/v2`.
+Batch execution uses GigaChat's native batch service, with no native cancellation
+or processing-time SLA. Cancel/delete return an explicit unsupported error.
+Custom functions are accepted; hosted tools and streaming are rejected. One job
+uses one model and operation family. `batches.create_embeddings` is also supported
+for text embeddings through the same backend.
 
-```bash
-uv run python examples/gemini/batches/batches.py
-```
+`batch_generate_content.jsonl` supplies request/metadata rows. IDs/order are retained
+across restart and shuffled native output. Gemini results use actual operation
+metadata so the SDK exposes `BatchJob.dest`.
 
-## Версия API
-
-Выбор версии лежит в `types.HttpOptions`: `api_version="v1"` отправляет запросы
-в GigaChat v1 contract, `api_version="v2"` — в GigaChat v2 contract. Если
-`api_version` не указан, используется backend mode из
-`GPT2GIGA_GIGACHAT_API_MODE=v1|v2`.
-
-```python
-api_version = "v1"
-client = genai.Client(
-    api_key="0",
-    http_options=types.HttpOptions(
-        base_url="http://localhost:8090",
-        api_version=api_version,
-    ),
-)
-```
-
-## Файлы
-
-- `batches.py`: `batchGenerateContent` через uploaded JSONL source
-- `batch_generate_content.jsonl`: готовые JSONL-строки для входного batch-файла
+Русский контракт и ограничения: [Files/Batches](../../../docs-site/i18n/ru/docusaurus-plugin-content-docs/current/gemini-resources.md).

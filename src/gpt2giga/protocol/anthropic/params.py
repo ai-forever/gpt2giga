@@ -81,8 +81,36 @@ def _pop_unknown_as_extra_field(
     extra_fields[name] = data.pop(name)
 
 
-def sanitize_anthropic_messages_parameters(data: Mapping[str, Any]) -> dict[str, Any]:
+def validate_anthropic_version(
+    data: Mapping[str, Any], version: str | None = None
+) -> None:
+    """Apply the explicitly selected Messages version without changing legacy input."""
+    if version != "2026-10-21":
+        return
+    for name in ("temperature", "top_p", "top_k"):
+        if name in data:
+            _raise_anthropic_param_error(
+                name, f"`{name}` is not supported by anthropic-version 2026-10-21."
+            )
+    for index, message in enumerate(data.get("messages", [])):
+        if not isinstance(message, Mapping) or message.get("role") != "assistant":
+            continue
+        content = message.get("content")
+        if isinstance(content, list) and any(
+            isinstance(block, Mapping) and block.get("type") == "document"
+            for block in content
+        ):
+            _raise_anthropic_param_error(
+                f"messages[{index}].content",
+                "Documents are only supported in user messages in version 2026-10-21.",
+            )
+
+
+def sanitize_anthropic_messages_parameters(
+    data: Mapping[str, Any], *, version: str | None = None
+) -> dict[str, Any]:
     """Return a sanitized Anthropic Messages payload or raise compatibility errors."""
+    validate_anthropic_version(data, version)
     sanitized = dict(data)
     _sanitize_top_level_params(sanitized)
     _normalize_gigachat_extra_fields(sanitized)

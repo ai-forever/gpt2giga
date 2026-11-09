@@ -10,7 +10,7 @@ from gpt2giga.protocol.anthropic.request import (
     _build_openai_data_from_anthropic_request,
 )
 from gpt2giga.protocols.anthropic.adapter import AnthropicProtocolAdapter
-from gpt2giga.providers.gigachat.adapter import normalized_chat_to_openai_payload
+from gpt2giga.protocols.openai import OpenAIProtocolAdapter
 
 
 def transformer():
@@ -54,10 +54,10 @@ async def test_anthropic_any_and_reasoning_budget_reach_v2(normalized):
     }
     if normalized:
         request = AnthropicProtocolAdapter().messages_to_normalized(payload)
-        openai_payload = normalized_chat_to_openai_payload(request)
+        request = await transformer().prepare_normalized(request, api_mode="v2")
     else:
         openai_payload = _build_openai_data_from_anthropic_request(payload, logger)
-    request = await transformer().prepare_chat_completion(openai_payload)
+        request = await transformer().prepare_chat_completion(openai_payload)
     assert request.tool_config.mode == "any"
     assert request.model_options.parallel_tool_calls is False
     assert request.model_options.max_tokens == 3000
@@ -202,3 +202,57 @@ async def test_disabled_reasoning_removes_v1_extra_budget():
     )
     assert "reasoning_max_tokens" not in request
     assert "reasoning_max_tokens" not in (request.get("additional_fields") or {})
+
+
+@pytest.mark.parametrize("mode", ["v1", "v2"])
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"function_call": "auto", "functions": [{"name": "lookup", "parameters": {}}]},
+        {"function_call": "none", "functions": [{"name": "lookup", "parameters": {}}]},
+        {
+            "functions": [
+                {
+                    "name": "lookup",
+                    "parameters": {},
+                    "few_shot_examples": [{"request": "hello", "params": {}}],
+                    "return_parameters": {"type": "object"},
+                }
+            ]
+        },
+        {
+            "tools": [
+                {
+                    "type": "namespace",
+                    "name": "functions",
+                    "tools": [{"type": "function", "name": "lookup", "parameters": {}}],
+                }
+            ]
+        },
+    ],
+)
+async def test_direct_builder_preserves_legacy_function_extensions(mode, extra):
+    from copy import deepcopy
+
+    rt = transformer()
+    payload = {
+        "model": "GigaChat-3-Ultra",
+        "messages": [{"role": "user", "content": "hello"}],
+        **extra,
+    }
+    legacy = rt.prepare_chat if mode == "v1" else rt.prepare_chat_completion
+    expected = await legacy(deepcopy(payload))
+    actual = await rt.prepare_normalized(
+        OpenAIProtocolAdapter().chat_to_normalized(deepcopy(payload)), api_mode=mode
+    )
+
+    def dump(value):
+        if hasattr(value, "model_dump"):
+            value = value.model_dump(exclude_none=True, by_alias=True)
+        if isinstance(value, dict):
+            return {key: dump(item) for key, item in value.items() if key != "stream"}
+        if isinstance(value, list):
+            return [dump(item) for item in value]
+        return value
+
+    assert dump(actual) == dump(expected)
