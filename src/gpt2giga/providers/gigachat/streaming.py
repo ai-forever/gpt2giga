@@ -13,6 +13,7 @@ from gigachat.exceptions import (
     StreamInterruptedError,
 )
 
+from gpt2giga.protocol.response.processor import PUBLIC_CHAT_MESSAGE_EXTENSIONS
 from gpt2giga.protocols.normalized import (
     NormalizedError,
     NormalizedMessage,
@@ -277,6 +278,10 @@ class GigaChatNormalizedStreamMapper:
             event_type = "reasoning_delta"
         elif usage is not None:
             event_type = "usage"
+        elif any(delta.get(field) for field in PUBLIC_CHAT_MESSAGE_EXTENSIONS):
+            # A file/source/tool result is a public content delta even when no
+            # text accompanies it. State-only chunks remain private heartbeats.
+            event_type = "content_delta"
 
         return self._event(
             event_type,

@@ -390,3 +390,9 @@ reasoning/source state после штатного flush и после авар�
 conversation stitching сохраняет typed messages текущего turn и декодирует только
 восстановленную историю на storage boundary. Legacy request builder остаётся для
 batch/admin consumers.
+
+Streaming сохраняет и отдельные delta с этими публичными расширениями, даже
+без текста или usage. Пустые keepalive и chunks только с внутренним состоянием
+провайдера не публикуются. Известное отключение клиента отменяет ожидающий stream
+при ASGI 2.3 и 2.4; upstream закрывается до освобождения model slot и credential
+lease.

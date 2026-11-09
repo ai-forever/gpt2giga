@@ -1,5 +1,6 @@
 """Streaming response lifecycle for pre-acquired model concurrency slots."""
 
+import asyncio
 from collections.abc import AsyncIterator
 from contextlib import AsyncExitStack, asynccontextmanager
 from typing import Any
@@ -7,6 +8,8 @@ from typing import Any
 from anyio import CancelScope
 from starlette.responses import StreamingResponse
 from starlette.types import Receive, Scope, Send
+
+from gpt2giga.common.model_concurrency import model_request_disconnected
 
 
 @asynccontextmanager
@@ -45,8 +48,29 @@ class ModelLimitedStreamingResponse(StreamingResponse):
         self._acquired_model_limit = acquired_model_limit
 
     async def stream_response(self, send: Send) -> None:
-        async with closing_stream(self.body_iterator):
-            await super().stream_response(send)
+        disconnected = model_request_disconnected.get()
+        # The middleware owns ASGI receive. ASGI 2.4's StreamingResponse only
+        # notices disconnect on send, which never runs while awaiting an idle
+        # upstream. Watch the existing event without adding a receive consumer.
+        with CancelScope() as consumer_scope:
+
+            async def watch_disconnect() -> None:
+                await disconnected.wait()
+                consumer_scope.cancel()
+
+            watcher = (
+                asyncio.create_task(watch_disconnect())
+                if disconnected is not None
+                else None
+            )
+            try:
+                async with closing_stream(self.body_iterator):
+                    await super().stream_response(send)
+            finally:
+                if watcher is not None:
+                    watcher.cancel()
+                    with CancelScope(shield=True):
+                        await asyncio.gather(watcher, return_exceptions=True)
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         try:

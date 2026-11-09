@@ -893,3 +893,81 @@ async def test_repeated_interrupted_sdk_streams_release_processor_buffers(mode):
             assert app.state.response_processor._stream_source_renderers == {}
     assert len(streams) == 20
     assert all(stream.closed for stream in streams)
+
+
+@pytest.mark.parametrize("normalization", ["off", "shadow", "on"])
+@pytest.mark.parametrize("placement", ["separate", "text", "terminal"])
+async def test_chat_stream_preserves_metadata_only_chunks(normalization, placement):
+    from openai.lib.streaming.chat import ChatCompletionStreamState
+    from openai.types.chat import ChatCompletionChunk
+
+    seen = []
+    files = [{"id": "generated-image", "mime": "image/png", "target": "image"}]
+    execution = {"name": "image_generate", "status": "success"}
+    metadata = [{"files": files}, {"tool_execution": execution}]
+    messages = [
+        {
+            "event": "response.message.delta",
+            "messages": [{"role": "assistant", "content": metadata}],
+        },
+        {
+            "event": "response.message.delta",
+            "messages": [{"role": "assistant", "content": [{"text": "answer"}]}],
+        },
+        {"event": "response.message.done", "messages": [], "finish_reason": "stop"},
+    ]
+    if placement != "separate":
+        messages.pop(0)
+        target = messages[0] if placement == "text" else messages[-1]
+        target.setdefault("messages", [])
+        if not target["messages"]:
+            target["messages"] = [{"role": "assistant", "content": []}]
+        target["messages"][0]["content"].extend(metadata)
+
+    def handle(request):
+        seen.append(request)
+        assert request.method == "POST", "reference-only Chat must not download files"
+        return httpx2.Response(
+            200,
+            headers={"content-type": "text/event-stream"},
+            text="".join(
+                f"event: {chunk['event']}\ndata: {json.dumps({'model': 'test-model', **chunk})}\n\n"
+                for chunk in messages
+            ),
+        )
+
+    async with sdk_app(handle, normalization=normalization) as (client, app):
+        path, data = chat_request("openai", "v2", stream=True)
+        response = await client.post(path, json=data)
+        assert app.state.response_processor._stream_reasoning_parsers == {}
+        assert app.state.response_processor._stream_source_renderers == {}
+    assert response.status_code == 200, response.text
+    frames = [
+        json.loads(line[6:])
+        for line in response.text.splitlines()
+        if line.startswith("data: ") and line != "data: [DONE]"
+    ]
+    assert all("error" not in frame for frame in frames), response.text
+    deltas = [choice["delta"] for frame in frames for choice in frame["choices"]]
+    assert [delta["files"] for delta in deltas if delta.get("files")] == [files]
+    assert [
+        delta["tool_executions"] for delta in deltas if delta.get("tool_executions")
+    ] == [[execution]]
+    assert sum("role" in delta for delta in deltas) == 1
+    assert (
+        sum(
+            choice.get("finish_reason") == "stop"
+            for frame in frames
+            for choice in frame["choices"]
+        )
+        == 1
+    )
+    assert response.text.count("data: [DONE]") == 1
+    accumulator = ChatCompletionStreamState()
+    for frame in frames:
+        list(accumulator.handle_chunk(ChatCompletionChunk.model_validate(frame)))
+    result = accumulator.get_final_completion().choices[0].message
+    assert result.role == "assistant"
+    assert result.content == "answer"
+    assert result.model_dump()["files"] == files
+    assert len(seen) == 1

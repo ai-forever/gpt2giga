@@ -301,3 +301,59 @@ async def test_parallel_sdk_calls_survive_native_anthropic_stream():
     ]
     assert arguments == [{"value": 0}, {"value": 1}]
     assert frames[-1].startswith("event: message_stop")
+
+
+@pytest.mark.parametrize(
+    "extension,publish",
+    [
+        ({}, False),
+        ({"files": [], "tool_executions": []}, False),
+        ({"data_for_context": "private-state"}, False),
+        ({"audio": {"id": "audio-1"}}, True),
+        ({"annotations": [{"type": "source"}]}, True),
+        ({"inline_data": {"sources": {"1": {"url": "https://example.test"}}}}, True),
+    ],
+)
+def test_stream_mapper_distinguishes_public_extensions_from_heartbeat(
+    extension, publish
+):
+    from gpt2giga.protocols.openai.streaming import (
+        normalized_stream_event_to_openai_chunk,
+    )
+
+    mapper = GigaChatNormalizedStreamMapper(
+        response_processor=ResponseProcessor(),
+        requested_model="test",
+        response_id="test",
+    )
+    event = mapper.chunk_to_events(
+        _wrapper({"choices": [{"delta": {"role": "assistant", **extension}}]})
+    )[0]
+    assert event.type == ("content_delta" if publish else "heartbeat")
+    chunk = normalized_stream_event_to_openai_chunk(
+        event, requested_model="test", response_id="test"
+    )
+    if publish:
+        assert all(
+            chunk["choices"][0]["delta"][key] == value
+            for key, value in extension.items()
+        )
+    else:
+        assert chunk is None
+    followup = mapper.chunk_to_events(
+        _wrapper(
+            {
+                "choices": [
+                    {
+                        "delta": {"role": "assistant", "content": "answer"},
+                        "finish_reason": "stop",
+                    }
+                ]
+            }
+        )
+    )[0]
+    projected = normalized_stream_event_to_openai_chunk(
+        followup, requested_model="test", response_id="test"
+    )
+    assert ("role" in projected["choices"][0]["delta"]) is not publish
+    mapper.discard()

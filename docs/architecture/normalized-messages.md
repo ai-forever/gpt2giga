@@ -388,3 +388,9 @@ The stream owner discards reasoning/source state after both normal flush and abo
 execution. Anthropic conversation stitching retains current typed messages and only
 decodes restored history at the storage boundary; its legacy request builder remains
 for batch/admin consumers.
+
+Streaming also preserves standalone deltas containing these public extensions,
+even without text or usage. Empty keepalives and provider state-only chunks stay
+private. A known client disconnect cancels an idle stream under both ASGI 2.3 and
+2.4; upstream cleanup completes before the model slot and credential lease are
+released.

@@ -302,7 +302,17 @@ async def test_stream_close_failure_surfaces_without_an_active_exception():
 )
 @pytest.mark.parametrize(
     "failure",
-    ["headers", "body", "cancel", "complete", "asgi2", "early_close", "converter"],
+    [
+        "headers",
+        "body",
+        "cancel",
+        "complete",
+        "asgi2",
+        "idle23",
+        "idle24",
+        "early_close",
+        "converter",
+    ],
 )
 async def test_real_sdk_stream_closed_before_model_slot_release(
     mode, protocol, normalized, failure, monkeypatch
@@ -391,6 +401,8 @@ async def test_real_sdk_stream_closed_before_model_slot_release(
                     ],
                 }
             yield ("data: " + json.dumps(chunk) + "\n\n").encode()
+            if failure in {"idle23", "idle24"}:
+                await asyncio.Event().wait()
             if mode == "v2":
                 yield b'event: response.message.done\ndata: {"event":"response.message.done","model":"GigaChat-2-Max","messages":[],"finish_reason":"stop"}\n\n'
             else:
@@ -436,6 +448,8 @@ async def test_real_sdk_stream_closed_before_model_slot_release(
         disconnected = asyncio.Event()
         if failure == "asgi2":
             scope["asgi"]["spec_version"] = "2.0"
+        elif failure == "idle23":
+            scope["asgi"]["spec_version"] = "2.3"
         if protocol == "messages":
             body = json.dumps(
                 {
@@ -458,12 +472,15 @@ async def test_real_sdk_stream_closed_before_model_slot_release(
                 }
             ).encode()
 
+        request_body = body
+        previous_call_count = 0
+
         async def receive():
             nonlocal body
             if body is not None:
                 data, body = body, None
                 return {"type": "http.request", "body": data}
-            if failure == "asgi2":
+            if failure in {"asgi2", "idle23", "idle24"}:
                 await disconnected.wait()
                 return {"type": "http.disconnect"}
             await asyncio.Event().wait()
@@ -472,8 +489,11 @@ async def test_real_sdk_stream_closed_before_model_slot_release(
             outgoing.append(message)
             if failure == "headers" and message["type"] == "http.response.start":
                 raise OSError("synthetic headers disconnect")
-            if calls and message["type"] == "http.response.body":
-                if failure == "asgi2":
+            if (
+                len(calls) > previous_call_count
+                and message["type"] == "http.response.body"
+            ):
+                if failure in {"asgi2", "idle23", "idle24"}:
                     disconnected.set()
                     await asyncio.sleep(0)
                 if failure == "body":
@@ -506,15 +526,29 @@ async def test_real_sdk_stream_closed_before_model_slot_release(
                 while not calls:
                     await anext(outer)
                 await outer.aclose()
-        elif failure in {"complete", "asgi2", "converter"}:
-            await app(scope, receive, send)
+        elif failure in {"complete", "asgi2", "idle23", "idle24", "converter"}:
+            await asyncio.wait_for(app(scope, receive, send), timeout=2)
         else:
             with pytest.raises(
                 asyncio.CancelledError if failure == "cancel" else ClientDisconnect
             ):
                 await app(scope, receive, send)
-        assert len(calls) == (0 if failure == "headers" else 1)
+        if failure in {"idle23", "idle24"}:
+            # Reuse the same application/provider for a series, so assertions
+            # cover steady state rather than cleanup of a disposable fixture.
+            for _ in range(4):
+                assert app.state.response_processor._stream_reasoning_parsers == {}
+                assert app.state.response_processor._stream_source_renderers == {}
+                assert app.state.bridge_request_lifecycle.active_requests == 0
+                assert next(iter(pool._entries.values())).active_requests == 0
+                disconnected.clear()
+                previous_call_count = len(calls)
+                body = request_body
+                await asyncio.wait_for(app(scope, receive, send), timeout=2)
+        expected_calls = 5 if failure in {"idle23", "idle24"} else 1
+        assert len(calls) == (0 if failure == "headers" else expected_calls)
         assert all(stream.closed for stream in held)
+        assert app.state.bridge_request_lifecycle.active_requests == 0
         assert app.state.response_processor._stream_reasoning_parsers == {}
         assert app.state.response_processor._stream_source_renderers == {}
         wire = b"".join(message.get("body", b"") for message in outgoing)
