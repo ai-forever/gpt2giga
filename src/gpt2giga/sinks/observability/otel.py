@@ -59,6 +59,7 @@ class OpenTelemetryObservabilitySink:
         self.capture_content = capture_content
         self.redaction_enabled = redaction_enabled
         self._random_fn = random_fn
+        self._shutdown_task: asyncio.Task[None] | None = None
 
     async def emit(
         self,
@@ -69,7 +70,7 @@ class OpenTelemetryObservabilitySink:
         events: Sequence[Mapping[str, Any]] | None = None,
     ) -> None:
         """Record one observability event as an OTel span."""
-        if not self._should_sample():
+        if self._shutdown_task is not None or not self._should_sample():
             return
         await asyncio.to_thread(self._emit_sync, name, attributes, context, events)
 
@@ -113,12 +114,26 @@ class OpenTelemetryObservabilitySink:
 
     async def flush(self) -> None:
         """Flush pending spans best effort."""
+        if self._shutdown_task is not None:
+            return
         force_flush = getattr(self.tracer_provider, "force_flush", None)
         if force_flush is not None:
             await asyncio.wait_for(
                 asyncio.to_thread(_force_flush, force_flush),
                 timeout=DEFAULT_FORCE_FLUSH_TIMEOUT_SECONDS,
             )
+
+    async def aclose(self) -> None:
+        """Shut down the owned provider once, independently of flush."""
+        if self._shutdown_task is None:
+            shutdown = getattr(self.tracer_provider, "shutdown", None)
+            if shutdown is None:
+                return
+            # TracerProvider.shutdown has no timeout argument. Preserve ownership
+            # if the lifecycle's async deadline expires: cancelling to_thread
+            # cannot stop a running SDK/exporter shutdown in its native thread.
+            self._shutdown_task = asyncio.create_task(asyncio.to_thread(shutdown))
+        await asyncio.shield(self._shutdown_task)
 
     def _should_sample(self) -> bool:
         if self.sample_rate <= 0:

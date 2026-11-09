@@ -32,9 +32,13 @@ class QueuedTrafficLogSink:
         self.emitted_events = 0
         self._queue: asyncio.Queue[Any] = asyncio.Queue(maxsize=queue_size)
         self._worker_task: asyncio.Task[None] | None = None
+        self._closed = False
 
     async def emit(self, event: Any) -> None:
         """Queue one event without waiting for the storage backend."""
+        if self._closed:
+            self.dropped_events += 1
+            return
         self._ensure_worker()
         if self.drop_on_backpressure:
             try:
@@ -60,6 +64,17 @@ class QueuedTrafficLogSink:
                 self._queue.get_nowait()
                 self._queue.task_done()
                 self.dropped_events += 1
+
+    async def aclose(self) -> None:
+        """Close the backend after abandoning any remaining queue work."""
+        self._closed = True
+        await self._stop_worker()
+        while not self._queue.empty():
+            self._queue.get_nowait()
+            self._queue.task_done()
+            self.dropped_events += 1
+        close = getattr(self.sink, "aclose", self.sink.flush)
+        await close()
 
     def _ensure_worker(self) -> None:
         if self._worker_task is None or self._worker_task.done():

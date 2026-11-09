@@ -939,3 +939,62 @@ async def test_response_observability_uses_previous_response_id_as_session():
     assert attributes["session.id"] == "thread_1"
     assert attributes["conversation.id"] == "thread_1"
     assert events == []
+
+
+async def test_otel_close_cancellation_keeps_single_owned_shutdown():
+    started = threading.Event()
+    release = threading.Event()
+    calls = []
+
+    class Provider:
+        def shutdown(self):
+            calls.append("shutdown")
+            started.set()
+            release.wait(2)
+
+    sink = OpenTelemetryObservabilitySink(tracer=None, tracer_provider=Provider())
+    close = asyncio.create_task(sink.aclose())
+    try:
+        assert await asyncio.to_thread(started.wait, 1)
+        close.cancel()
+        try:
+            await close
+        except asyncio.CancelledError:
+            pass
+        else:
+            raise AssertionError("close cancellation must propagate")
+        assert not sink._shutdown_task.done()
+    finally:
+        release.set()
+        await sink.aclose()
+    await sink.aclose()
+    assert calls == ["shutdown"]
+
+
+async def test_queued_observability_close_discards_work_before_closing_backend():
+    started = asyncio.Event()
+
+    class StalledSink:
+        closed = 0
+
+        async def emit(self, *args, **kwargs):
+            started.set()
+            await asyncio.Event().wait()
+
+        async def aclose(self):
+            self.closed += 1
+
+    inner = StalledSink()
+    sink = QueuedObservabilitySink(inner)
+    await sink.emit("active", {"content": "never retained after close"})
+    await started.wait()
+    await sink.emit("queued")
+    worker = sink._worker_task
+    await sink.aclose()
+    await sink.emit("after.close")
+    assert inner.closed == 1
+    assert worker.done()
+    assert sink._worker_task is None
+    assert sink._queue.empty()
+    assert sink.dropped_events == 3
+    await asyncio.wait_for(sink._queue.join(), 1)

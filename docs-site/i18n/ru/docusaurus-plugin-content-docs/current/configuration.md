@@ -703,7 +703,13 @@ pool сохраняет владение cleanup выселенного клие
 `GPT2GIGA_SHUTDOWN_TIMEOUT_SECONDS` ограничивает drain запросов. Отдельно каждому
 telemetry sink даётся до пяти секунд на best-effort flush. Зависший queued traffic
 sink отменяется, оставшиеся events учитываются как dropped, остальные зависимости
-продолжают закрываться. Это не общий deadline завершения всех зависимостей.
+продолжают закрываться. После flush, включая timeout или отмену, sink получает
+отдельные пять секунд на терминальное закрытие. Очередь отказывается от оставшихся
+событий и закрывает backend без повторного drain. Phoenix один раз закрывает
+принадлежащий приложению OpenTelemetry provider; обычный flush сохраняет exporter
+работоспособным. Async deadline не может принудительно остановить блокирующий
+SDK/exporter thread: синхронный shutdown OpenTelemetry продолжается с ограничениями
+самого SDK. Эти бюджеты не задают общий deadline завершения всех зависимостей.
 
 HTTP metrics используют route templates, например `/v1/files/{file_id}`, и
 `unmatched` для неизвестных путей. Сохраняются встроенные model names и ключи

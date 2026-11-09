@@ -31,3 +31,13 @@ class CompositeTrafficLogSink:
         for result in results:
             if isinstance(result, BaseException) and self.logger is not None:
                 self.logger.warning("Traffic log mirror sink flush failed: {}", result)
+
+    async def aclose(self) -> None:
+        """Close each backend independently, including after a failed drain."""
+        results = await asyncio.gather(
+            *(getattr(sink, "aclose", sink.flush)() for sink in self.sinks),
+            return_exceptions=True,
+        )
+        for result in results:
+            if isinstance(result, BaseException) and self.logger is not None:
+                self.logger.warning("Traffic log mirror sink close failed: {}", result)

@@ -41,6 +41,7 @@ from gpt2giga.sinks.observability.factory import (
 
 # Telemetry gets a separate best-effort budget; request drain retains its meaning.
 TELEMETRY_FLUSH_TIMEOUT_SECONDS = 5.0
+TELEMETRY_CLOSE_TIMEOUT_SECONDS = 5.0
 
 
 @asynccontextmanager
@@ -169,6 +170,18 @@ async def _close_runtime_dependencies(
             logger.warning("{} flush timed out; pending telemetry is discarded", name)
         except asyncio.CancelledError:
             cancelled = True
+        # A failed drain must not skip the owner of a provider or backend.
+        # Queue aclose abandons work before closing; it never repeats join().
+        close = getattr(getattr(app.state, name, None), "aclose", None)
+        if close is not None:
+            try:
+                await asyncio.wait_for(close(), timeout=TELEMETRY_CLOSE_TIMEOUT_SECONDS)
+            except asyncio.TimeoutError:
+                logger.warning("{} close timed out; continuing shutdown", name)
+            except asyncio.CancelledError:
+                cancelled = True
+            except Exception:
+                logger.exception("{} close failed; continuing shutdown", name)
     closers = [
         lambda: stop_traffic_log_retention_task(
             getattr(app.state, "traffic_log_retention_task", None), logger=logger

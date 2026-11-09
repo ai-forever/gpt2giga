@@ -39,6 +39,7 @@ class QueuedObservabilitySink:
             maxsize=queue_size
         )
         self._worker_task: asyncio.Task[None] | None = None
+        self._closed = False
 
     async def emit(
         self,
@@ -49,6 +50,9 @@ class QueuedObservabilitySink:
         events: Sequence[Mapping[str, Any]] | None = None,
     ) -> None:
         """Queue an event without waiting for the exporter."""
+        if self._closed:
+            self.dropped_events += 1
+            return
         self._ensure_worker()
         event = _ObservabilityEvent(name, attributes, context, events)
         if self.drop_on_backpressure:
@@ -70,6 +74,18 @@ class QueuedObservabilitySink:
         finally:
             await self._stop_worker()
 
+    async def aclose(self) -> None:
+        """Stop accepting events and close the exporter without another drain."""
+        self._closed = True
+        await self._stop_worker()
+        while not self._queue.empty():
+            self._queue.get_nowait()
+            self._queue.task_done()
+            self.dropped_events += 1
+        close = getattr(self.sink, "aclose", None)
+        if close is not None:
+            await close()
+
     def _ensure_worker(self) -> None:
         if self._worker_task is None or self._worker_task.done():
             self._worker_task = asyncio.create_task(self._worker())
@@ -88,6 +104,9 @@ class QueuedObservabilitySink:
                     events=event.events,
                 )
                 self.emitted_events += 1
+            except asyncio.CancelledError:
+                self.dropped_events += 1
+                raise
             except Exception as exc:  # pragma: no cover - best-effort exporter
                 if self.logger is not None:
                     self.logger.warning("Observability queue worker failed: {}", exc)

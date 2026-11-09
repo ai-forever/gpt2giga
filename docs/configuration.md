@@ -703,7 +703,13 @@ shutdown retry.
 `GPT2GIGA_SHUTDOWN_TIMEOUT_SECONDS` limits request draining. Separately, each
 telemetry sink receives up to five seconds for best-effort flush. A stalled queued
 traffic sink is cancelled, pending events are counted as dropped, and dependency
-cleanup continues. This is not a total shutdown deadline for all dependencies.
+cleanup continues. After flush (including timeout or cancellation), sinks receive a
+separate five-second terminal-close budget. Queue shutdown abandons remaining
+work before closing the backend, without draining again. Phoenix closes its
+app-owned OpenTelemetry provider once; ordinary flush keeps export available.
+The async deadline cannot forcibly stop a blocking SDK/exporter thread:
+OpenTelemetry's synchronous shutdown continues under the SDK's own limits.
+These budgets are not a total shutdown deadline for all dependencies.
 
 HTTP metrics use route templates, such as `/v1/files/{file_id}`, and `unmatched`
 for unknown paths. Built-in model names and configured per-model concurrency keys
