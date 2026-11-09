@@ -1,7 +1,10 @@
 {
   "extends": "@docusaurus/tsconfig",
   "compilerOptions": {
-    "baseUrl": ".",
-    "ignoreDeprecations": "6.0"
+    // Clear the inherited option removed in TypeScript 7.
+    "baseUrl": null,
+    "paths": {
+      "@site/*": ["./*"]
+    }
   }
 }
