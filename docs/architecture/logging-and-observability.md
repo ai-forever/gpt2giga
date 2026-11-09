@@ -55,6 +55,12 @@ Observability events must use request context fields for correlation:
 Prompt and response capture for observability must be opt-in and follow the same
 redaction rules as traffic logs.
 
+A client disconnect before stream completion produces one `streaming_aborted`
+traffic outcome with `stream_cancelled`, telemetry status 499, and one increment
+of `gpt2giga_stream_disconnects_total`. Already-sent HTTP headers are unchanged;
+the gateway does not send a synthetic SSE completion to the disconnected client.
+A disconnect observed after a completed response does not replace its outcome.
+
 LLM-specific observability is built around the normalized request/response models
 where possible: Chat Completions uses `NormalizedChatRequest` and
 `NormalizedResponse`, Responses and Anthropic helpers bring public payloads to a

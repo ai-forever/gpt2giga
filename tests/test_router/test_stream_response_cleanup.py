@@ -3,6 +3,7 @@
 import asyncio
 import json
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from gigachat.api.utils import build_headers
@@ -310,6 +311,8 @@ async def test_stream_close_failure_surfaces_without_an_active_exception():
         "asgi2",
         "idle23",
         "idle24",
+        "late23",
+        "late24",
         "early_close",
         "converter",
     ],
@@ -322,6 +325,10 @@ async def test_real_sdk_stream_closed_before_model_slot_release(
 
     app, _, limiter = _make_app("complete", pass_token=True)
     app.state.logger = logger
+    traffic = SimpleNamespace(emit=AsyncMock())
+    metrics = SimpleNamespace(increment=AsyncMock(), observe=AsyncMock())
+    app.state.traffic_log_sink = traffic
+    app.state.metrics_sink = metrics
     app.state.config.proxy_settings.normalization_mode = "on" if normalized else "off"
     calls = []
     held = []
@@ -448,7 +455,7 @@ async def test_real_sdk_stream_closed_before_model_slot_release(
         disconnected = asyncio.Event()
         if failure == "asgi2":
             scope["asgi"]["spec_version"] = "2.0"
-        elif failure == "idle23":
+        elif failure in {"idle23", "late23"}:
             scope["asgi"]["spec_version"] = "2.3"
         if protocol == "messages":
             body = json.dumps(
@@ -480,13 +487,23 @@ async def test_real_sdk_stream_closed_before_model_slot_release(
             if body is not None:
                 data, body = body, None
                 return {"type": "http.request", "body": data}
-            if failure in {"asgi2", "idle23", "idle24"}:
+            if failure in {"asgi2", "idle23", "idle24", "late23", "late24"}:
                 await disconnected.wait()
                 return {"type": "http.disconnect"}
             await asyncio.Event().wait()
 
         async def send(message):
             outgoing.append(message)
+            if (
+                failure in {"late23", "late24"}
+                and message["type"] == "http.response.body"
+                and not message.get("more_body", False)
+            ):
+                disconnected.set()
+                # Ensure the receive owner observes the late disconnect before
+                # the response returns to the lifecycle fallback.
+                while not model_request_disconnected.get().is_set():
+                    await asyncio.sleep(0)
             if failure == "headers" and message["type"] == "http.response.start":
                 raise OSError("synthetic headers disconnect")
             if (
@@ -526,7 +543,15 @@ async def test_real_sdk_stream_closed_before_model_slot_release(
                 while not calls:
                     await anext(outer)
                 await outer.aclose()
-        elif failure in {"complete", "asgi2", "idle23", "idle24", "converter"}:
+        elif failure in {
+            "complete",
+            "asgi2",
+            "idle23",
+            "idle24",
+            "late23",
+            "late24",
+            "converter",
+        }:
             await asyncio.wait_for(app(scope, receive, send), timeout=2)
         else:
             with pytest.raises(
@@ -554,9 +579,43 @@ async def test_real_sdk_stream_closed_before_model_slot_release(
         wire = b"".join(message.get("body", b"") for message in outgoing)
         if failure == "converter":
             assert b"error" in wire
-        elif failure == "complete":
+        elif failure in {"complete", "late23", "late24"}:
             assert b"answer" in wire
             assert b'"error"' not in wire
+        if failure in {"idle23", "idle24", "complete", "late23", "late24"}:
+            aborted = failure in {"idle23", "idle24"}
+            events = [
+                call.args[0]
+                for call in traffic.emit.call_args_list
+                if call.args[0].metadata.get("lifecycle", "").startswith("streaming_")
+            ]
+            assert len(events) == expected_calls
+            for event in events:
+                assert event.metadata["lifecycle"] == (
+                    "streaming_aborted" if aborted else "streaming_completed"
+                )
+                assert event.status_code == (499 if aborted else 200)
+                assert event.error_type == ("stream_cancelled" if aborted else None)
+                assert "giga-auth-synthetic" not in repr(event)
+            disconnects = [
+                call
+                for call in metrics.increment.call_args_list
+                if call.args[0] == "gpt2giga_stream_disconnects_total"
+            ]
+            assert len(disconnects) == (expected_calls if aborted else 0)
+            assert all(call.args[1] == 1 for call in disconnects)
+            assert all(
+                message["status"] == 200
+                for message in outgoing
+                if message["type"] == "http.response.start"
+            )
+            if protocol == "chat/completions":
+                assert (b"[DONE]" in wire) is not aborted
+            assert not any(
+                "watch_disconnect" in getattr(task.get_coro(), "__qualname__", "")
+                for task in asyncio.all_tasks()
+                if not task.done()
+            )
         async with limiter.limit("GigaChat-2-Max"):
             pass
         assert next(iter(pool._entries.values())).active_requests == 0
