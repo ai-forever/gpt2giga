@@ -16,6 +16,11 @@ byte offsets and declared length. Sessions expire after 24 hours. The configured
 blob limit bounds buffered uploads; upstream document MIME/size limits still apply.
 Metadata-only POST and multipart/form-data do not emulate Google's upload protocol.
 
+Accepted path aliases such as `/proxy/upload/v1beta/files` and
+`/v2/v1/upload/v1beta/files` retain the Gemini error format even when the
+pass-token client pool rejects a request before routing: HTTP 503,
+`Retry-After: 1`, numeric `error.code: 503` and `error.status: UNAVAILABLE`.
+
 `files.get`, `files.list` and `files.delete` preserve the known filename, display
 name, MIME, byte length and creation time. `fileData.fileUri` must reference an
 owned gateway file; it resolves to its actual native attachment. Arbitrary URIs,

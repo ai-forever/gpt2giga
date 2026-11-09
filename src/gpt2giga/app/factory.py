@@ -32,6 +32,7 @@ from gpt2giga.common.app_meta import get_app_version
 from gpt2giga.common.conversation import MemoryConversationStore
 from gpt2giga.middlewares.pass_token import PassTokenMiddleware
 from gpt2giga.middlewares.path_normalizer import PathNormalizationMiddleware
+from gpt2giga.core.paths import GATEWAY_API_ROOTS
 from gpt2giga.middlewares.request_validation import RequestValidationMiddleware
 from gpt2giga.middlewares.rquid_context import RquidMiddleware
 from gpt2giga.models.config import ProxyConfig
@@ -100,24 +101,7 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
     # /api/v1/embeddings -> /v1/embeddings/
     app.add_middleware(
         PathNormalizationMiddleware,
-        valid_roots=[
-            "v1",
-            "v2",
-            "v1beta",
-            "upload",
-            "chat",
-            "models",
-            "embeddings",
-            "responses",
-            "messages",
-            "model",
-            "files",
-            "batches",
-            "bridge",
-            "health",
-            "ping",
-            "ready",
-        ],
+        valid_roots=GATEWAY_API_ROOTS,
     )
     app.add_middleware(
         RequestValidationMiddleware,

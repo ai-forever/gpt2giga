@@ -18,6 +18,7 @@ from gpt2giga.common.model_concurrency import (
 )
 from gpt2giga.common.gemini_errors import gemini_error_payload, gemini_error_status
 from gpt2giga.core.context import _infer_protocol, get_request_context
+from gpt2giga.core.paths import normalize_api_path
 from gpt2giga.logger import rquid_context
 from gpt2giga.providers.gigachat.model_resolution import UpstreamModelRequiredError
 from gpt2giga.providers.gigachat.pool import GigaChatPoolCapacityError
@@ -435,6 +436,7 @@ def _public_protocol(request: Request | None) -> str:
         if protocol in {"anthropic", "gemini"}:
             return protocol
     path = request.url.path if request is not None else ""
+    path = normalize_api_path(path) or path
     protocol = _infer_protocol(path)
     if protocol in {"anthropic", "gemini"}:
         return protocol

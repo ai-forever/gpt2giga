@@ -15,6 +15,11 @@ identity и контекста credentials. Anonymous local mode использ�
 ограничивает буфер; дополнительно действуют MIME/размерные лимиты GigaChat.
 POST одних metadata и multipart/form-data не подменяют Google upload protocol.
 
+Поддерживаемые aliases, например `/proxy/upload/v1beta/files` и
+`/v2/v1/upload/v1beta/files`, сохраняют формат ошибки Gemini и при отказе пула
+pass-token клиентов до маршрутизации: HTTP 503, `Retry-After: 1`, числовой
+`error.code: 503` и `error.status: UNAVAILABLE`.
+
 Get/list/delete сохраняют известные filename, displayName, MIME, размер и время
 создания. `fileData.fileUri` разрешается только через owner-scoped mapping к native
 attachment. Неизвестный ID, произвольный URI и локальный batch JSONL нельзя передать

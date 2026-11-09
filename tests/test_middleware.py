@@ -807,6 +807,8 @@ async def test_pool_capacity_returns_retryable_redacted_error(path, protocol):
         (prefix + "/files" + suffix, "gemini")
         for prefix in (
             "/upload/v1beta",
+            "/proxy/upload/v1beta",
+            "/v2/v1/upload/v1beta",
             "/v1/upload/v1beta",
             "/v2/upload/v1beta",
             "/upload/v1/v1beta",
@@ -816,12 +818,34 @@ async def test_pool_capacity_returns_retryable_redacted_error(path, protocol):
     ]
     + [
         (prefix + "/files", protocol)
-        for prefix in ("", "/v1", "/v2")
+        for prefix in ("", "/v1", "/v2", "/proxy/v1", "/v2/v1")
         for protocol in ("openai", "anthropic")
     ]
     + [
+        # A file ID that happens to name another API must not become a root.
+        (prefix + "/files/messages", "openai")
+        for prefix in ("/proxy", "/v2/v1")
+    ]
+    + [
+        (prefix + route, protocol)
+        for prefix in ("/proxy", "/v2/v1")
+        for route, protocol in (
+            ("/chat/completions", "openai"),
+            ("/messages", "anthropic"),
+        )
+    ]
+    + [
         (prefix + "/models/test-model:" + operation, "gemini")
-        for prefix in ("", "/v1", "/v2", "/v1beta", "/v1/v1beta", "/v2/v1beta")
+        for prefix in (
+            "",
+            "/v1",
+            "/v2",
+            "/v1beta",
+            "/v1/v1beta",
+            "/v2/v1beta",
+            "/proxy/v1beta",
+            "/v2/v1/v1beta",
+        )
         for operation in ("generateContent", "streamGenerateContent", "countTokens")
     ],
 )
@@ -865,6 +889,66 @@ async def test_mounted_pool_capacity_preserves_protocol_shape(path, protocol):
             assert not client_factory.return_value.mock_calls
     finally:
         await pool.aclose()
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/upload/v1beta/files",
+        "/proxy/upload/v1beta/files",
+        "/v2/v1/upload/v1beta/files",
+    ],
+)
+async def test_mounted_gemini_upload_alias_with_available_pool(path, tmp_path):
+    import httpx
+
+    from gpt2giga.app.factory import create_app
+    from gpt2giga.providers.gigachat.pool import GigaChatClientPool
+    from gpt2giga.storage.resources import ResourceStore
+
+    client_factory = MagicMock()
+    client_factory.return_value.aclose = AsyncMock()
+    pool = GigaChatClientPool({}, max_size=1, client_factory=client_factory)
+    test_app = create_app(ProxyConfig(proxy=ProxySettings(mode="DEV", pass_token=True)))
+    test_app.state.gigachat_client = client_factory.return_value
+    test_app.state.gigachat_pool = pool
+    test_app.state.logger = MagicMock()
+    store = test_app.state.resource_store = await ResourceStore.open(tmp_path)
+    try:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=test_app), base_url="http://test"
+        ) as client:
+            response = await client.post(
+                path,
+                headers={
+                    "Authorization": "Bearer giga-auth-new-secret",
+                    "X-Goog-Upload-Protocol": "resumable",
+                    "X-Goog-Upload-Command": "start",
+                    "X-Goog-Upload-Header-Content-Length": "4",
+                    "X-Goog-Upload-Header-Content-Type": "text/plain",
+                },
+                json={"file": {"displayName": "notes.txt"}},
+            )
+            assert response.status_code == 200, response.text
+            assert response.headers["x-goog-upload-status"] == "active"
+            # Follow the returned URL to cover query preservation after normalization.
+            query = await client.post(
+                response.headers["x-goog-upload-url"],
+                headers={
+                    "Authorization": "Bearer giga-auth-new-secret",
+                    "X-Goog-Upload-Command": "query",
+                },
+            )
+            assert query.status_code == 200, query.text
+            assert query.headers["x-goog-upload-status"] == "active"
+            assert query.headers["x-goog-upload-size-received"] == "0"
+        assert client_factory.call_count == 1
+        assert not client_factory.return_value.mock_calls
+        assert "new-secret" not in response.text + query.text
+        assert "new-secret" not in str(test_app.state.logger.mock_calls)
+    finally:
+        await pool.aclose()
+        await store.aclose()
 
 
 @pytest.mark.parametrize(
