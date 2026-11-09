@@ -72,3 +72,25 @@ def test_metrics_endpoint_requires_api_key_when_auth_enabled():
         ).status_code
         == 200
     )
+
+
+def test_metrics_bound_unknown_paths_and_resource_identifiers():
+    app = create_app(ProxyConfig(proxy=ProxySettings(metrics_enabled=True)))
+
+    @app.get("/metric-test/{resource_id}")
+    async def resource(resource_id: str):
+        return {"id": resource_id}
+
+    client = TestClient(app)
+    for index in range(1000):
+        assert client.get(f"/unknown-{index}").status_code == 404
+        assert client.get(f"/metric-test/private-{index}").status_code == 200
+
+    sink = app.state.metrics_sink
+    assert len(sink._counters) == 2
+    assert len(sink._histograms) == 2
+    text = sink.render()
+    assert 'route="unmatched"' in text
+    assert 'route="/metric-test/{resource_id}"' in text
+    assert "private-" not in text
+    assert "unknown-" not in text

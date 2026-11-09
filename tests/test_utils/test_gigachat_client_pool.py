@@ -144,3 +144,72 @@ async def test_gigachat_client_pool_close_failure_is_safe_and_redacted():
     assert all(client.close_calls == 1 for client in created)
     logger.warning.assert_called_once_with("Failed to close pooled GigaChat client")
     assert secret not in str(logger.warning.call_args)
+
+
+async def test_cancel_before_yield_releases_lease_and_owns_evicted_cleanup():
+    import asyncio
+
+    closing = asyncio.Event()
+    release = asyncio.Event()
+    created = {}
+
+    class BlockingClient(FakeClient):
+        async def aclose(self):
+            if self.token == "first":
+                closing.set()
+                await release.wait()
+            await super().aclose()
+
+    def factory(settings, token):
+        created[token] = BlockingClient(token)
+        return created[token]
+
+    pool = GigaChatClientPool({}, max_size=1, client_factory=factory)
+    async with pool.acquire("first"):
+        pass
+
+    async def acquire_second():
+        async with pool.acquire("second"):
+            pytest.fail("cancelled acquisition must not yield")
+
+    task = asyncio.create_task(acquire_second())
+    await closing.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert all(entry.active_requests == 0 for entry in pool._entries.values())
+    assert pool._cleanup_tasks
+    release.set()
+    await pool.aclose()
+    assert created["first"].closed
+    assert created["second"].closed
+    assert not pool._cleanup_tasks
+
+
+async def test_evicted_close_timeout_is_retained_for_shutdown_retry():
+    import asyncio
+
+    release = asyncio.Event()
+    created = {}
+
+    class BlockingClient(FakeClient):
+        async def aclose(self):
+            if self.token == "first":
+                await release.wait()
+            await super().aclose()
+
+    def factory(settings, token):
+        created[token] = BlockingClient(token)
+        return created[token]
+
+    pool = GigaChatClientPool({}, max_size=1, client_factory=factory)
+    pool._CLOSE_TIMEOUT_SECONDS = 0.01
+    async with pool.acquire("first"):
+        pass
+    async with pool.acquire("second"):
+        pass
+    assert list(pool._failed_cleanup.values()) == [created["first"]]
+    release.set()
+    await pool.aclose()
+    assert all(client.closed for client in created.values())
+    assert not pool._failed_cleanup

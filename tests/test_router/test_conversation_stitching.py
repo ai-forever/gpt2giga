@@ -631,3 +631,28 @@ def test_mounted_normalized_anthropic_stitching_keeps_native_content(stream):
     assert original[2]["tools_state_id"] == "explicit-tools-state"
     assert calls[1].model_dump(mode="json", by_alias=True)["messages"] == original
     assert calls[2].model_dump(mode="json", by_alias=True)["messages"][:3] == original
+
+
+def test_anthropic_current_turn_uses_normalized_messages_without_second_decode(
+    monkeypatch,
+):
+    app = make_mounted_anthropic_app(normalization_mode="on")
+
+    def reject_redecode(*args, **kwargs):
+        raise AssertionError("current normalized messages must not be decoded twice")
+
+    monkeypatch.setattr(
+        "gpt2giga.protocols.openai.OpenAIProtocolAdapter.chat_to_normalized",
+        reject_redecode,
+    )
+    client = TestClient(app, raise_server_exceptions=True)
+    response = client.post(
+        "/v1/messages",
+        headers={"x-gpt2giga-conversation-id": "fresh-conversation"},
+        json={
+            "model": "GigaChat-2-Max",
+            "max_tokens": 16,
+            "messages": [{"role": "user", "content": "Keep typed input."}],
+        },
+    )
+    assert response.status_code == 200, response.text

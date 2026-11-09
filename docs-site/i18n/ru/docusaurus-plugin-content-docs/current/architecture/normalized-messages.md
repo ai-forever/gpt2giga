@@ -381,3 +381,12 @@ GPT2GIGA_ADMIN_API_KEY="<strong-admin-secret>"
 Token counting сохраняет узкое различие совместимости при подготовке текста: `on`
 учитывает normalized tool/schema text, а `off`/`shadow` сохраняют tolerant legacy subset.
 Все режимы используют общий token-count dispatch, client binding, limiter и cleanup.
+
+Публичная Chat projection сохраняет поддержанные native `audio`, `annotations`,
+`inline_data`, `tool_executions`, `files` через явный allowlist. Source markers
+обрабатывает общий renderer. Reference-only Chat не скачивает generated image bytes;
+consumers, которым нужны bytes, выполняют hydration явно. Владелец stream удаляет
+reasoning/source state после штатного flush и после аварийного завершения. Anthropic
+conversation stitching сохраняет typed messages текущего turn и декодирует только
+восстановленную историю на storage boundary. Legacy request builder остаётся для
+batch/admin consumers.

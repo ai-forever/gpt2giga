@@ -301,6 +301,15 @@ async def stream_chat_generator(
         yield f"data: {json.dumps(error_response)}\n\n"
         yield "data: [DONE]\n\n"
 
+    finally:
+        discard = getattr(
+            getattr(request.app.state, "response_processor", None),
+            "discard_stream_state",
+            None,
+        )
+        if discard is not None:
+            discard(response_id, family="chat")
+
 
 async def stream_chat_completion_generator(
     request: Request,
@@ -490,6 +499,15 @@ async def stream_chat_completion_generator(
         }
         yield f"data: {json.dumps(error_response)}\n\n"
         yield "data: [DONE]\n\n"
+
+    finally:
+        discard = getattr(
+            getattr(request.app.state, "response_processor", None),
+            "discard_stream_state",
+            None,
+        )
+        if discard is not None:
+            discard(response_id, family="chat")
 
 
 class _ChatCompletionResponsesStreamClient:

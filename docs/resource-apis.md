@@ -88,3 +88,32 @@ cache reuse is scoped to provider/profile/credentials and retains size/type acco
 Anthropic `expires_in_seconds` is rejected before upload until native expiry is supported.
 Concurrent resumable writes at the same offset yield one success and one HTTP 409.
 Finalizing local JSONL adopts its upload blob without requiring a second blob quota.
+
+## Upload admission and profile selection
+
+Set `X-GPT2GIGA-Profile: <configured-gigachat-profile-id>` on Files upload to target
+the same GigaChat account as your model alias. An absent header keeps the default
+account. Unknown and non-GigaChat profiles return 400 before upload. Metadata,
+content and deletion keep the existing owner/profile checks. Gemini resumable
+uploads fix the target at session start; subsequent headers cannot switch it.
+
+Native upload reserves durable resource count and metadata capacity before the
+provider POST. Exhausted local capacity returns 413 without uploading. If a known
+success cannot be published, the gateway attempts native deletion with a five-second
+upstream timeout. An unknown outcome or unsuccessful cleanup retains a non-expiring
+`file_upload` intent that still consumes quota. Reconcile these intents with the
+provider before retrying; there is no automatic upload retry or cross-system atomicity.
+Storage cleanup drains transactions already started, so this upstream timeout is not
+a total request deadline. SQLite admission waits asynchronously before taking an
+executor thread. Expired-row cleanup commits independently of rejected publications.
+
+Resumable appends write only the new chunk. Committed offsets define the visible
+bytes; an uncommitted tail is trimmed on recovery. Batch lists validate the cursor
+and select a page before polling its active jobs. Unchanged and terminal jobs do not
+produce redundant metadata updates.
+
+The native-file ownership ledger retains deleted IDs to prevent legacy fallback
+across owners. Its disk usage is not yet covered by the resource metadata/count
+quotas. Monitor durable-store disk usage in long-running native-file deployments;
+do not delete ledger entries to reclaim space. A separate ledger admission quota
+is a follow-up, without changing public file IDs.

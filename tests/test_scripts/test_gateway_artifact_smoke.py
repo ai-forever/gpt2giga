@@ -15,6 +15,10 @@ MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
 
 
+async def test_base_artifact_multipart_probe():
+    await MODULE._verify_multipart_parser()
+
+
 @pytest.mark.parametrize(
     "version",
     ["0.2.3a1", "0.2.3b1", "0.2.3rc1", "0.2.3.dev1", "0.2.3-alpha1"],

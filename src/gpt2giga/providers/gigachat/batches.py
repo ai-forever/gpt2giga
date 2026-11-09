@@ -33,7 +33,11 @@ from gpt2giga.providers.gigachat.model_resolution import (
     UpstreamModelRequiredError,
 )
 from gpt2giga.providers.profiles.errors import ProviderAliasError
-from gpt2giga.storage.resources import Resource, ResourceStoreError
+from gpt2giga.storage.resources import (
+    Resource,
+    ResourceStoreError,
+    ResourceNotFoundError,
+)
 
 TERMINAL = frozenset({"completed", "failed", "expired"})
 _STATUS = {
@@ -315,9 +319,15 @@ async def poll_batch(request: Request, batch_id: str, protocol: str) -> Resource
     resource = await get_batch(request, batch_id, protocol)
     store = get_resource_store(request)
     owner = batch_owner(request, resource)
-    resource = await store.update(
-        owner, "batch", batch_id, lambda m: _expire(m, time.time())
-    )
+    if resource.metadata["status"] in TERMINAL:
+        return resource
+    if (
+        resource.metadata.get("deadline") is not None
+        and time.time() >= resource.metadata["deadline"]
+    ):
+        resource = await store.update(
+            owner, "batch", batch_id, lambda m: _expire(m, time.time())
+        )
     if resource.metadata["status"] in TERMINAL:
         return resource
     profile_id = resource.metadata.get("provider_profile")
@@ -380,8 +390,30 @@ async def poll_batch(request: Request, batch_id: str, protocol: str) -> Resource
     return await store.update(owner, "batch", batch_id, apply)
 
 
-async def list_batches(request: Request, protocol: str) -> list[Resource]:
-    """List registered jobs only; unknown native jobs never acquire guessed metadata."""
+async def list_batches(
+    request: Request,
+    protocol: str,
+    *,
+    limit: int | None = None,
+    after: str | None = None,
+    before: str | None = None,
+) -> list[Resource]:
+    """Validate pagination locally, then refresh only returned active jobs."""
+    if limit is not None:
+        try:
+            stored = await get_resource_store(request).page(
+                _batch_owners(request),
+                "batch",
+                protocol=protocol,
+                limit=limit,
+                after=after,
+                before=before,
+            )
+        except ResourceNotFoundError as exc:
+            raise batch_error("Invalid batch cursor.") from exc
+        return [
+            await poll_batch(request, row.public_id, protocol) for row in stored[:limit]
+        ] + stored[limit:]
     stored = []
     for owner in _batch_owners(request):
         stored.extend(await get_resource_store(request).list(owner, "batch"))

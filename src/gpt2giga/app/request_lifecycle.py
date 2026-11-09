@@ -6,7 +6,10 @@ import asyncio
 from contextlib import asynccontextmanager
 from typing import Any
 
+from anyio import CancelScope
 from starlette.responses import JSONResponse
+
+from gpt2giga.common.model_concurrency import model_request_disconnected
 
 
 class BridgeRequestLifecycle:
@@ -73,7 +76,8 @@ class BridgeRequestLifecycleMiddleware:
             return
         try:
             async with lifecycle.track():
-                await self.app(scope, receive, send)
+                async with _disconnect_receive(receive) as request_receive:
+                    await self.app(scope, request_receive, send)
         except GatewayShuttingDownError:
             await JSONResponse(
                 {
@@ -88,6 +92,46 @@ class BridgeRequestLifecycleMiddleware:
             )(scope, receive, send)
 
 
+@asynccontextmanager
+async def _disconnect_receive(receive):
+    """Keep one ASGI receive owner and expose disconnect during admission."""
+    frames = asyncio.Queue(maxsize=1)
+    disconnected = asyncio.Event()
+    token = model_request_disconnected.set(disconnected)
+
+    async def read_frames():
+        try:
+            while True:
+                frame = await receive()
+                if frame["type"] == "http.disconnect":
+                    disconnected.set()
+                await frames.put(frame)
+                if disconnected.is_set():
+                    return
+        except Exception as exc:
+            disconnected.set()
+            await frames.put(exc)
+
+    async def request_receive():
+        if disconnected.is_set() and frames.empty():
+            return {"type": "http.disconnect"}
+        frame = await frames.get()
+        if isinstance(frame, Exception):
+            raise frame
+        return frame
+
+    reader = asyncio.create_task(read_frames())
+    try:
+        yield request_receive
+    finally:
+        reader.cancel()
+        try:
+            with CancelScope(shield=True):
+                await asyncio.gather(reader, return_exceptions=True)
+        finally:
+            model_request_disconnected.reset(token)
+
+
 def _is_model_request(path: str) -> bool:
     normalized = path.rstrip("/")
     return normalized.endswith(
@@ -96,7 +140,13 @@ def _is_model_request(path: str) -> bool:
             "/embeddings",
             "/messages",
             "/responses",
+            "/responses/input_tokens",
+            "/messages/count_tokens",
+            "/images/generations",
             ":generateContent",
             ":streamGenerateContent",
+            ":countTokens",
+            ":embedContent",
+            ":batchEmbedContents",
         )
     )

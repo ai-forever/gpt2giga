@@ -691,3 +691,26 @@ Metadata ограничены отдельно от blobs: `GPT2GIGA_RESOURCE_MA
 Token counting сохраняет узкое различие совместимости при подготовке текста: `on`
 учитывает normalized tool/schema text, а `off`/`shadow` сохраняют tolerant legacy subset.
 Все режимы используют общий token-count dispatch, client binding, limiter и cleanup.
+
+### Очередь запросов и завершение telemetry
+
+Отключившийся model request прекращает ожидание concurrency slot до dispatch.
+Пустой acquire timeout по-прежнему разрешает живому клиенту ждать без ограничения.
+Динамические model entries освобождаются после последнего holder/waiter. Client
+pool сохраняет владение cleanup выселенного клиента при отмене acquire; close
+ограничен пятью секундами, неуспешное закрытие записывается для повтора на shutdown.
+
+`GPT2GIGA_SHUTDOWN_TIMEOUT_SECONDS` ограничивает drain запросов. Отдельно каждому
+telemetry sink даётся до пяти секунд на best-effort flush. Зависший queued traffic
+sink отменяется, оставшиеся events учитываются как dropped, остальные зависимости
+продолжают закрываться. Это не общий deadline завершения всех зависимостей.
+
+HTTP metrics используют route templates, например `/v1/files/{file_id}`, и
+`unmatched` для неизвестных путей. Сохраняются встроенные model names и ключи
+настроенных per-model concurrency limits; прочие model/error labels становятся
+`other`. Raw paths остаются на logging boundary с его политикой capture/redaction.
+
+Multipart Files parsing использует Starlette spooled uploads. `python-multipart`
+входит в базовые runtime dependencies, integrations extra не нужен. Общий body
+limit и ограничения размера по MIME сохраняются, включая файлы крупнее memory
+threshold spool. Временные файлы закрываются после success, error и cancellation.

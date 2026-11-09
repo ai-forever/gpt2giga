@@ -13,6 +13,7 @@ from gpt2giga.app.factory import create_app
 from gpt2giga.common.model_concurrency import (
     ModelConcurrencyLimiter,
     ModelConcurrencyTimeoutError,
+    model_request_disconnected,
 )
 from gpt2giga.common.streaming_response import closing_stream
 from gpt2giga.models.config import ProxyConfig, ProxySettings
@@ -81,9 +82,14 @@ def _make_app(outcome, *, pass_token=False):
     limiter = ModelConcurrencyLimiter({"GigaChat-2-Max": 1}, acquire_timeout=0)
 
     async def before_close():
-        with pytest.raises(ModelConcurrencyTimeoutError):
-            async with limiter.limit("GigaChat-2-Max"):
-                pytest.fail("upstream must close before its model slot is released")
+        # Probe capacity as a fresh request; the closing request is disconnected.
+        token = model_request_disconnected.set(None)
+        try:
+            with pytest.raises(ModelConcurrencyTimeoutError):
+                async with limiter.limit("GigaChat-2-Max"):
+                    pytest.fail("upstream must close before its model slot is released")
+        finally:
+            model_request_disconnected.reset(token)
 
     upstream.before_close = before_close
     app.state.model_concurrency_limiter = limiter
@@ -338,11 +344,15 @@ async def test_real_sdk_stream_closed_before_model_slot_release(
             tracked_closing,
         )
     if failure == "converter":
+        target = "gpt2giga.providers.gigachat.streaming"
+        original_conversion = importlib.import_module(
+            target
+        ).GigaChatNormalizedStreamMapper.chunk_to_events
 
         def fail_conversion(*args, **kwargs):
+            original_conversion(*args, **kwargs)
             raise RuntimeError("synthetic stream converter failure")
 
-        target = "gpt2giga.providers.gigachat.streaming"
         monkeypatch.setattr(
             importlib.import_module(target).GigaChatNormalizedStreamMapper,
             "chunk_to_events",
@@ -358,7 +368,10 @@ async def test_real_sdk_stream_closed_before_model_slot_release(
                     "choices": [
                         {
                             "index": 0,
-                            "delta": {"role": "assistant", "content": "answer"},
+                            "delta": {
+                                "role": "assistant",
+                                "content": "answer [sources=[",
+                            },
                             "finish_reason": None,
                         }
                     ],
@@ -371,7 +384,10 @@ async def test_real_sdk_stream_closed_before_model_slot_release(
                     "event": "response.message.delta",
                     "model": "GigaChat-2-Max",
                     "messages": [
-                        {"role": "assistant", "content": [{"text": "answer"}]}
+                        {
+                            "role": "assistant",
+                            "content": [{"text": "answer [sources=["}],
+                        }
                     ],
                 }
             yield ("data: " + json.dumps(chunk) + "\n\n").encode()
@@ -381,9 +397,14 @@ async def test_real_sdk_stream_closed_before_model_slot_release(
                 yield b"data: [DONE]\n\n"
 
         async def aclose(self):
-            with pytest.raises(ModelConcurrencyTimeoutError):
-                async with limiter.limit("GigaChat-2-Max"):
-                    pytest.fail("slot released before SDK response")
+            # Inspect slot ownership independently of the disconnected request.
+            token = model_request_disconnected.set(None)
+            try:
+                with pytest.raises(ModelConcurrencyTimeoutError):
+                    async with limiter.limit("GigaChat-2-Max"):
+                        pytest.fail("slot released before SDK response")
+            finally:
+                model_request_disconnected.reset(token)
             assert next(iter(pool._entries.values())).active_requests == 1
             self.closed = True
 
@@ -494,6 +515,8 @@ async def test_real_sdk_stream_closed_before_model_slot_release(
                 await app(scope, receive, send)
         assert len(calls) == (0 if failure == "headers" else 1)
         assert all(stream.closed for stream in held)
+        assert app.state.response_processor._stream_reasoning_parsers == {}
+        assert app.state.response_processor._stream_source_renderers == {}
         wire = b"".join(message.get("body", b"") for message in outgoing)
         if failure == "converter":
             assert b"error" in wire

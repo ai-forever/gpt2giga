@@ -690,3 +690,27 @@ remain so expired/foreign resources cannot fall back to native lookup.
 Token counting retains one narrow input-projection compatibility difference: `on` includes
 normalized tool/schema text, while `off`/`shadow` retain the tolerant legacy text subset.
 All modes share the same token-count dispatch, client binding, limiter and cleanup.
+
+### Request and telemetry cleanup
+
+A disconnected model request stops waiting for a concurrency slot before dispatch.
+An empty acquire timeout still permits indefinite waiting by a connected client.
+Dynamic model entries are released after their final holder or waiter exits.
+Credential-pool eviction owns client cleanup even if acquisition is cancelled;
+client close has a five-second timeout, and failed closes remain recorded for a
+shutdown retry.
+
+`GPT2GIGA_SHUTDOWN_TIMEOUT_SECONDS` limits request draining. Separately, each
+telemetry sink receives up to five seconds for best-effort flush. A stalled queued
+traffic sink is cancelled, pending events are counted as dropped, and dependency
+cleanup continues. This is not a total shutdown deadline for all dependencies.
+
+HTTP metrics use route templates, such as `/v1/files/{file_id}`, and `unmatched`
+for unknown paths. Built-in model names and configured per-model concurrency keys
+are retained; other model/error label values become `other`. Raw request paths
+remain available to the logging boundary, subject to its capture/redaction policy.
+
+Multipart Files parsing uses Starlette spooled uploads. `python-multipart` is a
+base runtime dependency; no integrations extra is needed. The total request-body
+limit and MIME-specific file limits still apply, including files larger than the
+spool's memory threshold. Temporary files are closed on success, error and cancellation.

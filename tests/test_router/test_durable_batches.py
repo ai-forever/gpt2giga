@@ -799,3 +799,50 @@ async def test_batch_native_foreign_attachment_rejected_before_submit(tmp_path):
         )
         assert response.status_code == 404, response.text
         assert native.calls == []
+
+
+async def test_batch_list_polls_only_page_and_skips_unchanged_writes(tmp_path):
+    native = NativeBatches()
+    native.status = "in_progress"
+    async with app_client(tmp_path, native) as (app, client):
+        file_id = await upload(client, openai_rows())
+        ids = []
+        for _ in range(5):
+            result = await client.post(
+                "/v1/batches",
+                json={"input_file_id": file_id, "endpoint": "/v1/chat/completions"},
+            )
+            assert result.status_code == 200, result.text
+            ids.append(result.json()["id"])
+        native.calls.clear()
+        invalid = await client.get(
+            "/v1/batches", params={"limit": 1, "after": "foreign"}
+        )
+        assert invalid.status_code == 400
+        assert native.calls == []
+        first = await client.get("/v1/batches", params={"limit": 1})
+        assert first.status_code == 200
+        assert first.json()["has_more"] is True
+        assert [row["id"] for row in first.json()["data"]] == ids[-1:]
+        assert len(native.calls) == 1
+        statements = []
+        app.state.resource_store._db.set_trace_callback(statements.append)
+        native.calls.clear()
+        repeated = await client.get("/v1/batches", params={"limit": 1})
+        assert repeated.status_code == 200
+        assert len(native.calls) == 1
+        assert not any(sql.startswith("UPDATE resources") for sql in statements)
+        assert not any("SUM(" in sql for sql in statements)
+        next_page = await client.get(
+            "/v1/batches", params={"limit": 1, "after": ids[-1]}
+        )
+        assert [row["id"] for row in next_page.json()["data"]] == ids[-2:-1]
+        native.status = "completed"
+        completed = await client.get(f"/v1/batches/{ids[-1]}")
+        assert completed.json()["status"] == "completed"
+        native.calls.clear()
+        statements.clear()
+        terminal = await client.get("/v1/batches", params={"limit": 1})
+        assert terminal.status_code == 200
+        assert native.calls == []
+        assert not any(sql.startswith("UPDATE resources") for sql in statements)

@@ -197,3 +197,7 @@ GigaChat profile. Known aliases never fall through to the default client.
 The Chat Completions facade to an OpenAI-compatible upstream remains blocked by the
 executable loss matrix and rejects before upstream I/O. Responses, Anthropic Messages
 and Gemini GenerateContent retain their admitted external bridge paths.
+
+For Files uploaded for an explicit GigaChat model alias, select its profile with
+`X-GPT2GIGA-Profile`. Gemini resumable uploads retain the start-time profile.
+See [upload admission and profile selection](resource-apis.md#upload-admission-and-profile-selection).

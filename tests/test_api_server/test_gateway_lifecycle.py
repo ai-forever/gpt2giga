@@ -10,6 +10,9 @@ import pytest
 from gpt2giga.app.factory import create_app
 from gpt2giga.app.request_lifecycle import BridgeRequestLifecycle
 from gpt2giga.models.config import ProxyConfig, ProxySettings
+from gpt2giga.sinks.logs.composite import CompositeTrafficLogSink
+from gpt2giga.sinks.logs.queue import QueuedTrafficLogSink
+from gpt2giga.storage.resources import ResourceStoreError
 
 
 class _GigaChat:
@@ -102,3 +105,37 @@ def test_provider_runtime_startup_failure_closes_client_before_exposure(
             pass
 
     assert giga_client.closed is True
+
+
+async def test_stalled_telemetry_closes_workers_and_runtime(monkeypatch, tmp_path):
+    client = _GigaChat()
+    monkeypatch.setattr(
+        "gpt2giga.app.lifecycle.create_gigachat_client", lambda _: client
+    )
+    monkeypatch.setattr("gpt2giga.app.lifecycle.TELEMETRY_FLUSH_TIMEOUT_SECONDS", 0.01)
+
+    class StalledSink:
+        async def emit_many(self, events):
+            await asyncio.Event().wait()
+
+        async def flush(self):
+            await asyncio.Event().wait()
+
+    sinks = [QueuedTrafficLogSink(StalledSink()) for _ in range(2)]
+    app = create_app(
+        ProxyConfig(
+            proxy=ProxySettings(resource_store_path=str(tmp_path / "resources"))
+        )
+    )
+    app.state.traffic_log_sink = CompositeTrafficLogSink(sinks)
+    async with app.router.lifespan_context(app):
+        store = app.state.resource_store
+        for sink in sinks:
+            await sink.emit({"test": "event"})
+        workers = [sink._worker_task for sink in sinks]
+    assert client.closed
+    assert all(worker.done() for worker in workers)
+    assert all(sink._worker_task is None for sink in sinks)
+    assert all(sink.dropped_events == 1 for sink in sinks)
+    with pytest.raises(ResourceStoreError, match="not open"):
+        await store.list("owner", "file")

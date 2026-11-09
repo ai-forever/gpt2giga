@@ -19,6 +19,9 @@ from gpt2giga.core.context import (
     update_request_context,
 )
 from gpt2giga.models.config import ProxySettings
+from gpt2giga.protocol.request.transformer import normalized_message_fields
+from gpt2giga.protocols.normalized import NormalizedChatRequest
+from gpt2giga.protocols.openai import OpenAIProtocolAdapter
 
 ConversationProtocol = Literal["openai", "anthropic", "gemini"]
 
@@ -154,6 +157,33 @@ async def stitch_message_list(
         return None
 
     return await _stitch_messages(request, key, messages, settings=settings)
+
+
+async def stitch_normalized_chat(
+    request: Request,
+    normalized: NormalizedChatRequest,
+    *,
+    payload: Mapping[str, Any],
+    protocol: ConversationProtocol,
+) -> ConversationTurn | None:
+    """Stitch stored history while retaining the current turn's typed messages."""
+    incoming = [normalized_message_fields(message) for message in normalized.messages]
+    turn = await stitch_message_list(
+        request, incoming, payload=payload, protocol=protocol
+    )
+    if turn is not None:
+        current = {
+            _canonical_message(wire): typed
+            for wire, typed in zip(incoming, normalized.messages)
+        }
+        adapter = OpenAIProtocolAdapter()
+        normalized.messages = [
+            current[_canonical_message(message)]
+            if _canonical_message(message) in current
+            else adapter.chat_to_normalized({"messages": [message]}).messages[0]
+            for message in turn.request_messages
+        ]
+    return turn
 
 
 async def stitch_responses_payload(

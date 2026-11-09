@@ -379,3 +379,12 @@ status, warnings/errors, and the shape hash of the normalized payload.
 Token counting retains one narrow input-projection compatibility difference: `on` includes
 normalized tool/schema text, while `off`/`shadow` retain the tolerant legacy text subset.
 All modes share the same token-count dispatch, client binding, limiter and cleanup.
+
+The public Chat projection preserves the supported native `audio`, `annotations`,
+`inline_data`, `tool_executions` and `files` extensions through an explicit allowlist.
+Source markers use the shared renderer. Reference-only Chat replies do not download
+generated image bytes; consumers requiring bytes hydrate them explicitly.
+The stream owner discards reasoning/source state after both normal flush and aborted
+execution. Anthropic conversation stitching retains current typed messages and only
+decodes restored history at the storage boundary; its legacy request builder remains
+for batch/admin consumers.

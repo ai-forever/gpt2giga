@@ -194,12 +194,7 @@ async def create_batch(request: Request):
 async def list_batches(
     request: Request, after: str | None = None, limit: int = Query(20, ge=1, le=100)
 ):
-    resources = await registered_batches(request, "openai")
-    if after:
-        matches = [i for i, r in enumerate(resources) if r.public_id == after]
-        if not matches:
-            raise batch_error("Invalid batch cursor.")
-        resources = resources[matches[0] + 1 :]
+    resources = await registered_batches(request, "openai", limit=limit, after=after)
     data = [await batch_object(request, r) for r in resources[:limit]]
     return {
         "object": "list",

@@ -16,6 +16,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, TypeVar
 
+from anyio import CancelScope
+
 T = TypeVar("T")
 
 
@@ -69,6 +71,7 @@ class ResourceStore:
         self.max_resources = max_resources
         self._clock = clock
         self._lock = threading.RLock()
+        self._admission = asyncio.Lock()
         self._db: sqlite3.Connection | None = None
         self._secret: bytes | None = None
 
@@ -82,25 +85,28 @@ class ResourceStore:
     async def _run(
         self, operation: Callable[[], T], *, cancel_event: threading.Event | None = None
     ) -> T:
-        # Drain the worker on cancellation: no detached writes outlive a request.
-        task = asyncio.create_task(asyncio.to_thread(operation))
-        try:
-            return await asyncio.shield(task)
-        except asyncio.CancelledError:
-            if cancel_event is not None:
-                cancel_event.set()
-            while not task.done():
-                try:
-                    await asyncio.shield(task)
-                except asyncio.CancelledError:
-                    continue
-                except Exception:
-                    break
+        # Waiting operations must not occupy shared executor threads.
+        async with self._admission:
+            # Drain the worker on cancellation: no detached writes outlive a request.
+            task = asyncio.create_task(asyncio.to_thread(operation))
             try:
-                task.result()
-            except Exception:
-                pass
-            raise
+                return await asyncio.shield(task)
+            except asyncio.CancelledError:
+                if cancel_event is not None:
+                    cancel_event.set()
+                with CancelScope(shield=True):
+                    while not task.done():
+                        try:
+                            await asyncio.shield(task)
+                        except asyncio.CancelledError:
+                            continue
+                        except Exception:
+                            break
+                try:
+                    task.result()
+                except Exception:
+                    pass
+                raise
 
     def _open(self) -> None:
         with self._lock:
@@ -121,6 +127,30 @@ class ResourceStore:
                     metadata TEXT NOT NULL, created_at REAL NOT NULL,
                     expires_at REAL NOT NULL, blob_name TEXT, blob_size INTEGER NOT NULL,
                     PRIMARY KEY(owner, kind, public_id))""")
+                db.execute("""CREATE TABLE IF NOT EXISTS resource_usage (
+                    singleton INTEGER PRIMARY KEY CHECK(singleton=1),
+                    resource_count INTEGER NOT NULL, metadata_bytes INTEGER NOT NULL,
+                    blob_bytes INTEGER NOT NULL)""")
+                db.execute("""INSERT OR REPLACE INTO resource_usage
+                    SELECT 1, COUNT(*), COALESCE(SUM(length(CAST(metadata AS BLOB))),0),
+                    COALESCE(SUM(blob_size),0) FROM resources""")
+                db.execute("""CREATE TRIGGER IF NOT EXISTS resource_usage_insert
+                    AFTER INSERT ON resources BEGIN UPDATE resource_usage SET
+                    resource_count=resource_count+1,
+                    metadata_bytes=metadata_bytes+length(CAST(NEW.metadata AS BLOB)),
+                    blob_bytes=blob_bytes+NEW.blob_size WHERE singleton=1; END""")
+                db.execute("""CREATE TRIGGER IF NOT EXISTS resource_usage_delete
+                    AFTER DELETE ON resources BEGIN UPDATE resource_usage SET
+                    resource_count=resource_count-1,
+                    metadata_bytes=metadata_bytes-length(CAST(OLD.metadata AS BLOB)),
+                    blob_bytes=blob_bytes-OLD.blob_size WHERE singleton=1; END""")
+                db.execute("""CREATE TRIGGER IF NOT EXISTS resource_usage_update
+                    AFTER UPDATE OF metadata, blob_size ON resources
+                    BEGIN UPDATE resource_usage SET
+                    metadata_bytes=metadata_bytes+length(CAST(NEW.metadata AS BLOB))
+                        -length(CAST(OLD.metadata AS BLOB)),
+                    blob_bytes=blob_bytes+NEW.blob_size-OLD.blob_size
+                    WHERE singleton=1; END""")
                 db.execute(
                     "CREATE TABLE IF NOT EXISTS registered_resources (kind TEXT NOT NULL, public_id TEXT NOT NULL, PRIMARY KEY(kind, public_id))"
                 )
@@ -137,6 +167,9 @@ class ResourceStore:
                 )
                 db.execute(
                     "CREATE INDEX IF NOT EXISTS resource_public_id ON resources(kind, public_id)"
+                )
+                db.execute(
+                    "CREATE INDEX IF NOT EXISTS resource_page ON resources(owner, kind, created_at, public_id)"
                 )
                 db.execute(
                     "INSERT OR IGNORE INTO store_settings VALUES ('namespace_secret', ?)",
@@ -159,6 +192,11 @@ class ResourceStore:
                             "SELECT blob_name FROM resources WHERE blob_name IS NOT NULL"
                         )
                     }
+                    for name, size in db.execute(
+                        "SELECT blob_name, blob_size FROM resources WHERE kind='upload' AND blob_name IS NOT NULL"
+                    ):
+                        with (self.path / "blobs" / name).open("r+b") as stream:
+                            stream.truncate(size)
                     for blob in (self.path / "blobs").iterdir():
                         if (
                             len(blob.name) == 32
@@ -214,7 +252,7 @@ class ResourceStore:
 
     def _check_metadata_budget(self, db: sqlite3.Connection) -> None:
         count, size = db.execute(
-            "SELECT COUNT(*), COALESCE(SUM(length(CAST(metadata AS BLOB))), 0) FROM resources"
+            "SELECT resource_count, metadata_bytes FROM resource_usage WHERE singleton=1"
         ).fetchone()
         if count > self.max_resources or size > self.max_metadata_bytes:
             raise ResourceLimitError("Resource store metadata quota exceeded")
@@ -251,10 +289,9 @@ class ResourceStore:
                 try:
                     with db:
                         db.execute("BEGIN IMMEDIATE")
-                        self._purge(db)
                         size = len(blob) if blob is not None else 0
                         total = db.execute(
-                            "SELECT COALESCE(SUM(blob_size), 0) FROM resources"
+                            "SELECT blob_bytes FROM resource_usage WHERE singleton=1"
                         ).fetchone()[0]
                         if total + size > self.max_total_blob_bytes:
                             raise ResourceLimitError(
@@ -292,6 +329,7 @@ class ResourceStore:
                         (self.path / "blobs" / name).unlink(missing_ok=True)
                     raise
 
+        await self.purge_expired()
         return await self._run(operation)
 
     async def get(self, owner: str, kind: str, public_id: str) -> Resource | None:
@@ -341,6 +379,48 @@ class ResourceStore:
 
         return await self._run(operation)
 
+    async def page(
+        self,
+        owners: set[str],
+        kind: str,
+        *,
+        protocol: str,
+        limit: int,
+        after: str | None = None,
+        before: str | None = None,
+    ) -> list[Resource]:
+        """Read at most limit+1 rows after an owned, protocol-scoped cursor."""
+
+        def operation() -> list[Resource]:
+            with self._lock:
+                db = self._connection()
+                scope = (
+                    f"owner IN ({','.join('?' for _ in owners)}) AND kind=? "
+                    "AND expires_at>? AND json_extract(metadata, '$.protocol')=?"
+                )
+                args = [*sorted(owners), kind, self._clock(), protocol]
+                cursor = ""
+                for value, operator in ((after, "<"), (before, ">")):
+                    if value is None:
+                        continue
+                    row = db.execute(
+                        f"SELECT created_at, public_id FROM resources WHERE {scope}{cursor} AND public_id=?",
+                        (*args, value),
+                    ).fetchone()
+                    if row is None:
+                        raise ResourceNotFoundError("Invalid resource cursor")
+                    cursor += f" AND (created_at, public_id) {operator} (?, ?)"
+                    args.extend(row)
+                rows = db.execute(
+                    "SELECT public_id, kind, metadata, created_at, expires_at, blob_size "
+                    f"FROM resources WHERE {scope}{cursor} "
+                    "ORDER BY created_at DESC, public_id DESC LIMIT ?",
+                    (*args, limit + 1),
+                ).fetchall()
+                return [self._resource(row) for row in rows]
+
+        return await self._run(operation)
+
     async def update(
         self,
         owner: str,
@@ -366,6 +446,13 @@ class ResourceStore:
                 encoded = json.dumps(
                     metadata, ensure_ascii=False, separators=(",", ":")
                 )
+                if encoded == row[2]:
+                    return self._resource(row)
+                if kind == "file_upload" and metadata.get("upstream_id"):
+                    db.execute(
+                        "INSERT OR IGNORE INTO registered_resources VALUES ('file', ?)",
+                        (metadata["upstream_id"],),
+                    )
                 db.execute(
                     "UPDATE resources SET metadata=? WHERE owner=? AND kind=? AND public_id=?",
                     (encoded, owner, kind, public_id),
@@ -397,7 +484,6 @@ class ResourceStore:
         def operation() -> None:
             with self._lock, self._connection() as db:
                 db.execute("BEGIN IMMEDIATE")
-                self._purge(db)
                 now = self._clock()
                 if conversation_id is not None:
                     row = db.execute(
@@ -439,6 +525,7 @@ class ResourceStore:
                 if cancelled.is_set():
                     raise ResourceStoreError("Response storage cancelled")
 
+        await self.purge_expired()
         await self._run(operation, cancel_event=cancelled)
 
     async def read_blob(self, owner: str, kind: str, public_id: str) -> bytes | None:
@@ -449,14 +536,13 @@ class ResourceStore:
                 # A read transaction prevents another worker's delete until read ends.
                 db.execute("BEGIN IMMEDIATE")
                 row = db.execute(
-                    "SELECT blob_name FROM resources WHERE owner=? AND kind=? AND public_id=? AND expires_at>?",
+                    "SELECT blob_name, blob_size FROM resources WHERE owner=? AND kind=? AND public_id=? AND expires_at>?",
                     (owner, kind, public_id, self._clock()),
                 ).fetchone()
-                return (
-                    (self.path / "blobs" / row[0]).read_bytes()
-                    if row and row[0]
-                    else None
-                )
+                if row and row[0]:
+                    with (self.path / "blobs" / row[0]).open("rb") as stream:
+                        return stream.read(row[1])
+                return None
 
         return await self._run(operation)
 
@@ -468,8 +554,9 @@ class ResourceStore:
         def operation() -> Resource | None:
             with self._lock:
                 db = self._connection()
-                new_name = None
-                old_name = None
+                name = None
+                previous_size = 0
+                created = False
                 committed = False
                 try:
                     with db:
@@ -491,7 +578,7 @@ class ResourceStore:
                             )
                         size = offset + len(data)
                         total = db.execute(
-                            "SELECT COALESCE(SUM(blob_size), 0) FROM resources"
+                            "SELECT blob_bytes FROM resource_usage WHERE singleton=1"
                         ).fetchone()[0]
                         if (
                             size > self.max_blob_bytes
@@ -500,17 +587,15 @@ class ResourceStore:
                             raise ResourceLimitError(
                                 "Resource store blob quota exceeded"
                             )
-                        old_name = row[6]
-                        previous = (
-                            (self.path / "blobs" / old_name).read_bytes()
-                            if old_name
-                            else b""
-                        )
-                        new_name = uuid.uuid4().hex
-                        target = self.path / "blobs" / new_name
-                        with target.open("xb") as stream:
+                        name = row[6] or uuid.uuid4().hex
+                        created = row[6] is None
+                        previous_size = row[5]
+                        target = self.path / "blobs" / name
+                        with target.open("x+b" if created else "r+b") as stream:
                             os.chmod(target, 0o600)
-                            stream.write(previous)
+                            # Remove the tail of any uncommitted crashed append.
+                            stream.truncate(previous_size)
+                            stream.seek(previous_size)
                             stream.write(data)
                             stream.flush()
                             os.fsync(stream.fileno())
@@ -520,18 +605,20 @@ class ResourceStore:
                         )
                         db.execute(
                             "UPDATE resources SET blob_name=?, blob_size=?, metadata=? WHERE owner=? AND kind=? AND public_id=?",
-                            (new_name, size, encoded, owner, kind, public_id),
+                            (name, size, encoded, owner, kind, public_id),
                         )
                         self._check_metadata_budget(db)
                     committed = True
-                    if old_name:
-                        (self.path / "blobs" / old_name).unlink(missing_ok=True)
                     return self._resource(
                         (row[0], row[1], encoded, row[3], row[4], size)
                     )
                 except BaseException:
-                    if new_name and not committed:
-                        (self.path / "blobs" / new_name).unlink(missing_ok=True)
+                    if name and created and not committed:
+                        (self.path / "blobs" / name).unlink(missing_ok=True)
+                    # Existing blobs may already have another worker's committed
+                    # append after rollback releases SQLite's writer lock. Leave
+                    # their tail alone; reads honor the committed size and the
+                    # next append/startup truncates under the database lock.
                     raise
 
         return await self._run(operation)

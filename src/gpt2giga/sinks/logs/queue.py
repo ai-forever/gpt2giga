@@ -49,10 +49,17 @@ class QueuedTrafficLogSink:
 
     async def flush(self) -> None:
         """Drain queued events and flush the wrapped sink best effort."""
-        if self._worker_task is not None:
-            await self._queue.join()
-        await self._flush_inner()
-        await self._stop_worker()
+        try:
+            if self._worker_task is not None:
+                await self._queue.join()
+            await self._flush_inner()
+        finally:
+            await self._stop_worker()
+            # Cancellation abandons unsent events; never retain their payloads.
+            while not self._queue.empty():
+                self._queue.get_nowait()
+                self._queue.task_done()
+                self.dropped_events += 1
 
     def _ensure_worker(self) -> None:
         if self._worker_task is None or self._worker_task.done():
@@ -77,9 +84,14 @@ class QueuedTrafficLogSink:
                 except asyncio.QueueEmpty:
                     break
 
-            await self._emit_batch(batch)
-            for _ in batch:
-                self._queue.task_done()
+            try:
+                await self._emit_batch(batch)
+            except asyncio.CancelledError:
+                self.dropped_events += len(batch)
+                raise
+            finally:
+                for _ in batch:
+                    self._queue.task_done()
 
     async def _emit_batch(self, batch: list[Any]) -> None:
         try:
@@ -91,6 +103,7 @@ class QueuedTrafficLogSink:
                     await self.sink.emit(event)
             self.emitted_events += len(batch)
         except Exception as exc:  # pragma: no cover - covered by no-raise behavior
+            self.dropped_events += len(batch)
             if self.logger is not None:
                 self.logger.warning("Traffic log queue worker failed: {}", exc)
 

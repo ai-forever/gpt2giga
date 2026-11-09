@@ -19,7 +19,7 @@ from gpt2giga.common.client_params import ClientCompatibilityError
 from gpt2giga.common.conversation import (
     commit_anthropic_response,
     stitch_anthropic_stream,
-    stitch_chat_payload,
+    stitch_normalized_chat,
 )
 from gpt2giga.common.exceptions import exceptions_handler
 from gpt2giga.common.gigachat_options import (
@@ -43,7 +43,6 @@ from gpt2giga.protocol.anthropic.params import (
 )
 from gpt2giga.protocol.anthropic.files import resolve_anthropic_file_references
 from gpt2giga.protocol.anthropic.request import (
-    _build_openai_data_from_anthropic_request,
     _convert_anthropic_messages_to_openai,
     _extract_text_from_openai_messages,
     _extract_structured_output_text,
@@ -55,7 +54,6 @@ from gpt2giga.protocols.anthropic import (
     normalized_chat_response_to_anthropic,
 )
 from gpt2giga.protocols.normalized import BridgeMatrixAdmissionError, PublicProtocol
-from gpt2giga.protocols.openai import OpenAIProtocolAdapter
 from gpt2giga.providers.gigachat import GigaChatProviderAdapter
 from gpt2giga.providers.gigachat.adapter import (
     normalized_chat_to_openai_payload,
@@ -177,25 +175,11 @@ async def messages(request: Request):
     normalized_request = _anthropic_adapter(request).messages_to_normalized(
         data, context=context
     )
-    openai_data = _build_openai_data_from_anthropic_request(
-        data, request.app.state.logger
+    conversation_turn = await stitch_normalized_chat(
+        request, normalized_request, payload=data, protocol="anthropic"
     )
-    openai_data["messages"] = normalized_chat_to_openai_payload(normalized_request)[
-        "messages"
-    ]
-    for key in ("conversation", "metadata"):
-        if key in data:
-            openai_data[key] = data[key]
-    conversation_turn = await stitch_chat_payload(
-        request, openai_data, protocol="anthropic"
-    )
+    openai_data = normalized_chat_to_openai_payload(normalized_request)
     await validate_model_attachments(request, openai_data)
-    if conversation_turn is not None:
-        normalized_request.messages = (
-            OpenAIProtocolAdapter()
-            .chat_to_normalized({"messages": openai_data["messages"]})
-            .messages
-        )
     provider = _provider_adapter(
         request,
         normalized_request=normalized_request,

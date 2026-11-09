@@ -239,28 +239,53 @@ async def test_startup_removes_crashed_unpublished_blob_only(tmp_path):
     await store.aclose()
 
 
-async def test_failed_old_blob_cleanup_preserves_committed_append(
+async def test_append_keeps_blob_identity_and_never_copies_prefix(
     tmp_path, monkeypatch
 ):
-    store = await ResourceStore.open(tmp_path)
-    await store.put("owner", "upload", "session", {"status": "active"}, blob=b"a")
-    old_blob = next((tmp_path / "blobs").iterdir())
-    unlink = type(old_blob).unlink
+    from pathlib import Path
 
-    def fail_old(path, *args, **kwargs):
-        if path == old_blob:
-            raise PermissionError("simulated cleanup failure")
-        return unlink(path, *args, **kwargs)
+    store = await ResourceStore.open(tmp_path)
+    await store.put("owner", "upload", "session", {"status": "active"}, blob=b"")
+    blob = next((tmp_path / "blobs").iterdir())
+    inode = blob.stat().st_ino
+    original_open = Path.open
+    counts = {"read": 0, "write": 0}
+
+    class CountedFile:
+        def __init__(self, stream):
+            self.stream = stream
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            self.stream.close()
+
+        def __getattr__(self, name):
+            return getattr(self.stream, name)
+
+        def read(self, *args):
+            data = self.stream.read(*args)
+            counts["read"] += len(data)
+            return data
+
+        def write(self, data):
+            counts["write"] += len(data)
+            return self.stream.write(data)
+
+    def counted_open(path, *args, **kwargs):
+        result = original_open(path, *args, **kwargs)
+        return CountedFile(result) if path == blob else result
 
     with monkeypatch.context() as patch:
-        patch.setattr(type(old_blob), "unlink", fail_old)
-        with pytest.raises(PermissionError):
-            await store.append_blob("owner", "upload", "session", b"b", offset=1)
-    assert await store.read_blob("owner", "upload", "session") == b"ab"
-    await store.aclose()
-    store = await ResourceStore.open(tmp_path)
-    assert not old_blob.exists()
-    assert await store.read_blob("owner", "upload", "session") == b"ab"
+        patch.setattr(Path, "open", counted_open)
+        for index in range(64):
+            await store.append_blob(
+                "owner", "upload", "session", b"x" * 65536, offset=index * 65536
+            )
+    assert counts == {"read": 0, "write": 64 * 65536}
+    assert blob.stat().st_ino == inode
+    assert len(await store.read_blob("owner", "upload", "session")) == 64 * 65536
     await store.aclose()
 
 
@@ -355,3 +380,152 @@ async def test_startup_discards_redundant_tombstones_but_keeps_native_file_gate(
             "SELECT kind, public_id FROM registered_resources"
         ).fetchall() == [("file", "native-file")]
     await store.aclose()
+
+
+async def test_rejected_large_publication_commits_bounded_expiry_cleanup(tmp_path):
+    now = [0.0]
+    store = await ResourceStore.open(
+        tmp_path, clock=lambda: now[0], max_metadata_bytes=40000
+    )
+    for index in range(400):
+        await store.put("owner", "response", str(index), {"x": "x" * 90}, expires_at=1)
+    now[0] = 2
+    with pytest.raises(ResourceLimitError):
+        await store.commit_response("owner", "new", {"x": "x" * 30000})
+    with sqlite3.connect(tmp_path / "resources.sqlite3") as db:
+        assert db.execute("SELECT COUNT(*) FROM resources").fetchone()[0] == 144
+    await store.commit_response("owner", "new", {"x": "x" * 30000})
+    assert await store.get("owner", "response", "new") is not None
+    await store.aclose()
+
+
+async def test_append_rollback_and_crashed_tail_are_never_read(tmp_path, monkeypatch):
+    store = await ResourceStore.open(tmp_path)
+    await store.put("owner", "upload", "session", {"status": "active"}, blob=b"ok")
+    blob = next((tmp_path / "blobs").iterdir())
+    with monkeypatch.context() as patch:
+
+        def reject(db):
+            raise ResourceLimitError("simulated metadata rejection")
+
+        patch.setattr(store, "_check_metadata_budget", reject)
+        with pytest.raises(ResourceLimitError):
+            await store.append_blob("owner", "upload", "session", b"bad", offset=2)
+    assert await store.read_blob("owner", "upload", "session") == b"ok"
+    with blob.open("ab") as stream:
+        stream.write(b"crashed-tail")
+    assert await store.read_blob("owner", "upload", "session") == b"ok"
+    await store.aclose()
+    store = await ResourceStore.open(tmp_path)
+    assert blob.read_bytes() == b"ok"
+    await store.append_blob("owner", "upload", "session", b"new", offset=2)
+    assert await store.read_blob("owner", "upload", "session") == b"oknew"
+    await store.aclose()
+
+
+async def test_queued_storage_uses_no_executor_threads_and_cancels_promptly(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+
+    store = await ResourceStore.open(tmp_path)
+    loop = asyncio.get_running_loop()
+    previous = loop._default_executor
+    executor = ThreadPoolExecutor(max_workers=2)
+    loop.set_default_executor(executor)
+    started, release = threading.Event(), threading.Event()
+    try:
+
+        def blocked():
+            started.set()
+            release.wait(timeout=5)
+
+        active = asyncio.create_task(store._run(blocked))
+        await asyncio.to_thread(started.wait, 5)
+        queued = [asyncio.create_task(store.list("owner", "file")) for _ in range(8)]
+        await asyncio.sleep(0)
+        assert await asyncio.wait_for(asyncio.to_thread(lambda: "free"), 1) == "free"
+        for task in queued:
+            task.cancel()
+        results = await asyncio.wait_for(
+            asyncio.gather(*queued, return_exceptions=True), 1
+        )
+        assert all(isinstance(result, asyncio.CancelledError) for result in results)
+    finally:
+        release.set()
+        await active
+        loop._default_executor = previous
+        executor.shutdown()
+        await store.aclose()
+
+
+async def test_usage_accounting_unchanged_update_and_restart(tmp_path):
+    store = await ResourceStore.open(tmp_path)
+    await store.put("owner", "file", "file_g2g_local", {"text": "é"}, blob=b"abc")
+    statements = []
+    store._db.set_trace_callback(statements.append)
+    await store.update("owner", "file", "file_g2g_local", {"text": "é"})
+    assert not any(sql.startswith("UPDATE resources") for sql in statements)
+    await store.update("owner", "file", "file_g2g_local", {"text": "new"})
+    with sqlite3.connect(tmp_path / "resources.sqlite3") as db:
+        assert (
+            db.execute(
+                "SELECT resource_count, metadata_bytes, blob_bytes FROM resource_usage"
+            ).fetchone()
+            == db.execute(
+                "SELECT COUNT(*), SUM(length(CAST(metadata AS BLOB))), SUM(blob_size) FROM resources"
+            ).fetchone()
+        )
+    await store.aclose()
+    store = await ResourceStore.open(tmp_path)
+    await store.delete("owner", "file", "file_g2g_local")
+    assert store._db.execute(
+        "SELECT resource_count, metadata_bytes, blob_bytes FROM resource_usage"
+    ).fetchone() == (0, 0, 0)
+    await store.aclose()
+
+
+async def test_failed_append_does_not_truncate_another_workers_committed_bytes(
+    tmp_path, monkeypatch
+):
+    one = await ResourceStore.open(tmp_path)
+    two = await ResourceStore.open(tmp_path)
+    await one.put("owner", "upload", "session", {"status": "active"}, blob=b"ok")
+    loop = asyncio.get_running_loop()
+    connection = one._connection()
+    interleaved = []
+
+    class RollbackBarrier:
+        def __getattr__(self, name):
+            return getattr(connection, name)
+
+        def __enter__(self):
+            connection.__enter__()
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            result = connection.__exit__(exc_type, exc, traceback)
+            if exc_type is ResourceLimitError:
+                # SQLite has released its writer lock. Force another worker to
+                # publish before the rejected writer's exception cleanup runs.
+                future = asyncio.run_coroutine_threadsafe(
+                    two.append_blob(
+                        "owner", "upload", "session", b"committed", offset=2
+                    ),
+                    loop,
+                )
+                interleaved.append(future.result(timeout=5))
+            return result
+
+    def reject(db):
+        raise ResourceLimitError("first writer rejected")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(one, "_connection", lambda: RollbackBarrier())
+        patch.setattr(one, "_check_metadata_budget", reject)
+        with pytest.raises(ResourceLimitError):
+            await one.append_blob("owner", "upload", "session", b"rejected", offset=2)
+    assert len(interleaved) == 1
+    assert interleaved[0].blob_size == len(b"okcommitted")
+    assert await two.read_blob("owner", "upload", "session") == b"okcommitted"
+    assert await one.read_blob("owner", "upload", "session") == b"okcommitted"
+    await one.aclose()
+    await two.aclose()

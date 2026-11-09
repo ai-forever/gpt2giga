@@ -641,3 +641,255 @@ async def test_responses_done_without_semantic_finish_is_error(mode, storage_mod
                 if frame["type"] == "response.created"
             )
             assert (await client.get(f"/v1/responses/{response_id}")).status_code == 404
+
+
+@pytest.mark.parametrize("mode", ["v1", "v2"])
+@pytest.mark.parametrize("normalization", ["off", "shadow", "on"])
+async def test_chat_preserves_native_sources_and_generated_file_references(
+    mode, normalization
+):
+    seen = []
+    inline = {
+        "sources": {"1": {"url": "https://example.test/source", "title": "Source"}}
+    }
+    files = [{"id": "generated-image", "mime": "image/png", "target": "image"}]
+    execution = {"name": "image_generate", "status": "success"}
+
+    def handle(request):
+        seen.append(request)
+        assert request.method == "POST", (
+            "reference-only Chat must not fetch image bytes"
+        )
+        if mode == "v1":
+            payload = {
+                "choices": [
+                    {
+                        "index": 0,
+                        "finish_reason": "stop",
+                        "message": {
+                            "role": "assistant",
+                            "content": "Answer [sources=[1]]",
+                            "inline_data": inline,
+                        },
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": 1,
+                    "completion_tokens": 2,
+                    "total_tokens": 3,
+                },
+            }
+        else:
+            payload = {
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "content": [
+                            {"text": "Answer [sources=[1]]", "inline_data": inline},
+                            {"files": files},
+                            {"tool_execution": execution},
+                        ],
+                    }
+                ],
+                "finish_reason": "stop",
+                "usage": {"input_tokens": 1, "output_tokens": 2, "total_tokens": 3},
+            }
+        payload.update(created=1, model="test-model", object="chat.completion")
+        return httpx2.Response(200, json=payload)
+
+    async with sdk_app(handle, normalization=normalization) as (client, _):
+        response = await client.post(
+            f"/{mode}/chat/completions",
+            json={
+                "model": "test-model",
+                "messages": [{"role": "user", "content": "hello"}],
+            },
+        )
+    assert response.status_code == 200, response.text
+    message = response.json()["choices"][0]["message"]
+    assert "[sources=" not in message["content"]
+    assert message["content"].count("https://example.test/source") == 1
+    assert message["inline_data"] == inline
+    if mode == "v2":
+        assert message["files"] == files
+        assert message["tool_executions"] == [execution]
+    assert len(seen) == 1
+
+
+@pytest.mark.parametrize("mode", ["v1", "v2"])
+@pytest.mark.parametrize("normalization", ["off", "shadow", "on"])
+@pytest.mark.parametrize("include_parameters", [False, True])
+async def test_flat_input_schema_preserves_precedence_at_sdk_boundary(
+    mode, normalization, include_parameters
+):
+    seen = []
+    schema = {
+        "type": "object",
+        "properties": {"city": {"type": "string"}},
+        "required": ["city"],
+    }
+
+    def handle(request):
+        seen.append(json.loads(request.content))
+        payload = (
+            {
+                "choices": [
+                    {
+                        "message": {"role": "assistant", "content": "ok"},
+                        "index": 0,
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": 1,
+                    "completion_tokens": 1,
+                    "total_tokens": 2,
+                },
+            }
+            if mode == "v1"
+            else {
+                "messages": [{"role": "assistant", "content": [{"text": "ok"}]}],
+                "finish_reason": "stop",
+                "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
+            }
+        )
+        payload.update(created=1, model="test-model", object="chat.completion")
+        return httpx2.Response(200, json=payload)
+
+    tool = {"type": "function", "name": "weather", "input_schema": schema}
+    if include_parameters:
+        tool["parameters"] = {
+            "type": "object",
+            "properties": {"ignored": {"type": "number"}},
+        }
+    async with sdk_app(handle, normalization=normalization) as (client, _):
+        response = await client.post(
+            f"/{mode}/chat/completions",
+            json={
+                "model": "test-model",
+                "messages": [{"role": "user", "content": "hello"}],
+                "tools": [tool],
+            },
+        )
+    assert response.status_code == 200, response.text
+    sent = seen[0]
+    if mode == "v1":
+        assert sent["functions"][0]["parameters"] == schema
+    else:
+        assert (
+            sent["tools"][0]["functions"]["specifications"][0]["parameters"] == schema
+        )
+
+
+async def test_responses_image_bytes_consumer_still_hydrates_generated_files():
+    seen = []
+
+    def handle(request):
+        seen.append((request.method, request.url.path))
+        if request.method == "GET":
+            assert request.url.path.endswith("/files/generated-image/content")
+            return httpx2.Response(200, content=b"image-bytes")
+        return httpx2.Response(
+            200,
+            json={
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "tool_execution": {
+                                    "name": "image_generate",
+                                    "status": "success",
+                                }
+                            },
+                            {
+                                "files": [
+                                    {
+                                        "id": "generated-image",
+                                        "mime": "image/png",
+                                        "target": "image",
+                                    }
+                                ]
+                            },
+                        ],
+                    }
+                ],
+                "finish_reason": "stop",
+                "model": "test-model",
+                "usage": {"input_tokens": 1, "output_tokens": 2, "total_tokens": 3},
+            },
+        )
+
+    async with sdk_app(handle) as (client, _):
+        response = await client.post(
+            "/v2/responses",
+            json={
+                "model": "test-model",
+                "input": "Draw an image",
+                "tools": [{"type": "image_generation"}],
+            },
+        )
+    assert response.status_code == 200, response.text
+    image = next(
+        item
+        for item in response.json()["output"]
+        if item["type"] == "image_generation_call"
+    )
+    assert image["result"] == "aW1hZ2UtYnl0ZXM="
+    assert [method for method, _ in seen] == ["POST", "GET"]
+
+
+@pytest.mark.parametrize("mode", ["v1", "v2"])
+async def test_repeated_interrupted_sdk_streams_release_processor_buffers(mode):
+    streams = []
+
+    class Interrupted(httpx2.AsyncByteStream):
+        closed = False
+
+        async def __aiter__(self):
+            text = "answer [sources=[" + "1" * 10_000
+            chunk = (
+                {
+                    "choices": [
+                        {
+                            "index": 0,
+                            "delta": {"role": "assistant", "content": text},
+                            "finish_reason": None,
+                        }
+                    ],
+                    "created": 1,
+                    "model": "test-model",
+                    "object": "chat.completion.chunk",
+                }
+                if mode == "v1"
+                else {"messages": [{"role": "assistant", "content": [{"text": text}]}]}
+            )
+            yield f"data: {json.dumps(chunk)}\n\n".encode()
+            raise httpx2.ReadError("synthetic interruption")
+
+        async def aclose(self):
+            self.closed = True
+
+    def handle(request):
+        stream = Interrupted()
+        streams.append(stream)
+        return httpx2.Response(
+            200, headers={"content-type": "text/event-stream"}, stream=stream
+        )
+
+    async with sdk_app(handle) as (client, app):
+        for _ in range(20):
+            response = await client.post(
+                f"/{mode}/chat/completions",
+                json={
+                    "model": "test-model",
+                    "messages": [{"role": "user", "content": "hello"}],
+                    "stream": True,
+                },
+            )
+            assert response.status_code == 200
+            assert '"error"' in response.text
+            assert app.state.response_processor._stream_reasoning_parsers == {}
+            assert app.state.response_processor._stream_source_renderers == {}
+    assert len(streams) == 20
+    assert all(stream.closed for stream in streams)

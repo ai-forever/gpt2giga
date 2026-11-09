@@ -2,6 +2,8 @@ import asyncio
 import json
 import stat
 
+import pytest
+
 
 from gpt2giga.core.interfaces import TrafficLogSink
 from gpt2giga.models.config import ProxySettings
@@ -323,3 +325,27 @@ async def test_queued_traffic_log_sink_isolates_inner_errors():
 
     await sink.emit({"id": 1})
     await sink.flush()
+
+
+async def test_cancelled_flush_stops_worker_and_accounts_for_abandoned_events():
+    started = asyncio.Event()
+
+    class StalledSink:
+        async def emit_many(self, events):
+            started.set()
+            await asyncio.Event().wait()
+
+        async def flush(self):
+            await asyncio.Event().wait()
+
+    sink = QueuedTrafficLogSink(StalledSink(), batch_size=1)
+    await sink.emit({"id": 1})
+    await started.wait()
+    await sink.emit({"id": 2})
+    worker = sink._worker_task
+    with pytest.raises(asyncio.TimeoutError):
+        await asyncio.wait_for(sink.flush(), timeout=0.01)
+    assert worker.done()
+    assert sink._worker_task is None
+    assert sink.dropped_events == 2
+    await asyncio.wait_for(sink._queue.join(), timeout=0.1)

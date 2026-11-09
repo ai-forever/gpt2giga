@@ -169,15 +169,13 @@ async def list_message_batches(
     before_id: str | None = None,
     limit: int = Query(20, ge=1, le=1000),
 ):
-    resources = await registered_batches(request, "anthropic")
-    for cursor, before in ((after_id, False), (before_id, True)):
-        if cursor:
-            matches = [i for i, r in enumerate(resources) if r.public_id == cursor]
-            if not matches:
-                raise batch_error("Invalid batch cursor.")
-            resources = (
-                resources[: matches[0]] if before else resources[matches[0] + 1 :]
-            )
+    resources = await registered_batches(
+        request,
+        "anthropic",
+        limit=limit,
+        after=after_id or None,
+        before=before_id or None,
+    )
     data = [batch_object(request, r) for r in resources[:limit]]
     return {
         "data": data,

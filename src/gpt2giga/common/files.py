@@ -5,7 +5,9 @@ import time
 import uuid
 from types import SimpleNamespace
 
+from anyio import CancelScope
 from fastapi import HTTPException, Request
+from gigachat.exceptions import ResponseError
 
 from gpt2giga.app_state import (
     get_gigachat_client,
@@ -18,6 +20,8 @@ from gpt2giga.common.gigachat_options import (
 )
 from gpt2giga.protocol.files import _serialize_file_object
 from gpt2giga.storage.resources import ResourceLimitError
+
+_FILE_CLEANUP_TIMEOUT_SECONDS = 5.0
 
 
 def file_not_found() -> HTTPException:
@@ -130,6 +134,61 @@ async def validate_model_attachments(request: Request, data: dict) -> None:
             )
 
 
+def file_upload_size_limit(
+    settings, mime_type: str, filename: str, purpose: str
+) -> int:
+    """Apply the same MIME and resource byte limits before reading or uploading."""
+    limit = settings.resource_max_blob_bytes
+    if purpose in {"batch", "batch_output"} or filename.lower().endswith(".jsonl"):
+        return limit
+    kind = (
+        "image"
+        if mime_type.startswith("image/")
+        else "audio"
+        if mime_type.startswith("audio/")
+        else "text"
+    )
+    return min(limit, getattr(settings, f"max_{kind}_file_size_bytes"))
+
+
+async def bind_file_upload_profile(request: Request) -> None:
+    """Select one configured GigaChat target before deriving upload ownership."""
+    profile_id = request.headers.get("x-gpt2giga-profile")
+    if profile_id is None:
+        return
+    registry = getattr(request.app.state, "provider_registry", None)
+    profiles = registry.config.profiles if registry is not None else []
+    if not any(
+        p.profile_id == profile_id and p.provider_kind.value == "gigachat"
+        for p in profiles
+    ):
+        raise HTTPException(400, detail="Unknown or non-GigaChat upload profile.")
+    from gpt2giga.app.providers import bind_gigachat_profile
+
+    await bind_gigachat_profile(request, profile_id)
+
+
+async def _bounded_cleanup(request: Request, operation) -> None:
+    """Bound compensation; drain any already-started local transaction on cancel."""
+
+    async def run():
+        try:
+            await asyncio.wait_for(operation(), timeout=_FILE_CLEANUP_TIMEOUT_SECONDS)
+        except Exception:
+            logger = getattr(request.app.state, "logger", None)
+            if logger is not None:
+                logger.warning("File cleanup incomplete; durable intent retained")
+
+    task = asyncio.create_task(run())
+    with CancelScope(shield=True):
+        while not task.done():
+            try:
+                await asyncio.shield(task)
+            except asyncio.CancelledError:
+                continue
+    task.result()
+
+
 async def upload_file_resource(
     request: Request,
     *,
@@ -141,90 +200,124 @@ async def upload_file_resource(
     upload_session_id: str | None = None,
 ) -> dict:
     """Publish metadata only after a real upload or atomic local blob creation."""
+    if upload_session_id is None:
+        await bind_file_upload_profile(request)
     store = get_resource_store(request)
     owner = get_resource_owner(request)
     is_local = purpose in {"batch", "batch_output"} or filename.lower().endswith(
         ".jsonl"
     )
-    limit = store.max_blob_bytes
-    if not is_local:
-        settings = request.app.state.config.proxy_settings
-        kind = (
-            "image"
-            if mime_type.startswith("image/")
-            else "audio"
-            if mime_type.startswith("audio/")
-            else "text"
-        )
-        limit = min(limit, getattr(settings, f"max_{kind}_file_size_bytes"))
+    limit = min(
+        store.max_blob_bytes,
+        file_upload_size_limit(
+            request.app.state.config.proxy_settings, mime_type, filename, purpose
+        ),
+    )
     if len(content) > limit:
         raise HTTPException(
             413, detail="File exceeds the configured upload size limit."
         )
-    if is_local:
-        file_id = "file_g2g_" + uuid.uuid4().hex
-        file = SimpleNamespace(
-            id_=file_id,
-            bytes_=len(content),
-            filename=filename,
-            created_at=int(time.time()),
-            purpose="general",
-        )
-    else:
-        options = extract_gigachat_request_options(request)
-        async with gigachat_request_options(
-            get_gigachat_client(request), options, include_body=False
-        ) as client:
-            file = await client.aupload_file(
-                (filename, content, mime_type), purpose="general"
-            )
-        file_id = file.id_
-    metadata = {
-        **_serialize_file_object(file, {"purpose": purpose}),
-        "mime_type": mime_type,
-        "protocol": protocol,
-        "upstream_id": None if is_local else file_id,
-        "local": is_local,
-        "downloadable": purpose == "batch_output",
-    }
-    existing = await store.get(owner, "file", file_id)
+    reservation_id = "upload_g2g_" + uuid.uuid4().hex
+    file_id = "file_g2g_" + uuid.uuid4().hex if is_local else None
+    started = False
+    existing = None
+    compensate = False
+    options = extract_gigachat_request_options(request)
+
+    async def cleanup() -> None:
+        # Never drop the durable intent until remote deletion is confirmed.
+        if not is_local and started:
+            if file_id is None:
+                return  # Unknown upload outcome needs operator reconciliation.
+            if compensate:
+                async with gigachat_request_options(
+                    get_gigachat_client(request), options, include_body=False
+                ) as client:
+                    await client.with_options(max_retries=0).adelete_file(file=file_id)
+            elif existing is None:
+                return  # Cannot prove a previously owned ID is safe to delete.
+        if file_id is not None and existing is None:
+            await store.delete(owner, "file", file_id)
+        if not is_local:
+            await store.delete(owner, "file_upload", reservation_id)
+
     try:
-        if is_local and upload_session_id is not None:
+        if is_local:
+            file = SimpleNamespace(
+                id_=file_id,
+                bytes_=len(content),
+                filename=filename,
+                created_at=int(time.time()),
+                purpose="general",
+            )
+        else:
+            # Reserve count and conservative metadata capacity transactionally.
+            # Unknown outcomes deliberately do not expire or become retryable.
+            await store.put(
+                owner,
+                "file_upload",
+                reservation_id,
+                {
+                    "status": "upload_outcome_unknown",
+                    "upstream_id": None,
+                    "provider_profile": getattr(
+                        request.state, "provider_profile_id", None
+                    ),
+                    "filename": filename,
+                    "mime_type": mime_type,
+                    "purpose": purpose,
+                    "reserved_metadata": " " * 1024,
+                },
+                expires_at=float("inf"),
+            )
+            async with gigachat_request_options(
+                get_gigachat_client(request), options, include_body=False
+            ) as client:
+                started = True
+                file = await client.with_options(max_retries=0).aupload_file(
+                    (filename, content, mime_type), purpose="general"
+                )
+                file_id = file.id_
+            existing = await store.get(owner, "file", file_id)
+            compensate = not await store.is_registered("file", file_id)
+            await store.update(
+                owner,
+                "file_upload",
+                reservation_id,
+                {"upstream_id": file_id, "status": "publication_pending"},
+            )
+        metadata = {
+            **_serialize_file_object(file, {"purpose": purpose}),
+            "mime_type": mime_type,
+            "protocol": protocol,
+            "provider_profile": getattr(request.state, "provider_profile_id", None),
+            "upstream_id": None if is_local else file_id,
+            "local": is_local,
+            "downloadable": purpose == "batch_output",
+        }
+        if is_local:
+            existing = await store.get(owner, "file", file_id)
+        if not is_local:
+            await store.promote_blob(
+                owner, "file_upload", reservation_id, "file", file_id, metadata
+            )
+        elif upload_session_id is not None:
             await store.promote_blob(
                 owner, "upload", upload_session_id, "file", file_id, metadata
             )
         else:
-            await store.put(
-                owner, "file", file_id, metadata, blob=content if is_local else None
-            )
-    except asyncio.CancelledError:
-        # The store drains its write before propagating cancellation. Remove a
-        # newly published resource before allowing the cancelled request to exit.
-        if existing is None:
-
-            async def cleanup() -> None:
-                await store.delete(owner, "file", file_id)
-                if not is_local:
-                    async with gigachat_request_options(
-                        get_gigachat_client(request), options, include_body=False
-                    ) as client:
-                        await client.adelete_file(file=file_id)
-
-            cleanup_task = asyncio.create_task(cleanup())
-            while not cleanup_task.done():
-                try:
-                    await asyncio.shield(cleanup_task)
-                except asyncio.CancelledError:
-                    continue
-                except Exception:
-                    break
-            if cleanup_task.exception() is not None:
-                logger = getattr(request.app.state, "logger", None)
-                if logger is not None:
-                    logger.warning("Cancelled file cleanup failed")
+            await store.put(owner, "file", file_id, metadata, blob=content)
+    except BaseException as exc:
+        if (
+            isinstance(exc, ResponseError)
+            and file_id is None
+            and exc.status_code in {400, 401, 403, 404, 405, 413, 415, 422, 429}
+        ):
+            started = False  # A definite rejection created no upstream object.
+        await _bounded_cleanup(request, cleanup)
+        if isinstance(exc, ResourceLimitError):
+            raise HTTPException(413, detail=str(exc)) from exc
         raise
-    except ResourceLimitError as exc:
-        raise HTTPException(413, detail="Resource store blob quota exceeded.") from exc
     return metadata
 
 

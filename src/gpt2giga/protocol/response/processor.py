@@ -34,6 +34,11 @@ from gpt2giga.protocol.response.gigachat_chat_completion_adapter import (
 )
 
 
+PUBLIC_CHAT_MESSAGE_EXTENSIONS = frozenset(
+    {"audio", "annotations", "inline_data", "tool_executions", "files"}
+)
+
+
 class ResponseProcessor:
     """Обработчик ответов от GigaChat в формат OpenAI."""
 
@@ -694,6 +699,14 @@ class ResponseProcessor:
             for choice in choices
         )
 
+    def discard_stream_state(
+        self, response_id: str, *, family: Literal["chat", "responses"] = "chat"
+    ) -> None:
+        """Release buffered state without emitting data or a terminal event."""
+        key = f"{family}:{response_id}"
+        self._stream_reasoning_parsers.pop(key, None)
+        self._stream_source_renderers.pop(key, None)
+
     def flush_stream_reasoning(
         self,
         response_id: str,
@@ -804,11 +817,7 @@ class ResponseProcessor:
                     "reasoning_content",
                     "tool_calls",
                     "function_call",
-                    "audio",
-                    "annotations",
-                    "inline_data",
-                    "tool_executions",
-                    "files",
+                    *PUBLIC_CHAT_MESSAGE_EXTENSIONS,
                 }:
                     message.pop(key)
             if message.get("function_call") is None:

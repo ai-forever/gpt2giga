@@ -200,3 +200,7 @@ Pass-through auth заменяет credentials внутри выбранного
 Chat Completions → OpenAI-compatible остаётся blocked в executable loss matrix:
 отказ происходит до upstream I/O. Responses, Anthropic Messages и Gemini GenerateContent
 сохраняют допустимые external bridge пути.
+
+При загрузке Files для явного GigaChat model alias выберите соответствующий профиль
+заголовком `X-GPT2GIGA-Profile`. Gemini resumable сохраняет профиль start-запроса.
+Подробнее — [Files и пакетные ресурсы](resource-apis.md).

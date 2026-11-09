@@ -93,6 +93,13 @@ class GigaChatNormalizedStreamMapper:
         self._pending_tool_chunks: list[dict[str, Any]] = []
         self._tool_state_id: str | None = None
 
+    def discard(self) -> None:
+        """Drop all request-owned buffers after success, error, or cancellation."""
+        self._pending_tool_chunks.clear()
+        discard = getattr(self.response_processor, "discard_stream_state", None)
+        if discard is not None:
+            discard(self.response_id, family="chat")
+
     def message_start(self) -> NormalizedStreamEvent:
         """Build the canonical stream start event."""
         return self._event(
@@ -174,10 +181,14 @@ class GigaChatNormalizedStreamMapper:
         if flush_stream_reasoning is None:
             return []
         flushed = flush_stream_reasoning(self.response_id, family="chat")
-        if not flushed.content and not flushed.reasoning_content:
+        flush_sources = getattr(self.response_processor, "flush_stream_sources", None)
+        source_text = (
+            flush_sources(self.response_id, family="chat") if flush_sources else ""
+        )
+        if not flushed.content and not flushed.reasoning_content and not source_text:
             return []
 
-        delta: dict[str, Any] = {"content": flushed.content}
+        delta: dict[str, Any] = {"content": flushed.content + source_text}
         if flushed.reasoning_content:
             delta["reasoning_content"] = flushed.reasoning_content
         processed = {

@@ -21,6 +21,8 @@ class _PoolEntry:
 class GigaChatClientPool:
     """Reuse a bounded set of credential-specific SDK clients."""
 
+    _CLOSE_TIMEOUT_SECONDS = 5.0
+
     def __init__(
         self,
         settings: Any,
@@ -36,6 +38,8 @@ class GigaChatClientPool:
         self._entries: OrderedDict[str, _PoolEntry] = OrderedDict()
         self._lock = asyncio.Lock()
         self._closed = False
+        self._cleanup_tasks: set[asyncio.Task[None]] = set()
+        self._failed_cleanup: dict[int, Any] = {}
 
     @asynccontextmanager
     async def acquire(self, token: str) -> AsyncIterator[Any]:
@@ -53,8 +57,8 @@ class GigaChatClientPool:
             self._entries.move_to_end(key)
             clients_to_close = self._evict_idle_locked()
 
-        await self._close_clients(clients_to_close)
         try:
+            await self._close_clients(clients_to_close)
             yield entry.client
         finally:
             async with self._lock:
@@ -69,8 +73,12 @@ class GigaChatClientPool:
                 return
             self._closed = True
             clients = [entry.client for entry in self._entries.values()]
+            clients.extend(self._failed_cleanup.values())
+            self._failed_cleanup.clear()
             self._entries.clear()
         await self._close_clients(clients)
+        if self._cleanup_tasks:
+            await asyncio.shield(asyncio.gather(*self._cleanup_tasks))
 
     def _evict_idle_locked(self) -> list[Any]:
         evicted: list[Any] = []
@@ -89,9 +97,19 @@ class GigaChatClientPool:
         return evicted
 
     async def _close_clients(self, clients: list[Any]) -> None:
-        for client in clients:
-            try:
-                await client.aclose()
-            except Exception:  # pragma: no cover - best-effort cleanup
-                if self.logger is not None:
-                    self.logger.warning("Failed to close pooled GigaChat client")
+        # Register ownership before awaiting: cancellation of a lease must not
+        # orphan an evicted client or interrupt its bounded close operation.
+        tasks = [asyncio.create_task(self._close_client(client)) for client in clients]
+        for task in tasks:
+            self._cleanup_tasks.add(task)
+            task.add_done_callback(self._cleanup_tasks.discard)
+        if tasks:
+            await asyncio.shield(asyncio.gather(*tasks))
+
+    async def _close_client(self, client: Any) -> None:
+        try:
+            await asyncio.wait_for(client.aclose(), self._CLOSE_TIMEOUT_SECONDS)
+        except Exception:
+            self._failed_cleanup[id(client)] = client
+            if self.logger is not None:
+                self.logger.warning("Failed to close pooled GigaChat client")

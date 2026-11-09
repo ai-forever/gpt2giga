@@ -349,3 +349,83 @@ async def test_chat_completions_stream_timeout_returns_http_429() -> None:
         }
     }
     assert gigachat.astream_calls == 0
+
+
+@pytest.mark.parametrize("disconnect", [False, True, "transport_error"])
+async def test_mounted_queued_request_stops_before_dispatch_on_disconnect(disconnect):
+    import json
+
+    from gpt2giga.app.factory import create_app
+    from gpt2giga.protocol import RequestTransformer
+
+    limiter = ModelConcurrencyLimiter({}, default_limit=1)
+    gigachat = GateGigachat()
+    gigachat.release.set()
+    config = ProxyConfig(proxy=ProxySettings(gigachat_api_mode="v1", pass_model=True))
+    app = create_app(config)
+    app.state.gigachat_client = gigachat
+    app.state.model_concurrency_limiter = limiter
+    app.state.response_processor = ResponseProcessor(logger=logger)
+    app.state.request_transformer = RequestTransformer(config, logger=logger)
+    frames = asyncio.Queue()
+    await frames.put(
+        {
+            "type": "http.request",
+            "body": json.dumps(
+                {
+                    "model": "GigaChat",
+                    "messages": [{"role": "user", "content": "hello"}],
+                }
+            ).encode(),
+            "more_body": False,
+        }
+    )
+    output = []
+
+    async def receive():
+        frame = await frames.get()
+        if isinstance(frame, Exception):
+            raise frame
+        return frame
+
+    async def send(message):
+        output.append(message)
+
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0"},
+        "http_version": "1.1",
+        "method": "POST",
+        "scheme": "http",
+        "path": "/v1/chat/completions",
+        "raw_path": b"/v1/chat/completions",
+        "query_string": b"",
+        "headers": [(b"content-type", b"application/json")],
+        "client": ("127.0.0.1", 1),
+        "server": ("testserver", 80),
+    }
+    async with limiter.limit("GigaChat"):
+        task = asyncio.create_task(app(scope, receive, send))
+
+        async def wait_for_waiter():
+            while limiter._users.get("GigaChat", 0) < 2:
+                await asyncio.sleep(0)
+
+        await asyncio.wait_for(wait_for_waiter(), 2)
+        if disconnect:
+            await frames.put(
+                OSError("transport closed")
+                if disconnect == "transport_error"
+                else {"type": "http.disconnect"}
+            )
+            with pytest.raises(asyncio.CancelledError):
+                await asyncio.wait_for(task, 2)
+            assert gigachat.call_count == 0
+        else:
+            assert not task.done()
+    if not disconnect:
+        await asyncio.wait_for(task, 2)
+        assert gigachat.call_count == 1
+        assert output[0]["status"] == 200
+    assert limiter._semaphores == {}
+    assert app.state.bridge_request_lifecycle.active_requests == 0

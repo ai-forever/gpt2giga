@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Sequence
 from typing import Any
 
@@ -24,9 +25,9 @@ class CompositeTrafficLogSink:
 
     async def flush(self) -> None:
         """Flush all configured sinks best effort."""
-        for sink in self.sinks:
-            try:
-                await sink.flush()
-            except Exception as exc:  # pragma: no cover - no-raise behavior tested
-                if self.logger is not None:
-                    self.logger.warning("Traffic log mirror sink flush failed: {}", exc)
+        results = await asyncio.gather(
+            *(sink.flush() for sink in self.sinks), return_exceptions=True
+        )
+        for result in results:
+            if isinstance(result, BaseException) and self.logger is not None:
+                self.logger.warning("Traffic log mirror sink flush failed: {}", result)

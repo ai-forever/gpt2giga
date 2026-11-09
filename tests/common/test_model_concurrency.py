@@ -1,10 +1,12 @@
 import asyncio
 
+import anyio
 import pytest
 
 from gpt2giga.common.model_concurrency import (
     ModelConcurrencyLimiter,
     ModelConcurrencyTimeoutError,
+    model_request_disconnected,
 )
 
 
@@ -215,3 +217,139 @@ def test_invalid_limiter_configuration_raises(
             default_limit=default_limit,
             acquire_timeout=acquire_timeout,
         )
+
+
+async def test_dynamic_entries_are_removed_after_last_user():
+    limiter = ModelConcurrencyLimiter({}, default_limit=1)
+    for index in range(1000):
+        async with limiter.limit(f"unknown-{index}"):
+            pass
+    assert limiter._semaphores == {}
+    assert limiter._users == {}
+
+
+async def test_dynamic_entry_keeps_waiters_and_cleans_cancelled_waiter():
+    limiter = ModelConcurrencyLimiter({}, default_limit=1)
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    async with limiter.limit("dynamic"):
+        original = limiter._semaphores["dynamic"]
+        waiter = asyncio.create_task(_hold_slot(limiter, "dynamic", entered, release))
+        await asyncio.sleep(0)
+        assert limiter._users["dynamic"] == 2
+        assert limiter._semaphores["dynamic"] is original
+        waiter.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await waiter
+        assert limiter._users["dynamic"] == 1
+        assert limiter._semaphores["dynamic"] is original
+    assert limiter._semaphores == {}
+    assert limiter._users == {}
+
+
+async def test_dynamic_entry_survives_release_to_waiter():
+    limiter = ModelConcurrencyLimiter({}, default_limit=1)
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    async with limiter.limit("dynamic"):
+        original = limiter._semaphores["dynamic"]
+        waiter = asyncio.create_task(_hold_slot(limiter, "dynamic", entered, release))
+        await asyncio.sleep(0)
+    await entered.wait()
+    assert limiter._semaphores["dynamic"] is original
+    release.set()
+    await waiter
+    assert limiter._semaphores == {}
+
+
+async def test_cancelled_anyio_scope_drains_admission_tasks_and_waiter():
+    limiter = ModelConcurrencyLimiter({"model": 1})
+    started = asyncio.Event()
+    finished = asyncio.Event()
+    scopes = []
+    entered = False
+
+    async def queued():
+        nonlocal entered
+        token = model_request_disconnected.set(asyncio.Event())
+        try:
+            with anyio.CancelScope() as scope:
+                scopes.append(scope)
+                started.set()
+                async with limiter.limit("model"):
+                    entered = True
+        finally:
+            model_request_disconnected.reset(token)
+            finished.set()
+
+    async with limiter.limit("model"):
+        semaphore = limiter._semaphores["model"]
+        async with anyio.create_task_group() as group:
+            group.start_soon(queued)
+            await started.wait()
+            # Allow the separately owned acquire task to enter the semaphore.
+            while not semaphore._waiters:
+                await asyncio.sleep(0)
+            scopes[0].cancel()
+            await asyncio.wait_for(finished.wait(), timeout=1)
+        assert not entered
+        assert not semaphore._waiters
+        assert limiter._users == {"model": 1}
+    assert semaphore._value == 1
+    assert limiter._users == {}
+
+
+async def test_already_cancelled_anyio_scope_cannot_leave_an_acquire_task():
+    limiter = ModelConcurrencyLimiter({"model": 1})
+    async with limiter.limit("model"):
+        token = model_request_disconnected.set(asyncio.Event())
+        try:
+            with anyio.CancelScope() as scope:
+                scope.cancel()
+                async with limiter.limit("model"):
+                    pytest.fail("cancelled request entered the upstream body")
+            assert scope.cancelled_caught
+        finally:
+            model_request_disconnected.reset(token)
+        semaphore = limiter._semaphores["model"]
+        assert not semaphore._waiters
+        assert limiter._users == {"model": 1}
+    assert semaphore._value == 1
+
+
+@pytest.mark.parametrize("cancel_scope", [False, True])
+async def test_disconnect_or_cancellation_racing_successful_acquire_releases_slot(
+    monkeypatch, cancel_scope
+):
+    limiter = ModelConcurrencyLimiter({"model": 1})
+    disconnected = asyncio.Event()
+    token = model_request_disconnected.set(disconnected)
+    acquire = limiter._acquire
+    entered = False
+    scope = None
+
+    async def acquire_then_interrupt(*args):
+        await acquire(*args)
+        if cancel_scope:
+            scope.cancel()
+        else:
+            disconnected.set()
+
+    monkeypatch.setattr(limiter, "_acquire", acquire_then_interrupt)
+    try:
+        if cancel_scope:
+            with anyio.CancelScope() as scope:
+                async with limiter.limit("model"):
+                    entered = True
+            assert scope.cancelled_caught
+        else:
+            with pytest.raises(asyncio.CancelledError):
+                async with limiter.limit("model"):
+                    entered = True
+    finally:
+        model_request_disconnected.reset(token)
+    assert not entered
+    semaphore = limiter._semaphores["model"]
+    assert semaphore._value == 1
+    assert not semaphore._waiters
+    assert limiter._users == {}

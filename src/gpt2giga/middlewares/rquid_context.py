@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from dataclasses import replace
 from typing import Any
 
 from starlette.datastructures import Headers, MutableHeaders
@@ -222,7 +223,12 @@ class _ResponseLifecycle:
             emissions.append(
                 emit_request_metrics(
                     metrics_sink,
-                    self.context,
+                    replace(
+                        self.context,
+                        route=getattr(
+                            self.request.scope.get("route"), "path", "unmatched"
+                        ),
+                    ),
                     status_code=status_code,
                     lifecycle=lifecycle,
                     logger=app_logger,

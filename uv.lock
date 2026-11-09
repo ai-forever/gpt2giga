@@ -1148,6 +1148,7 @@ dependencies = [
     { name = "pydantic-settings", version = "2.15.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "pydantic-settings", version = "2.16.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "python-dotenv" },
+    { name = "python-multipart" },
     { name = "pyyaml" },
     { name = "sse-starlette" },
     { name = "starlette" },
@@ -1185,7 +1186,6 @@ dev = [
 integrations = [
     { name = "openai-agents" },
     { name = "pyjwt" },
-    { name = "python-multipart" },
 ]
 
 [package.metadata]
@@ -1210,6 +1210,7 @@ requires-dist = [
     { name = "pillow", specifier = ">=12.3.0,<13" },
     { name = "pydantic-settings", specifier = ">=2.14.2,<3" },
     { name = "python-dotenv", specifier = ">=1.2.2,<2" },
+    { name = "python-multipart", specifier = ">=0.0.27,<0.1.0" },
     { name = "pyyaml", specifier = ">=6.0.3,<7" },
     { name = "sqlalchemy", extras = ["asyncio"], marker = "extra == 'postgres'", specifier = ">=2.0.51,<3" },
     { name = "sse-starlette", specifier = ">=3.4.6,<4" },
@@ -1233,7 +1234,6 @@ dev = [
 integrations = [
     { name = "openai-agents", specifier = ">=0.17,<1" },
     { name = "pyjwt", specifier = ">=2.13.0" },
-    { name = "python-multipart", specifier = ">=0.0.27,<0.1.0" },
 ]
 
 [[package]]

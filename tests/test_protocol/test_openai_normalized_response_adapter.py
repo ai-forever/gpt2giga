@@ -265,7 +265,12 @@ def test_normalized_chat_response_to_responses_projects_gigachat_hosted_results(
                             {"name": "image_generate", "status": "success"},
                         ],
                         "inline_data": {
-                            "sources": {"1": {"url": "https://example.test/source"}}
+                            "sources": {
+                                "1": {
+                                    "url": "https://example.test/source",
+                                    "title": "Source",
+                                }
+                            }
                         },
                         "files": [
                             {
@@ -317,3 +322,29 @@ def test_normalized_chat_response_to_responses_projects_gigachat_hosted_results(
             "target": "image",
         },
     ]
+
+
+def test_public_chat_projection_whitelists_extensions_without_mutating_response():
+    extensions = {
+        "audio": {"id": "audio-1"},
+        "annotations": [{"type": "url_citation"}],
+        "inline_data": {
+            "sources": {"1": {"url": "https://example.test/source", "title": "Source"}}
+        },
+        "tool_executions": [{"name": "web_search"}],
+        "files": [{"id": "file-1"}],
+        "internal_secret": "must-not-be-public",
+    }
+    message = NormalizedMessage(
+        role="assistant", content="Answer [sources=[1]]", raw_extensions=extensions
+    )
+    response = NormalizedResponse(choices=[NormalizedChoice(message=message)])
+    for _ in range(2):
+        public = normalized_chat_response_to_openai(response, requested_model="test")[
+            "choices"
+        ][0]["message"]
+        for key in ("audio", "annotations", "inline_data", "tool_executions", "files"):
+            assert public[key] == extensions[key]
+        assert "internal_secret" not in public
+        assert public["content"].count("https://example.test/source") == 1
+    assert message.content == "Answer [sources=[1]]"

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import importlib.metadata
 import importlib.util
 import json
@@ -43,6 +44,36 @@ def _gigachat_specifiers(requirements: list[str] | None) -> set[str]:
             "gateway metadata must contain exactly one direct gigachat requirement"
         )
     return set(matches[0].split(","))
+
+
+async def _verify_multipart_parser() -> None:
+    """Exercise base-install multipart parsing without provider or storage I/O."""
+    from starlette.requests import Request
+
+    from gpt2giga.common.request_form import read_request_multipart
+
+    async def receive():
+        return {
+            "type": "http.request",
+            "body": (
+                b'--smoke\r\nContent-Disposition: form-data; name="file"; filename="sample.txt"\r\n'
+                b"Content-Type: text/plain\r\n\r\nartifact smoke\r\n--smoke--\r\n"
+            ),
+            "more_body": False,
+        }
+
+    request = Request(
+        {
+            "type": "http",
+            "headers": [(b"content-type", b"multipart/form-data; boundary=smoke")],
+        },
+        receive,
+    )
+    parsed = await read_request_multipart(request)
+    if parsed["files"]["file"]["content"] != b"artifact smoke":
+        raise ArtifactSmokeError(
+            "installed multipart parser did not preserve file bytes"
+        )
 
 
 def verify_installed_gateway(
@@ -126,6 +157,8 @@ def verify_installed_gateway(
         raise ArtifactSmokeError(
             f"installed gateway OpenAPI is missing paths: {sorted(missing_paths)!r}"
         )
+
+    asyncio.run(_verify_multipart_parser())
 
     return {
         "gateway_version": distribution.version,

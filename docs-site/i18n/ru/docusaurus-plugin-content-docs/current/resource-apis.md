@@ -43,3 +43,32 @@ Cache вложений разделён по provider/profile/credentials и х�
 Anthropic `expires_in_seconds` отклоняется до upload, пока native expiry не поддержан.
 Гонка resumable-записей на одном offset даёт один success и один HTTP 409.
 Finalize локального JSONL переносит blob без повторного расходования квоты.
+
+## Резервирование upload и выбор профиля
+
+Для загрузки в тот же GigaChat-аккаунт, что использует model alias, передайте
+`X-GPT2GIGA-Profile: <configured-gigachat-profile-id>` в Files upload. Без заголовка
+сохраняется default account. Неизвестный профиль и профиль другого провайдера дают
+400 до upload. Metadata, content и delete сохраняют проверки owner/profile.
+Gemini resumable фиксирует профиль на start; последующие headers его не меняют.
+
+До native POST резервируются durable resource count и metadata capacity. При
+исчерпанной локальной квоте возвращается 413 без upload. Если подтверждённую загрузку
+не удалось опубликовать, шлюз пытается удалить native file с upstream timeout пять
+секунд. Неизвестный результат или неуспешный cleanup оставляет бессрочный
+`file_upload` intent, который продолжает занимать квоту. Перед повтором оператор
+должен сверить intent с провайдером; автоматического upload retry и общей транзакции
+SQLite/upstream нет. Начатые storage transactions дренируются, поэтому upstream
+timeout не является общим deadline запроса. Очередь SQLite ждёт асинхронно до занятия
+executor thread. Очистка expired rows коммитится независимо от отказа публикации.
+
+Resumable append записывает только новый chunk. Видимые bytes задаёт committed
+offset; неподтверждённый хвост обрезается при восстановлении. Batch list проверяет
+cursor и выбирает страницу до polling её active jobs. Неизменившиеся и terminal
+jobs не вызывают лишних metadata UPDATE.
+
+Native-file ACL ledger сохраняет удалённые IDs для защиты от legacy fallback между
+владельцами. Его размер на диске пока не покрывается квотами resource metadata/count.
+Для длительной работы с native files контролируйте размер durable store; удалять
+ledger entries ради очистки нельзя. Отдельная квота admission для ledger вынесена
+в follow-up без изменения публичных file IDs.

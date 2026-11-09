@@ -248,13 +248,14 @@ async def test_cancelled_file_publication_does_not_leave_visible_metadata(
             }
         )
         store = app.state.resource_store
-        original = store.put
+        method = "put" if local else "promote_blob"
+        original = getattr(store, method)
 
         async def cancelled_after_write(*args, **kwargs):
             await original(*args, **kwargs)
             raise asyncio.CancelledError
 
-        monkeypatch.setattr(store, "put", cancelled_after_write)
+        monkeypatch.setattr(store, method, cancelled_after_write)
         with pytest.raises(asyncio.CancelledError):
             await upload_file_resource(
                 request,
@@ -660,3 +661,497 @@ async def test_model_native_attachment_ownership_policy(resource_state):
     ]
     assert response.status_code == expected, response.text
     assert calls == (["/v1/chat/completions"] if expected == 200 else [])
+
+
+def native_uploaded_file(file_id="reserved-file"):
+    return {
+        "id": file_id,
+        "object": "file",
+        "bytes": 3,
+        "created_at": 123,
+        "filename": "test.txt",
+        "purpose": "general",
+    }
+
+
+def owner_request(app):
+    from starlette.requests import Request
+
+    return Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/files",
+            "headers": [],
+            "query_string": b"",
+            "app": app,
+        }
+    )
+
+
+async def test_exhausted_resource_quota_rejects_before_native_upload():
+    async with sdk_app(lambda _: pytest.fail("Quota must precede native upload")) as (
+        client,
+        app,
+    ):
+        store = app.state.resource_store
+        store.max_resources = 1
+        await store.put("other", "response", "occupied", {})
+        result = await client.post(
+            "/v1/files",
+            data={"purpose": "assistants"},
+            files={"file": ("test.txt", b"abc", "text/plain")},
+        )
+        assert result.status_code == 413
+        assert "metadata quota" in result.text
+
+
+async def test_upload_reservations_serialize_last_available_slot():
+    import asyncio
+    from gpt2giga.app_state import get_resource_owner
+
+    started, release = asyncio.Event(), asyncio.Event()
+    calls = []
+
+    async def handle(request):
+        calls.append(request)
+        started.set()
+        await release.wait()
+        return httpx2.Response(200, json=native_uploaded_file())
+
+    async with sdk_app(handle) as (client, app):
+        app.state.resource_store.max_resources = 1
+        first = asyncio.create_task(
+            client.post(
+                "/v1/files",
+                data={"purpose": "assistants"},
+                files={"file": ("test.txt", b"abc", "text/plain")},
+            )
+        )
+        await started.wait()
+        second = await client.post(
+            "/v1/files",
+            data={"purpose": "assistants"},
+            files={"file": ("test.txt", b"abc", "text/plain")},
+        )
+        assert second.status_code == 413
+        release.set()
+        assert (await first).status_code == 200
+        assert len(calls) == 1
+        owner = get_resource_owner(owner_request(app))
+        assert await app.state.resource_store.list(owner, "file_upload") == []
+        assert len(await app.state.resource_store.list(owner, "file")) == 1
+
+
+@pytest.mark.parametrize("delete_fails", [False, True])
+async def test_failed_native_publication_compensates_or_keeps_durable_intent(
+    monkeypatch, delete_fails
+):
+    from gpt2giga.app_state import get_resource_owner
+    from gpt2giga.common.files import upload_file_resource
+    from gpt2giga.storage.resources import ResourceStoreError
+
+    calls = []
+
+    def handle(request):
+        calls.append(request)
+        if request.url.path.endswith("/delete"):
+            return httpx2.Response(
+                503 if delete_fails else 200,
+                json={"id": "reserved-file", "deleted": True},
+            )
+        return httpx2.Response(200, json=native_uploaded_file())
+
+    async with sdk_app(handle) as (_, app):
+        store = app.state.resource_store
+        request = owner_request(app)
+
+        async def fail(*args, **kwargs):
+            raise ResourceStoreError("synthetic publication failure")
+
+        monkeypatch.setattr(store, "promote_blob", fail)
+        with pytest.raises(ResourceStoreError):
+            await upload_file_resource(
+                request, content=b"abc", filename="test.txt", mime_type="text/plain"
+            )
+        owner = get_resource_owner(request)
+        pending = await store.list(owner, "file_upload")
+        assert len(pending) == int(delete_fails)
+        if delete_fails:
+            assert pending[0].metadata["upstream_id"] == "reserved-file"
+            assert pending[0].expires_at == float("inf")
+            assert await store.is_registered("file", "reserved-file")
+        assert await store.list(owner, "file") == []
+    assert len(calls) == 2
+
+
+async def test_unknown_native_upload_outcome_keeps_admitted_intent_without_retry():
+    from gpt2giga.app_state import get_resource_owner
+
+    calls = []
+
+    def handle(request):
+        calls.append(request)
+        raise httpx2.ReadTimeout("unknown outcome", request=request)
+
+    async with sdk_app(handle) as (client, app):
+        response = await client.post(
+            "/v1/files",
+            data={"purpose": "assistants"},
+            files={"file": ("test.txt", b"abc", "text/plain")},
+        )
+        assert response.status_code == 504
+        pending = await app.state.resource_store.list(
+            get_resource_owner(owner_request(app)), "file_upload"
+        )
+        assert len(pending) == 1
+        assert pending[0].metadata["upstream_id"] is None
+        assert len(calls) == 1
+
+
+async def test_cancelled_reservation_before_upload_releases_admission(monkeypatch):
+    import asyncio
+    from gpt2giga.app_state import get_resource_owner
+    from gpt2giga.common.files import upload_file_resource
+
+    async with sdk_app(
+        lambda _: pytest.fail("Cancelled admission must not upload")
+    ) as (_, app):
+        request = owner_request(app)
+        store = app.state.resource_store
+        put = store.put
+
+        async def cancel_after_reservation(*args, **kwargs):
+            await put(*args, **kwargs)
+            raise asyncio.CancelledError
+
+        monkeypatch.setattr(store, "put", cancel_after_reservation)
+        with pytest.raises(asyncio.CancelledError):
+            await upload_file_resource(
+                request, content=b"abc", filename="test.txt", mime_type="text/plain"
+            )
+        assert await store.list(get_resource_owner(request), "file_upload") == []
+
+
+@pytest.mark.parametrize("profile", ["missing", "external"])
+async def test_invalid_upload_profile_fails_before_sdk(profile):
+    async with sdk_app(lambda _: pytest.fail("Invalid profile must not upload")) as (
+        client,
+        _,
+    ):
+        response = await client.post(
+            "/v1/files",
+            headers={"X-GPT2GIGA-Profile": profile},
+            data={"purpose": "assistants"},
+            files={"file": ("test.txt", b"abc", "text/plain")},
+        )
+        assert response.status_code == 400
+
+
+@pytest.mark.parametrize("resumable", [False, True])
+@pytest.mark.parametrize("pass_token", [False, True])
+async def test_selected_upload_profile_survives_reads_generation_and_resumable_headers(
+    tmp_path, monkeypatch, resumable, pass_token
+):
+    import time
+    import httpx
+    from gigachat import GigaChat
+    from gpt2giga.app.factory import create_app
+    from gpt2giga.models.config import ProxyConfig
+
+    profile_path = tmp_path / "providers.json"
+    profiles = []
+    for name, kind in (("selected", "gigachat"), ("external", "openai_compatible")):
+        profiles.append(
+            {
+                "profile_id": name,
+                "provider_kind": kind,
+                "base_url": f"https://{name}.giga.example/v1",
+                "network_policy_ref": "public-openai",
+                "tls_policy_ref": "system-default",
+                "models": [
+                    {
+                        "public_alias": f"{name}/model",
+                        "upstream_model": "test-model",
+                        "enabled": kind == "gigachat",
+                        "capability_profile": "fixture",
+                        "support_status": "technical_preview",
+                    }
+                ],
+                **(
+                    {"credential_env": "SELECTED_GIGA_CREDENTIAL"}
+                    if kind == "gigachat"
+                    else {}
+                ),
+            }
+        )
+    profile_path.write_text(
+        json.dumps(
+            {"schema_version": "gpt2giga.provider-profiles.v3", "profiles": profiles}
+        )
+    )
+    monkeypatch.setenv("SELECTED_GIGA_CREDENTIAL", "selected-credential")
+    calls = []
+
+    def handle(request):
+        if request.url.host == "auth.test":
+            assert request.headers["authorization"] == "Basic selected-credential"
+            return httpx2.Response(
+                200,
+                json={
+                    "access_token": "selected-token",
+                    "expires_at": int((time.time() + 3600) * 1000),
+                },
+            )
+        calls.append(request)
+        if request.url.path.endswith("/files"):
+            file_id = (
+                "selected-file"
+                if request.url.host == "selected.giga.example"
+                else "default-file"
+            )
+            return httpx2.Response(200, json=native_uploaded_file(file_id))
+        assert request.url.host == "selected.giga.example"
+        assert request.headers["authorization"] == (
+            "Bearer caller" if pass_token else "Bearer selected-token"
+        )
+        assert request.url.path.endswith("/chat/completions")
+        assert json.loads(request.content)["messages"][-1]["attachments"] == [
+            "selected-file"
+        ]
+        return httpx2.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "index": 0,
+                        "finish_reason": "stop",
+                        "message": {"role": "assistant", "content": "ok"},
+                    }
+                ],
+                "created": 1,
+                "model": "test-model",
+                "object": "chat.completion",
+                "usage": {
+                    "prompt_tokens": 1,
+                    "completion_tokens": 1,
+                    "total_tokens": 2,
+                },
+            },
+        )
+
+    async with httpx2.AsyncClient(
+        transport=httpx2.MockTransport(handle), trust_env=False
+    ) as wire:
+
+        def injected(**kwargs):
+            return GigaChat(
+                **kwargs, async_http_client=wire, auth_async_http_client=wire
+            )
+
+        monkeypatch.setattr("gpt2giga.providers.gigachat.client.GigaChat", injected)
+        config = ProxyConfig(
+            config=str(profile_path),
+            proxy={
+                "pass_model": True,
+                "pass_token": pass_token,
+                "resource_store_path": str(tmp_path / "store"),
+            },
+            gigachat={
+                "base_url": "https://default.giga.example/v1",
+                "auth_url": "https://auth.test/oauth",
+                "access_token": "default-token",
+                "credentials": "",
+                "user": "",
+                "password": "",
+                "max_retries": 0,
+                "trust_env": False,
+            },
+            _env_file=None,
+        )
+        app = create_app(config)
+        async with app.router.lifespan_context(app):
+            headers = {"Authorization": "Bearer giga-auth-caller"} if pass_token else {}
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app),
+                base_url="http://gateway.test",
+                headers=headers,
+            ) as client:
+                for invalid in ("missing", "external"):
+                    rejected = await client.post(
+                        "/v1/files",
+                        headers={"X-GPT2GIGA-Profile": invalid},
+                        data={"purpose": "assistants"},
+                        files={"file": ("test.txt", b"abc", "text/plain")},
+                    )
+                    assert rejected.status_code == 400, rejected.text
+                    assert calls == []
+                if resumable:
+                    start = await client.post(
+                        "/upload/v1beta/files",
+                        headers={
+                            "X-GPT2GIGA-Profile": "selected",
+                            "X-Goog-Upload-Command": "start",
+                            "X-Goog-Upload-Protocol": "resumable",
+                            "X-Goog-Upload-Header-Content-Length": "3",
+                            "X-Goog-Upload-Header-Content-Type": "text/plain",
+                        },
+                        json={"file": {"displayName": "test.txt"}},
+                    )
+                    assert start.status_code == 200, start.text
+                    uploaded = await client.post(
+                        start.headers["x-goog-upload-url"],
+                        headers={
+                            "X-GPT2GIGA-Profile": "external",
+                            "X-Goog-Upload-Command": "upload, finalize",
+                            "X-Goog-Upload-Offset": "0",
+                        },
+                        content=b"abc",
+                    )
+                    assert uploaded.status_code == 200, uploaded.text
+                    file_id = uploaded.json()["file"]["name"].removeprefix("files/")
+                else:
+                    uploaded = await client.post(
+                        "/v1/files",
+                        headers={"X-GPT2GIGA-Profile": "selected"},
+                        data={"purpose": "assistants"},
+                        files={"file": ("test.txt", b"abc", "text/plain")},
+                    )
+                    assert uploaded.status_code == 200, uploaded.text
+                    file_id = uploaded.json()["id"]
+                assert file_id == "selected-file"
+                assert calls[0].url.host == "selected.giga.example"
+                assert calls[0].headers["authorization"] == (
+                    "Bearer caller" if pass_token else "Bearer selected-token"
+                )
+                assert (await client.get(f"/v1/files/{file_id}")).status_code == 200
+                generated = await client.post(
+                    "/v1/chat/completions",
+                    json={
+                        "model": "selected/model",
+                        "messages": [
+                            {
+                                "role": "user",
+                                "content": "hello",
+                                "attachments": [file_id],
+                            }
+                        ],
+                    },
+                )
+                assert generated.status_code == 200, generated.text
+                if pass_token:
+                    foreign = await client.get(
+                        f"/v1/files/{file_id}",
+                        headers={"Authorization": "Bearer giga-auth-other"},
+                    )
+                    assert foreign.status_code == 404, foreign.text
+                default = await client.post(
+                    "/v1/files",
+                    data={"purpose": "assistants"},
+                    files={"file": ("test.txt", b"abc", "text/plain")},
+                )
+                assert default.status_code == 200, default.text
+                assert default.json()["id"] == "default-file"
+                assert calls[-1].url.host == "default.giga.example"
+
+
+@pytest.mark.parametrize("status", [400, 401, 403, 413, 422, 429])
+async def test_definite_upload_rejection_releases_last_slot(status):
+    from gpt2giga.app_state import get_resource_owner
+
+    calls = []
+
+    def handle(request):
+        calls.append(request)
+        if len(calls) <= 2:
+            return httpx2.Response(status, json={"message": "rejected"})
+        return httpx2.Response(200, json=native_uploaded_file())
+
+    async with sdk_app(handle) as (client, app):
+        app.state.resource_store.max_resources = 1
+        for _ in range(2):
+            result = await client.post(
+                "/v1/files",
+                data={"purpose": "assistants"},
+                files={"file": ("test.txt", b"abc", "text/plain")},
+            )
+            assert result.status_code == status, result.text
+            assert (
+                await app.state.resource_store.list(
+                    get_resource_owner(owner_request(app)), "file_upload"
+                )
+                == []
+            )
+        result = await client.post(
+            "/v1/files",
+            data={"purpose": "assistants"},
+            files={"file": ("test.txt", b"abc", "text/plain")},
+        )
+        assert result.status_code == 200, result.text
+        assert len(calls) == 3
+
+
+async def test_duplicate_native_id_failed_publication_never_deletes_original():
+    calls = []
+
+    def handle(request):
+        calls.append(request)
+        assert not request.url.path.endswith("/delete")
+        return httpx2.Response(200, json=native_uploaded_file())
+
+    async with sdk_app(handle) as (client, _):
+        first = await client.post(
+            "/v1/files",
+            data={"purpose": "assistants"},
+            files={"file": ("test.txt", b"abc", "text/plain")},
+        )
+        assert first.status_code == 200
+        duplicate = await client.post(
+            "/v1/files",
+            data={"purpose": "assistants"},
+            files={"file": ("test.txt", b"abc", "text/plain")},
+        )
+        assert duplicate.status_code == 500
+        retrieved = await client.get("/v1/files/reserved-file")
+        assert retrieved.status_code == 200
+        assert retrieved.json() == first.json()
+        assert len(calls) == 2
+
+
+async def test_stuck_native_compensation_times_out_and_retains_intent(monkeypatch):
+    import asyncio
+    from gpt2giga.app_state import get_resource_owner
+    from gpt2giga.common.files import upload_file_resource
+    from gpt2giga.storage.resources import ResourceStoreError
+
+    closed = asyncio.Event()
+
+    async def handle(request):
+        if request.url.path.endswith("/delete"):
+            try:
+                await asyncio.Event().wait()
+            finally:
+                closed.set()
+        return httpx2.Response(200, json=native_uploaded_file())
+
+    async with sdk_app(handle) as (_, app):
+        monkeypatch.setattr("gpt2giga.common.files._FILE_CLEANUP_TIMEOUT_SECONDS", 0.02)
+
+        async def reject(*args, **kwargs):
+            raise ResourceStoreError("publication failed")
+
+        monkeypatch.setattr(app.state.resource_store, "promote_blob", reject)
+        request = owner_request(app)
+        with pytest.raises(ResourceStoreError):
+            await asyncio.wait_for(
+                upload_file_resource(
+                    request, content=b"abc", filename="test.txt", mime_type="text/plain"
+                ),
+                1,
+            )
+        assert closed.is_set()
+        pending = await app.state.resource_store.list(
+            get_resource_owner(request), "file_upload"
+        )
+        assert len(pending) == 1
+        assert pending[0].metadata["upstream_id"] == "reserved-file"

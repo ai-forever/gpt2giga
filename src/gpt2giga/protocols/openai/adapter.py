@@ -6,7 +6,10 @@ from collections.abc import Mapping
 from typing import Any
 
 from gpt2giga.common.client_params import ClientCompatibilityError
-from gpt2giga.common.tools import normalize_gigachat_builtin_tool_type
+from gpt2giga.common.tools import (
+    function_tool_payload,
+    normalize_gigachat_builtin_tool_type,
+)
 from gpt2giga.core.context import RequestContext
 from gpt2giga.protocol.request.params import sanitize_openai_chat_parameters
 from gpt2giga.protocols.normalized import (
@@ -382,19 +385,19 @@ def _normalize_tool(tool: Mapping[str, Any]) -> NormalizedTool:
             configuration={key: value for key, value in tool.items() if key != "type"},
         )
 
-    function = tool.get("function")
-    function_data = function if isinstance(function, Mapping) else tool
+    function_data = function_tool_payload(tool, require_parameters=False) or tool
     raw_extensions = {
         key: value
         for key, value in tool.items()
-        if key not in {"type", "function", "name", "description", "parameters"}
+        if key
+        not in {"type", "function", "name", "description", "parameters", "input_schema"}
     }
     function_extensions = {
         key: value
         for key, value in function_data.items()
-        if key not in {"name", "description", "parameters"}
+        if key not in {"name", "description", "parameters", "input_schema"}
     }
-    if function_extensions and function_data is not tool:
+    if function_extensions and isinstance(tool.get("function"), Mapping):
         raw_extensions["function"] = function_extensions
     parameters = function_data.get("parameters")
     if not isinstance(parameters, Mapping):

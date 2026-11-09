@@ -178,7 +178,6 @@ async def _create(request: Request, model: str, *, embeddings: bool):
 async def list_batches(request: Request):
     """List registered Gemini jobs as Operations, with SDK pagination."""
     _context()
-    records = await native_list_batches(request, "gemini")
     try:
         limit = int(request.query_params.get("pageSize", "100"))
     except ValueError as exc:
@@ -186,13 +185,10 @@ async def list_batches(request: Request):
     if not 1 <= limit <= 100:
         raise batch_error("pageSize must be between 1 and 100.")
     token = request.query_params.get("pageToken")
-    ids = [resource.public_id for resource in records]
-    if token is not None and token not in ids:
-        raise batch_error("Invalid pageToken.")
-    start = ids.index(token) + 1 if token else 0
-    page = records[start : start + limit]
+    records = await native_list_batches(request, "gemini", limit=limit, after=token)
+    page = records[:limit]
     result = {"operations": [await _operation(resource, request) for resource in page]}
-    if start + limit < len(records):
+    if limit < len(records):
         result["nextPageToken"] = page[-1].public_id
     return result
 

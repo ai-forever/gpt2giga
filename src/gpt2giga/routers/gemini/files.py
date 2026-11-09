@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse, Response
 from gpt2giga.app_state import get_resource_owner, get_resource_store
 from gpt2giga.common.exceptions import exceptions_handler
 from gpt2giga.common.files import (
+    bind_file_upload_profile,
     file_content,
     file_metadata,
     file_not_found,
@@ -96,8 +97,21 @@ async def resumable_upload(request: Request):
         raise _invalid("A resumable upload session is required.")
     store, owner = get_resource_store(request), get_resource_owner(request)
     session = await store.get(owner, "upload", session_id)
+    runtime = getattr(request.app.state, "bridge_provider_runtime", None)
+    if session is None and runtime is not None:
+        for profile_id in runtime._giga_settings:
+            candidate_owner = get_resource_owner(request, profile=profile_id)
+            session = await store.get(candidate_owner, "upload", session_id)
+            if session is not None:
+                owner = candidate_owner
+                break
     if session is None:
         raise file_not_found()
+    profile_id = session.metadata.get("provider_profile")
+    if profile_id is not None:
+        from gpt2giga.app.providers import bind_gigachat_profile
+
+        await bind_gigachat_profile(request, profile_id)
     if command == {"query"}:
         return Response(
             headers={
@@ -189,6 +203,7 @@ async def resumable_upload(request: Request):
 
 
 async def _start_upload(request: Request) -> Response:
+    await bind_file_upload_profile(request)
     if request.headers.get("x-goog-upload-protocol") != "resumable":
         raise _invalid("Only the resumable upload protocol is supported.")
     data = await read_request_json(request)
@@ -224,6 +239,7 @@ async def _start_upload(request: Request) -> Response:
         session_id,
         {
             "status": "active",
+            "provider_profile": getattr(request.state, "provider_profile_id", None),
             "upload_offset": 0,
             "size_bytes": length,
             "mime_type": mime_type,
