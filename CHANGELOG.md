@@ -9,6 +9,7 @@
 
 - Подготовлен кандидат с exact SDK alpha, публичными request options, изоляцией auth/TLS, binary Files, безопасными upstream errors и закрытием streams без replay.
 - `gigachat[aiohttp]==0.3.0a1`; required stable Python 3.15 checks; preview-only moving tags for prerelease gateways.
+- **Безопасность зависимостей**: обновлены зависимости документации и GitHub Actions из Dependabot #254, #256, #257 и #258; требуется исправленный filelock >=4.2.1. Неиспользуемый Pillow удалён с сохранением поддержки Python 3.10; необязательный pre-commit теперь устанавливается на Python 3.11 и новее.
 
 ## [0.3.2] - 2026-11-05
 

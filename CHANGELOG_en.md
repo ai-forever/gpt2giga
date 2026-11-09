@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Prepare candidate with exact SDK alpha, public request options, isolated auth/TLS, binary Files, safe upstream errors and stream cleanup without replay.
 - `gigachat[aiohttp]==0.3.0a1`; required stable Python 3.15 checks; preview-only moving tags for prerelease gateways.
+- **Dependency security**: update documentation dependencies and GitHub Actions from Dependabot #254, #256, #257 and #258; require patched filelock >=4.2.1. Remove unused Pillow so Python 3.10 remains supported; optional pre-commit tooling now requires Python 3.11 or newer.
 
 ## [0.3.2] - 2026-11-05
 

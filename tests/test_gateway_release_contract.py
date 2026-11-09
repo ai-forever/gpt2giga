@@ -2,7 +2,9 @@
 
 from pathlib import Path
 
+from packaging.requirements import Requirement
 from packaging.specifiers import SpecifierSet
+from packaging.version import Version
 import yaml
 
 try:
@@ -30,6 +32,24 @@ def test_production_dockerfile_installs_root_gateway():
 
 def test_source_lock_is_current():
     assert_lock_is_current()
+
+
+def test_gateway_dependency_lock_excludes_vulnerable_image_and_lock_packages():
+    root = _WORKFLOW_ROOT.parents[1]
+    with (root / "pyproject.toml").open("rb") as file:
+        project = tomllib.load(file)["project"]
+    with (root / "uv.lock").open("rb") as file:
+        packages = tomllib.load(file)["package"]
+
+    # The gateway forwards image bytes and needs no native image decoder.
+    assert "pillow" not in {
+        Requirement(dependency).name.lower() for dependency in project["dependencies"]
+    }
+    assert all(package["name"] != "pillow" for package in packages)
+    # Check every resolution, including Python 3.10 branches, not just this host.
+    filelocks = [package for package in packages if package["name"] == "filelock"]
+    assert filelocks
+    assert all(Version(package["version"]) >= Version("4.2.1") for package in filelocks)
 
 
 def test_gateway_resolves_sdk_from_pypi():
