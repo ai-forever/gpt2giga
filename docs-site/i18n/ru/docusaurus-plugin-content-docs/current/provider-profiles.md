@@ -219,3 +219,5 @@ Pool сохраняет владение клиентами, закрытие к
 При его достижении новые учётные данные получают HTTP 503,
 `client_pool_capacity` (OpenAI/Anthropic) или `UNAVAILABLE` (Gemini) и
 `Retry-After: 1`. Уже выданные leases сохраняются; активные клиенты не вытесняются.
+Все Gemini upload aliases и URL их resumable sessions возвращают числовой
+`error.code: 503` и `error.status: UNAVAILABLE`, как и маршруты генерации Gemini.

@@ -1,7 +1,8 @@
 import asyncio
+import json
 from datetime import datetime, timezone
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 from fastapi import FastAPI
 from fastapi import Request
@@ -798,3 +799,160 @@ async def test_pool_capacity_returns_retryable_redacted_error(path, protocol):
         assert error["type"] == "api_error"
         assert error["code"] == "client_pool_capacity"
     assert len(pool._retired) + len(pool._entries) == 2
+
+
+@pytest.mark.parametrize(
+    "path,protocol",
+    [
+        (prefix + "/files" + suffix, "gemini")
+        for prefix in (
+            "/upload/v1beta",
+            "/v1/upload/v1beta",
+            "/v2/upload/v1beta",
+            "/upload/v1/v1beta",
+            "/upload/v2/v1beta",
+        )
+        for suffix in ("", "?upload_id=synthetic-session", "/synthetic-session")
+    ]
+    + [
+        (prefix + "/files", protocol)
+        for prefix in ("", "/v1", "/v2")
+        for protocol in ("openai", "anthropic")
+    ]
+    + [
+        (prefix + "/models/test-model:" + operation, "gemini")
+        for prefix in ("", "/v1", "/v2", "/v1beta", "/v1/v1beta", "/v2/v1beta")
+        for operation in ("generateContent", "streamGenerateContent", "countTokens")
+    ],
+)
+async def test_mounted_pool_capacity_preserves_protocol_shape(path, protocol):
+    import httpx
+
+    from gpt2giga.app.factory import create_app
+    from gpt2giga.providers.gigachat.pool import GigaChatClientPool
+
+    client_factory = MagicMock()
+    client_factory.return_value.aclose = AsyncMock()
+    pool = GigaChatClientPool({}, max_size=1, client_factory=client_factory)
+    test_app = create_app(ProxyConfig(proxy=ProxySettings(mode="DEV", pass_token=True)))
+    test_app.state.gigachat_client = client_factory.return_value
+    test_app.state.gigachat_pool = pool
+    test_app.state.logger = MagicMock()
+    headers = {"Authorization": "Bearer giga-auth-new-secret"}
+    if protocol == "anthropic":
+        headers["anthropic-version"] = "2023-06-01"
+
+    try:
+        async with pool.acquire("first"), pool.acquire("second"):
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=test_app), base_url="http://test"
+            ) as client:
+                response = await client.post(path, headers=headers)
+            assert response.status_code == 503
+            assert response.headers["Retry-After"] == "1"
+            error = response.json()["error"]
+            if protocol == "gemini":
+                assert error["code"] == 503
+                assert error["status"] == "UNAVAILABLE"
+            else:
+                assert error["type"] == "api_error"
+                assert error["code"] == "client_pool_capacity"
+                if protocol == "anthropic":
+                    assert response.json()["type"] == "error"
+            assert "secret" not in response.text
+            assert "secret" not in str(test_app.state.logger.mock_calls)
+            assert client_factory.call_count == 2
+            assert not client_factory.return_value.mock_calls
+    finally:
+        await pool.aclose()
+
+
+@pytest.mark.parametrize(
+    "prefix", ["", "/v1", "/v2", "/v1beta", "/v1/v1beta", "/v2/v1beta"]
+)
+@pytest.mark.parametrize(
+    "operation", ["generateContent", "streamGenerateContent", "countTokens"]
+)
+async def test_mounted_gemini_capacity_in_separate_profile_pool(
+    prefix, operation, tmp_path, monkeypatch
+):
+    import httpx
+
+    from gpt2giga.app.factory import create_app
+    from gpt2giga.app.providers import BridgeProviderRuntime
+    from gpt2giga.protocol import RequestTransformer, ResponseProcessor
+    from gpt2giga.providers.gigachat.pool import GigaChatClientPool
+
+    profile_path = tmp_path / "profiles.json"
+    profile_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "gpt2giga.provider-profiles.v3",
+                "profiles": [
+                    {
+                        "profile_id": name,
+                        "provider_kind": "gigachat",
+                        "base_url": f"https://{name}.example/v1",
+                        "network_policy_ref": "public-gigachat",
+                        "tls_policy_ref": "system-default",
+                        "models": [
+                            {
+                                "public_alias": f"{name}-model",
+                                "upstream_model": "test-model",
+                                "capability_profile": "native-gigachat-v1",
+                                "support_status": "stable",
+                            }
+                        ],
+                    }
+                    for name in ("first", "second")
+                ],
+            }
+        )
+    )
+    config = ProxyConfig(
+        config=str(profile_path),
+        proxy=ProxySettings(mode="DEV", pass_token=True, normalization_mode="on"),
+    )
+    test_app = create_app(config)
+    logger = test_app.state.logger = MagicMock()
+    sdk_client = MagicMock()
+    sdk_client.aclose = AsyncMock()
+    monkeypatch.setattr(
+        "gpt2giga.app.providers.create_gigachat_client", lambda _: sdk_client
+    )
+    test_app.state.gigachat_client = sdk_client
+    test_app.state.request_transformer = RequestTransformer(config, logger=logger)
+    test_app.state.response_processor = ResponseProcessor(logger=logger)
+    test_app.state.model_concurrency_limiter = None
+    runtime = test_app.state.bridge_provider_runtime = BridgeProviderRuntime(
+        test_app.state
+    )
+    factory = MagicMock(return_value=sdk_client)
+    default_pool = test_app.state.gigachat_pool = GigaChatClientPool(
+        {}, client_factory=factory
+    )
+    pool = runtime._giga_pools["second"] = GigaChatClientPool(
+        {}, max_size=1, client_factory=factory
+    )
+
+    try:
+        async with pool.acquire("first"), pool.acquire("second"):
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=test_app), base_url="http://test"
+            ) as client:
+                response = await client.post(
+                    f"{prefix}/models/second-model:{operation}",
+                    headers={"Authorization": "Bearer giga-auth-new-secret"},
+                    json={"contents": [{"role": "user", "parts": [{"text": "hello"}]}]},
+                )
+            assert response.status_code == 503, response.text
+            assert response.headers["Retry-After"] == "1"
+            assert response.json()["error"]["code"] == 503
+            assert response.json()["error"]["status"] == "UNAVAILABLE"
+            assert factory.call_count == 3  # The default lease succeeded first.
+            assert not sdk_client.mock_calls
+            assert "new-secret" not in response.text
+            assert "new-secret" not in str(logger.mock_calls)
+    finally:
+        await default_pool.aclose()
+        await runtime.aclose()

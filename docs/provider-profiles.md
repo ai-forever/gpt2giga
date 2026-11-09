@@ -215,3 +215,5 @@ The total budget for active, cached, and closing clients is twice that target.
 When full, a new credential receives HTTP 503, `client_pool_capacity`
 (OpenAI/Anthropic) or `UNAVAILABLE` (Gemini), and `Retry-After: 1`. Existing
 credential leases remain usable and are never evicted while active.
+Gemini upload aliases and their resumable session URLs use the same numeric
+`error.code: 503` and `error.status: UNAVAILABLE` as Gemini generation routes.

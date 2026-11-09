@@ -156,6 +156,15 @@ def _infer_protocol(path: str) -> str:
 
 
 def _is_gemini_route(path: str) -> bool:
+    upload_paths = (
+        "/upload/v1beta/files",
+        "/v1/upload/v1beta/files",
+        "/v2/upload/v1beta/files",
+        "/upload/v1/v1beta/files",
+        "/upload/v2/v1beta/files",
+    )
+    if any(path == prefix or path.startswith(f"{prefix}/") for prefix in upload_paths):
+        return True
     if path.startswith("/v1beta/"):
         return True
     if path.startswith(("/v1/v1beta/", "/v2/v1beta/")):
