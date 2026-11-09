@@ -7,8 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.3.3a1] - Unreleased
 
-- Prepare candidate with exact SDK alpha, public request options, isolated auth/TLS, binary Files, safe upstream errors and stream cleanup without replay.
-- `gigachat[aiohttp]==0.3.0a1`; required stable Python 3.15 checks; preview-only moving tags for prerelease gateways.
+### Added
+
+- **Durable resources**: owner- and provider-scoped SQLite metadata and local blobs with retention, size/count quotas, restart recovery and coordination across gateway workers.
+- **Files and Batches**: binary file upload/download and metadata for OpenAI and Anthropic clients, Gemini resumable uploads, and native GigaChat batch execution with durable row mappings and output/error files. Unsupported upstream cancellation and deletion return explicit errors.
+- **Responses storage**: opt-in `GPT2GIGA_RESPONSES_STORAGE_MODE=gateway` enables immutable response snapshots, retrieve/delete/input-items operations and Conversations CRUD. Snapshot replay branches from the stored context; conversation and response publication are atomic. Native continuation remains the default.
+- **Native operations**: text-only `POST /responses/input_tokens`, the v2 image-generation subset returning one `b64_json` image, and protected GigaChat token-count, function-validation, balance and AI-text-check utility routes.
+
+### Changed
+
+- **GigaChat SDK**: migrate to the exact PyPI prerelease `gigachat[aiohttp]==0.3.0a1` and its public request-options contract. Request-scoped credentials, TLS settings and safe transport options remain isolated between clients and provider profiles.
+- **Shared execution**: OpenAI, Anthropic and Gemini compatibility handlers reuse provider execution and capability admission; unsupported route/model semantics are rejected before upstream I/O. Model discovery preserves provider metadata and chat/embedder distinctions.
+- **Python and containers**: retain Python 3.10–3.15 support, require stable Python 3.15 tests and artifact checks, and keep moving prerelease image tags under preview aliases in Docker Hub and GHCR.
+- **Dependabot updates**: include #254 (Undici 7.30.2), #256 (CodeQL action 4.39.3), #257 (Docker login action 4.8.0), and #258 (React/React DOM 19.3.1 and React types 19.3.0).
+
+### Fixed
+
+- **Streams and history**: preserve response metadata, tool state and terminal events; classify observed disconnects as aborted, close upstream streams and release model slots. Interrupted or incomplete streams do not publish successful response snapshots or history, and uncertain upstream requests are not replayed.
+- **Resource lifecycle**: drain cancelled I/O, serialize upload finalization/cancellation, preserve ownership during publication, and retain cleanup/quota accounting for failed writes and orphaned blobs. Credential-scoped client pools and telemetry backends close during interrupted shutdown and retry failed cleanup.
+- **Compatibility errors**: normalize safe upstream errors, project Gemini upload-capacity failures consistently, and retain binary file bytes and explicit unsupported-operation responses across public aliases.
+- **CodeQL findings**: iterate capability metadata over the canonical key tuple, return explicit `None` for non-GigaChat catalog binding, remove an unused serializer import, document cancellation error precedence, and bound task waits in lifecycle tests. Regression tests verify that process-control exceptions are re-raised after durable cleanup accounting.
+
+### Security
+
+- **Dependency alerts**: remove unused Pillow from the runtime and test fixture, require `filelock>=4.2.1` (locked to 4.2.9), and update affected direct/transitive documentation dependencies, including DOMPurify, Tinypool, minimatch, URI/CSS parsers and serialization utilities. No actionable affected version remains in the checked lockfiles.
+- **Development tooling**: optional pre-commit is installed on Python 3.11+ because patched filelock no longer supports 3.10; gateway execution and tests retain Python 3.10 support.
+- **Rejected advisory**: the deepmerge alert refers to CVE-2026-93753, officially rejected by its assigning authority on 2026-11-02; the alert is dismissed as inaccurate rather than represented as a patched release.
 
 ## [0.3.2] - 2026-11-05
 
